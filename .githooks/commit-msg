@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMIT_MSG_FILE="${1:-}"
+if [[ -z "$COMMIT_MSG_FILE" || ! -f "$COMMIT_MSG_FILE" ]]; then
+  exit 0
+fi
+
+# Strip comment lines before scanning
+MSG_CONTENT="$(grep -v '^[[:space:]]*#' "$COMMIT_MSG_FILE" || true)"
+
+# Reject trailer attributions, generated-by notices, session links, and assistant names
+FORBIDDEN_REGEX='(Co-Authored-By:|Generated[- ]by|Generated[- ]with|conversation://|Antigravity|Claude|Anthropic|ChatGPT|OpenAI|Copilot|Gemini|Cursor|Devin|CodeRabbit)'
+
+if printf '%s\n' "$MSG_CONTENT" | grep -iE -q "$FORBIDDEN_REGEX"; then
+  echo "ERROR [commit-msg]: Commit message contains prohibited attribution, assistant name, or session link." >&2
+  printf '%s\n' "$MSG_CONTENT" | grep -iE -n "$FORBIDDEN_REGEX" >&2 || true
+  exit 1
+fi

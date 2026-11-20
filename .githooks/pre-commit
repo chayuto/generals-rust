@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+EXPECTED_EMAIL="5305832+chayuto@users.noreply.github.com"
+CURRENT_EMAIL="$(git config user.email || true)"
+
+if [[ "$CURRENT_EMAIL" != "$EXPECTED_EMAIL" ]]; then
+  echo "ERROR [pre-commit]: git user.email is '$CURRENT_EMAIL', expected '$EXPECTED_EMAIL'." >&2
+  exit 1
+fi
+
+# 1. Block prohibited retail game asset and binary extensions from ever being staged
+STAGED_FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [[ -z "$STAGED_FILES" ]]; then
+  exit 0
+fi
+
+BANNED_EXT_REGEX='\.(big|bik|map|wak|tga|dds|w3d|csf|str|mp3|wav|ogg|avi|mp4|exe|dll|pdb|ilk|lib|exp|7z|zip|rar|flatpak|crc)$'
+if printf '%s\n' "$STAGED_FILES" | grep -iE -q "$BANNED_EXT_REGEX"; then
+  echo "ERROR [pre-commit]: Staged files include prohibited game asset or binary formats:" >&2
+  printf '%s\n' "$STAGED_FILES" | grep -iE "$BANNED_EXT_REGEX" >&2
+  exit 1
+fi
+
+# 2. Scan staged additions (excluding hook definitions themselves) for prohibited attribution or secrets
+ADDED_LINES="$(git diff --cached -U0 -- . ':!.githooks/*' | grep '^+[^+]' || true)"
+if [[ -n "$ADDED_LINES" ]]; then
+  ATTR_REGEX='(Co-Authored-By:|Generated[- ]by:|Generated[- ]with:|conversation://)'
+  if printf '%s\n' "$ADDED_LINES" | grep -iE -q "$ATTR_REGEX"; then
+    echo "ERROR [pre-commit]: Staged changes contain prohibited attribution or session link:" >&2
+    printf '%s\n' "$ADDED_LINES" | grep -iE -n "$ATTR_REGEX" >&2 || true
+    exit 1
+  fi
+
+  SECRET_REGEX='(ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|sk-[A-Za-z0-9]{32,}|AIza[0-9A-Za-z_-]{35})'
+  if printf '%s\n' "$ADDED_LINES" | grep -E -q "$SECRET_REGEX"; then
+    echo "ERROR [pre-commit]: Staged changes appear to contain a credential or API token." >&2
+    exit 1
+  fi
+fi

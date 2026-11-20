@@ -1,0 +1,138 @@
+# =============================================================================
+# NEVER COMMIT PROPRIETARY OR RETAIL GAME ASSETS
+# =============================================================================
+# Archive & package formats
+*.big
+*.BIG
+*.dat
+*.DAT
+*.7z
+*.zip
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.dmg
+*.pkg
+*.flatpak
+
+# Retail map, terrain & preview formats
+*.map
+*.MAP
+*.wak
+*.WAK
+*.tga
+*.TGA
+*.dds
+*.DDS
+*.bmp
+*.BMP
+
+# 3D models, animations & particle assets
+*.w3d
+*.W3D
+
+# Audio & video assets
+*.bik
+*.BIK
+*.avi
+*.AVI
+*.mp3
+*.MP3
+*.wav
+*.WAV
+*.ogg
+*.OGG
+*.mp4
+*.MP4
+
+# Localization & string tables
+*.csf
+*.CSF
+*.str
+*.STR
+
+# Windows / retail binaries & symbols
+*.exe
+*.EXE
+*.dll
+*.DLL
+*.pdb
+*.PDB
+*.ilk
+*.ILK
+*.exp
+*.EXP
+*.lib
+*.LIB
+*.asi
+*.ASI
+*.dmp
+*.DMP
+*. manifest
+
+# Engine CRC binary dumps & crash logs
+*.crc
+*.CRC
+ReleaseCrashInfo.txt
+GameEngine.log
+DebugLogFile*.txt
+
+# Block any local game data or reference directories if placed inside repo
+/assets/
+/game-data/
+/generalszh/
+/vendor/
+/ref/
+/GeneralsX/
+/GeneralsGameCode/
+/GeneralsReplays/
+/GeneralsXReplays/
+
+# Note: Self-recorded replays (.rep) for testing are permitted under replays/
+# but raw root-level .rep dumps are ignored by default.
+/*.rep
+/*.REP
+
+# =============================================================================
+# BUILD ARTIFACTS & TOOLCHAINS
+# =============================================================================
+# Rust
+/target/
+**/*.rs.bk
+
+# C / C++ / CMake / vcpkg
+/build/
+/cmake-build-*/
+/out/
+/vcpkg_installed/
+/vcpkg-bincache/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.app/
+
+# macOS / Editor / OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment & local secrets
+.env
+.env.*
+*.pem
+*.key
