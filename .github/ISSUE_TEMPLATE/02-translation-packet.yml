@@ -1,0 +1,52 @@
+name: "Translation Packet (Single Module)"
+description: "Atomic single-module translation task for a Tier 1A / 1B / 2 worker agent"
+title: "[Packet] "
+labels: ["type:packet", "status:blocked-on-vv"]
+body:
+  - type: input
+    id: parent_wp
+    attributes:
+      label: Parent Work Package Issue
+      placeholder: "#12 (WP-5.1)"
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Assigned Agent Tier
+      options:
+        - "Tier 1A (Class C1 — Single-turn zero-search sandbox)"
+        - "Tier 1B (Class C2 — Single-turn + 1 compiler retry)"
+        - "Tier 2 (Class C3 — Bounded cargo test + Gate V2 loop)"
+        - "Tier 3 (Class C4 — Architect)"
+    validations:
+      required: true
+  - type: textarea
+    id: file_boundary
+    attributes:
+      label: Strict Compartmentalization Boundary
+      description: "Exact C++ source files to translate and the single Rust file the worker is permitted to write."
+      placeholder: |
+        C++ Source: GeneralsMD/Code/GameEngine/Source/GameLogic/Object/ExperienceTracker.cpp
+        C++ Header: GeneralsMD/Code/GameEngine/Include/GameLogic/ExperienceTracker.h
+        Allowed Rust Output Path: crates/zh_logic/src/object/experience_tracker.rs
+    validations:
+      required: true
+  - type: textarea
+    id: determinism_traps
+    attributes:
+      label: Module-Specific Determinism Traps & Invariants
+      placeholder: |
+        - Float-scaled XP truncation: `((experience_gain as f32) * self.experience_scalar) as i32`
+        - Snapshot::crc order: m_currentExperience (i32), m_currentLevel (i32), m_isTrainable (u8 under not(retail-crc))
+    validations:
+      required: true
+  - type: checkboxes
+    id: vv_proof
+    attributes:
+      label: Required V&V Proof Before Closing
+      options:
+        - label: "Pre-condition: Gate V2 differential test harness for this module exists and compiles"
+        - label: "Gate V1 (`scripts/lint_determinism.py` + `cargo check`) passed"
+        - label: "Gate V2 (1,000-seed C++ vs. Rust differential test) passed"
+        - label: "Gate V3/V4 (Shadow-verify & headless replay check) passed"

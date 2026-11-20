@@ -1,0 +1,64 @@
+name: "Work Package (WP-X.Y)"
+description: "Track a phased work package with explicit V&V pre-conditions and agent-tier routing"
+title: "[WP-X.Y] "
+labels: ["type:work-package"]
+body:
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      options:
+        - "Phase 0: Ground Truth & Replay Corpus"
+        - "Phase 1: Translation Spike (Go/No-Go)"
+        - "Phase 2: Foundation, Math & Serialization (Common)"
+        - "Phase 3: Core RTS Domain Models & Leaf Trackers"
+        - "Phase 4: Spatial & World Subsystems"
+        - "Phase 5: Object, Weapon & 222 BehaviorModules"
+        - "Phase 6: Player, Team, Pathfinder, AI & ScriptEngine"
+        - "Phase 7: Top-Level GameLogic Loop & Standalone zh-sim"
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Primary Agent Tier & Complexity Class
+      options:
+        - "Tier 1A: Lite Worker (Class C1 Leaf/Data)"
+        - "Tier 1B: Fast Worker (Class C2 Standard Stateful)"
+        - "Tier 2: Engineer (Class C3 Multi-Facet/Complex)"
+        - "Tier 3: Architect (Class C4 Spine/FFI/Scheduler)"
+    validations:
+      required: true
+  - type: textarea
+    id: vv_precondition
+    attributes:
+      label: "V&V Pre-Condition (Never build what you cannot verify)"
+      description: "What verification harness / oracle must exist and pass BEFORE translation code in this work package is written?"
+      placeholder: "e.g. Gate 0 C++ baseline green + Gate V2 in-process C++ vs Rust differential test harness compiled for target structs."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Target C++ Files & Rust Destination
+      description: "Exact C++ header/source paths in GeneralsX (84a7a20), LOC count, FFI pattern (Pattern 1/2/3), and target Rust module paths."
+    validations:
+      required: true
+  - type: textarea
+    id: packets
+    attributes:
+      label: Compartmentalized Micro-Packets Checklist
+      description: "Atomic single-file translation packets that can be claimed independently by worker agents."
+      value: |
+        - [ ] Packet 1:
+        - [ ] Packet 2:
+  - type: checkboxes
+    id: vv_gates
+    attributes:
+      label: Mandatory Exit V&V Gates
+      options:
+        - label: "Gate V1: `scripts/lint_determinism.py` + `cargo check --workspace` pass with 0 violations"
+          required: true
+        - label: "Gate V2: In-process C++ vs. Rust 1,000-seed differential test passes (return values, XferSave bytes, XferCRC, RNG seed CRC)"
+        - label: "Gate V3: Lockstep `shadow-verify` smoke replay (`macos_2p_vanilla_map.rep`) passes with 0 per-call divergence"
+        - label: "Gate V4: Full cross-platform headless replay suite exits 0 with zero CRC mismatches"

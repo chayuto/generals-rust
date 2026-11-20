@@ -1,0 +1,32 @@
+name: "CRC Desync / Determinism Divergence"
+description: "Report a Gate V2 differential failure or Gate V3/V4 replay CRC mismatch for Tier 3 Architect escalation"
+title: "[Desync] "
+labels: ["status:crc-desync", "tier:3-architect"]
+body:
+  - type: input
+    id: module_and_replay
+    attributes:
+      label: Suspected Module / Replay File / Frame Number
+      placeholder: "e.g. ExperienceTracker / macos_2p_vanilla_map.rep / Frame 400"
+    validations:
+      required: true
+  - type: dropdown
+    id: marker_section
+    attributes:
+      label: "First Diverging Section in GameLogic::getCRC()"
+      options:
+        - "Gate V2 In-Process Differential Harness (pre-replay)"
+        - "MARKER:Objects (Object::crc / Weapon::crc / ExperienceTracker::crc)"
+        - "RandomSeed (GetGameLogicRandomSeedCRC)"
+        - "MARKER:ThePartitionManager (PartitionCell::crc)"
+        - "MARKER:ThePlayerList (Player::crc / Money / Energy)"
+        - "MARKER:TheAI (Pathfinder::crc / TAiData / AIGroup::crc)"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic Diff Output
+      description: "Paste the diff from Gate V2, shadow-verify, or `-DebugCRCFromFrame (F-2) -DebugCRCUntilFrame (F+1) -LogObjectCRCs -SaveDebugCRCPerFrame`."
+    validations:
+      required: true
