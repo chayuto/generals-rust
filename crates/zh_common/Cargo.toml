@@ -1,0 +1,12 @@
+[package]
+name = "zh_common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic foundation types, CRC, PRNG, Xfer, and math primitives for generals-rust."
+
+[features]
+default = []
+retail-crc = []
+retail-xfer-save = []

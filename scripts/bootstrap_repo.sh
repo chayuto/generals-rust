@@ -45,9 +45,10 @@ for opt_cmd in cargo rustc cmake ninja; do
   fi
 done
 
-echo "=== [3/4] Running V&V self-tests on Manifest, Tier 0 Slicer & Gate V1 Determinism Linter ==="
+echo "=== [3/4] Running V&V self-tests on Manifest, Tier 0 Slicer, FFI Seam & Gate V1 Determinism Linter ==="
 python3 scripts/validate_manifest.py
 python3 scripts/test_prep_packet.py
+python3 scripts/test_apply_ffi_seam.py
 python3 scripts/test_lint_determinism.py
 python3 scripts/lint_determinism.py
 

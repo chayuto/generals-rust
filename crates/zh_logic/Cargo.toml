@@ -1,0 +1,15 @@
+[package]
+name = "zh_logic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic 30 Hz GameLogic simulation engine and Object/Module arenas for generals-rust."
+
+[features]
+default = []
+retail-crc = ["zh_common/retail-crc"]
+retail-xfer-save = ["zh_common/retail-xfer-save"]
+
+[dependencies]
+zh_common = { path = "../zh_common" }

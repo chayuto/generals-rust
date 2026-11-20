@@ -1,0 +1,20 @@
+[package]
+name = "zh_ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "C-ABI Strangler FFI staticlib seam (libzh_ffi.a) bridging GeneralsXZH and generals-rust."
+
+[lib]
+name = "zh_ffi"
+crate-type = ["rlib", "staticlib"]
+
+[features]
+default = []
+retail-crc = ["zh_common/retail-crc", "zh_logic/retail-crc"]
+retail-xfer-save = ["zh_common/retail-xfer-save", "zh_logic/retail-xfer-save"]
+
+[dependencies]
+zh_common = { path = "../zh_common" }
+zh_logic = { path = "../zh_logic" }

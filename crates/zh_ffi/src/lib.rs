@@ -1,0 +1,512 @@
+//! C-ABI Strangler FFI bridge (`libzh_ffi.a`) matching `crates/zh_ffi/include/zh_ffi.h`.
+
+use core::ffi::c_void;
+use core::slice;
+use zh_common::crc::Crc;
+use zh_common::random_value::{
+    get_audio_state_words, get_client_state_words, get_game_audio_random_value,
+    get_game_audio_random_value_real, get_game_client_random_value,
+    get_game_client_random_value_real, get_game_logic_random_seed, get_game_logic_random_seed_crc,
+    get_game_logic_random_value, get_game_logic_random_value_real,
+    get_game_logic_random_value_real_unchanged, get_game_logic_random_value_unchanged,
+    get_logic_state_words, init_random, init_random_time, set_audio_state_words,
+    set_client_state_words, set_logic_state_words,
+};
+use zh_common::types::{Bool, Int, ObjectId, Relationship, VeterancyLevel, FALSE, TRUE};
+use zh_common::xfer::{Snapshot, XferCrc, XferLoad, XferSave};
+use zh_logic::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
+
+// ============================================================================
+// Pattern 1: PKT-001 (crc) & PKT-002 (RandomValue)
+// ============================================================================
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_crc_compute_bytes(
+    initial_crc: u32,
+    buf: *const u8,
+    len: i32,
+) -> u32 {
+    let mut c = Crc::with_initial(initial_crc);
+    if !buf.is_null() && len > 0 {
+        let bytes = unsafe { slice::from_raw_parts(buf, len as usize) };
+        c.compute_crc(bytes, len);
+    } else {
+        c.compute_crc(&[], len);
+    }
+    c.get()
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_init_time() {
+    init_random_time();
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_init_seed(seed: u32) {
+    init_random(seed);
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_logic_base_seed() -> u32 {
+    get_game_logic_random_seed()
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_logic_seed_crc() -> u32 {
+    get_game_logic_random_seed_crc()
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_logic_int(lo: i32, hi: i32) -> i32 {
+    get_game_logic_random_value(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_logic_real(lo: f32, hi: f32) -> f32 {
+    get_game_logic_random_value_real(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_logic_int_unchanged(lo: i32, hi: i32) -> i32 {
+    get_game_logic_random_value_unchanged(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_logic_real_unchanged(lo: f32, hi: f32) -> f32 {
+    get_game_logic_random_value_real_unchanged(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_client_int(lo: i32, hi: i32) -> i32 {
+    get_game_client_random_value(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_client_real(lo: f32, hi: f32) -> f32 {
+    get_game_client_random_value_real(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_audio_int(lo: i32, hi: i32) -> i32 {
+    get_game_audio_random_value(lo, hi)
+}
+
+#[no_mangle]
+pub extern "C" fn zh_random_get_audio_real(lo: f32, hi: f32) -> f32 {
+    get_game_audio_random_value_real(lo, hi)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_random_get_logic_state_words(out_words: *mut u32) {
+    if !out_words.is_null() {
+        let words = get_logic_state_words();
+        unsafe {
+            core::ptr::copy_nonoverlapping(words.as_ptr(), out_words, 6);
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_random_set_logic_state_words(in_words: *const u32, base_seed: u32) {
+    if !in_words.is_null() {
+        let mut words = [0u32; 6];
+        unsafe {
+            core::ptr::copy_nonoverlapping(in_words, words.as_mut_ptr(), 6);
+        }
+        set_logic_state_words(words, base_seed);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_random_get_client_state_words(out_words: *mut u32) {
+    if !out_words.is_null() {
+        let words = get_client_state_words();
+        unsafe {
+            core::ptr::copy_nonoverlapping(words.as_ptr(), out_words, 6);
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_random_set_client_state_words(in_words: *const u32) {
+    if !in_words.is_null() {
+        let mut words = [0u32; 6];
+        unsafe {
+            core::ptr::copy_nonoverlapping(in_words, words.as_mut_ptr(), 6);
+        }
+        set_client_state_words(words);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_random_get_audio_state_words(out_words: *mut u32) {
+    if !out_words.is_null() {
+        let words = get_audio_state_words();
+        unsafe {
+            core::ptr::copy_nonoverlapping(words.as_ptr(), out_words, 6);
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_random_set_audio_state_words(in_words: *const u32) {
+    if !in_words.is_null() {
+        let mut words = [0u32; 6];
+        unsafe {
+            core::ptr::copy_nonoverlapping(in_words, words.as_mut_ptr(), 6);
+        }
+        set_audio_state_words(words);
+    }
+}
+
+// ============================================================================
+// Pattern 2: PKT-003 (ExperienceTracker)
+// ============================================================================
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ZhExpTrackerState {
+    pub current_level: i32,
+    pub current_experience: i32,
+    pub experience_sink: i32,
+    pub experience_scalar: f32,
+    pub is_trainable: u8,
+}
+
+impl ZhExpTrackerState {
+    #[inline]
+    fn to_rust(self) -> ExperienceTrackerState {
+        ExperienceTrackerState {
+            current_level: VeterancyLevel::from_i32(self.current_level),
+            current_experience: self.current_experience,
+            experience_sink: ObjectId(self.experience_sink),
+            experience_scalar: self.experience_scalar,
+            is_trainable: self.is_trainable,
+        }
+    }
+
+    #[inline]
+    fn write_from_rust(&mut self, s: &ExperienceTrackerState) {
+        self.current_level = s.current_level.as_i32();
+        self.current_experience = s.current_experience;
+        self.experience_sink = s.experience_sink.0;
+        self.experience_scalar = s.experience_scalar;
+        self.is_trainable = s.is_trainable;
+    }
+}
+
+#[repr(C)]
+pub struct ZhExpTrackerParentCallbacks {
+    pub parent_ctx: *mut c_void,
+    pub is_template_trainable: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
+    pub get_experience_required: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
+    pub get_experience_value: Option<unsafe extern "C" fn(*mut c_void, i32) -> i32>,
+    pub get_relationship_with_killer:
+        Option<unsafe extern "C" fn(*mut c_void, *const c_void) -> i32>,
+    pub on_veterancy_level_changed:
+        Option<unsafe extern "C" fn(*mut c_void, i32, i32, u8)>,
+    pub forward_experience_to_sink:
+        Option<unsafe extern "C" fn(*mut c_void, i32, i32, u8) -> u8>,
+    pub forward_set_exp_and_level_to_sink:
+        Option<unsafe extern "C" fn(*mut c_void, i32, i32, u8) -> u8>,
+}
+
+struct FfiExperienceParent<'a> {
+    cb: &'a ZhExpTrackerParentCallbacks,
+    killer_ctx: *const c_void,
+}
+
+impl<'a> ExperienceParentAccess for FfiExperienceParent<'a> {
+    fn is_template_trainable(&self) -> Bool {
+        if let Some(f) = self.cb.is_template_trainable {
+            unsafe { f(self.cb.parent_ctx) }
+        } else {
+            FALSE
+        }
+    }
+
+    fn get_experience_required(&self, level: Int) -> Int {
+        if let Some(f) = self.cb.get_experience_required {
+            unsafe { f(self.cb.parent_ctx, level) }
+        } else {
+            0
+        }
+    }
+
+    fn get_experience_value(&self, level: Int) -> Int {
+        if let Some(f) = self.cb.get_experience_value {
+            unsafe { f(self.cb.parent_ctx, level) }
+        } else {
+            0
+        }
+    }
+
+    fn get_relationship_with_killer(&self) -> Relationship {
+        if let Some(f) = self.cb.get_relationship_with_killer {
+            Relationship::from_i32(unsafe { f(self.cb.parent_ctx, self.killer_ctx) })
+        } else {
+            Relationship::Enemies
+        }
+    }
+
+    fn on_veterancy_level_changed(
+        &mut self,
+        old_level: VeterancyLevel,
+        new_level: VeterancyLevel,
+        provide_feedback: Bool,
+    ) {
+        if let Some(f) = self.cb.on_veterancy_level_changed {
+            unsafe {
+                f(
+                    self.cb.parent_ctx,
+                    old_level.as_i32(),
+                    new_level.as_i32(),
+                    provide_feedback,
+                );
+            }
+        }
+    }
+
+    fn forward_experience_to_sink(
+        &mut self,
+        sink_id: ObjectId,
+        scaled_exp_gain: Int,
+        can_scale_for_bonus: Bool,
+    ) -> bool {
+        if let Some(f) = self.cb.forward_experience_to_sink {
+            (unsafe { f(self.cb.parent_ctx, sink_id.0, scaled_exp_gain, can_scale_for_bonus) }) != 0
+        } else {
+            false
+        }
+    }
+
+    fn forward_set_exp_and_level_to_sink(
+        &mut self,
+        sink_id: ObjectId,
+        experience_in: Int,
+        provide_feedback: Bool,
+    ) -> bool {
+        if let Some(f) = self.cb.forward_set_exp_and_level_to_sink {
+            (unsafe { f(self.cb.parent_ctx, sink_id.0, experience_in, provide_feedback) }) != 0
+        } else {
+            false
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_init(
+    state: *mut ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+) {
+    if state.is_null() || cb.is_null() {
+        return;
+    }
+    let parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx: core::ptr::null(),
+    };
+    let s = ExperienceTrackerState::new(&parent);
+    unsafe { (*state).write_from_rust(&s) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_get_experience_value(
+    state: *const ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+    killer_ctx: *const c_void,
+) -> i32 {
+    if state.is_null() || cb.is_null() {
+        return 0;
+    }
+    let parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx,
+    };
+    let s = unsafe { (*state).to_rust() };
+    s.get_experience_value(&parent)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_is_accepting_exp(
+    state: *const ZhExpTrackerState,
+) -> u8 {
+    if state.is_null() {
+        return FALSE;
+    }
+    let s = unsafe { (*state).to_rust() };
+    s.is_accepting_experience_points()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_set_min_veterancy_level(
+    state: *mut ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+    new_level: i32,
+    provide_feedback: u8,
+) {
+    if state.is_null() || cb.is_null() {
+        return;
+    }
+    let mut parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx: core::ptr::null(),
+    };
+    let mut s = unsafe { (*state).to_rust() };
+    s.set_min_veterancy_level(
+        &mut parent,
+        VeterancyLevel::from_i32(new_level),
+        provide_feedback,
+    );
+    unsafe { (*state).write_from_rust(&s) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_set_veterancy_level(
+    state: *mut ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+    new_level: i32,
+    provide_feedback: u8,
+) {
+    if state.is_null() || cb.is_null() {
+        return;
+    }
+    let mut parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx: core::ptr::null(),
+    };
+    let mut s = unsafe { (*state).to_rust() };
+    s.set_veterancy_level(
+        &mut parent,
+        VeterancyLevel::from_i32(new_level),
+        provide_feedback,
+    );
+    unsafe { (*state).write_from_rust(&s) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_gain_exp_for_level(
+    state: *mut ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+    levels_to_gain: i32,
+    can_scale_for_bonus: u8,
+) -> u8 {
+    if state.is_null() || cb.is_null() {
+        return FALSE;
+    }
+    let mut parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx: core::ptr::null(),
+    };
+    let mut s = unsafe { (*state).to_rust() };
+    let res = s.gain_exp_for_level(&mut parent, levels_to_gain, can_scale_for_bonus);
+    unsafe { (*state).write_from_rust(&s) };
+    res
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_can_gain_exp_for_level(
+    state: *const ZhExpTrackerState,
+    levels_to_gain: i32,
+) -> u8 {
+    if state.is_null() {
+        return FALSE;
+    }
+    let s = unsafe { (*state).to_rust() };
+    s.can_gain_exp_for_level(levels_to_gain)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_add_experience_points(
+    state: *mut ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+    experience_gain: i32,
+    can_scale_for_bonus: u8,
+) {
+    if state.is_null() || cb.is_null() {
+        return;
+    }
+    let mut parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx: core::ptr::null(),
+    };
+    let mut s = unsafe { (*state).to_rust() };
+    s.add_experience_points(&mut parent, experience_gain, can_scale_for_bonus);
+    unsafe { (*state).write_from_rust(&s) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_set_experience_and_level(
+    state: *mut ZhExpTrackerState,
+    cb: *const ZhExpTrackerParentCallbacks,
+    experience_in: i32,
+    provide_feedback: u8,
+) {
+    if state.is_null() || cb.is_null() {
+        return;
+    }
+    let mut parent = FfiExperienceParent {
+        cb: unsafe { &*cb },
+        killer_ctx: core::ptr::null(),
+    };
+    let mut s = unsafe { (*state).to_rust() };
+    s.set_experience_and_level(&mut parent, experience_in, provide_feedback);
+    unsafe { (*state).write_from_rust(&s) };
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_crc(
+    state: *const ZhExpTrackerState,
+    initial_crc: u32,
+) -> u32 {
+    if state.is_null() {
+        return initial_crc;
+    }
+    let s = unsafe { (*state).to_rust() };
+    let mut xfer = XferCrc::with_initial(initial_crc);
+    s.crc(&mut xfer);
+    xfer.get_crc()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_xfer_save(
+    state: *const ZhExpTrackerState,
+    out_buf: *mut u8,
+    max_len: i32,
+) -> i32 {
+    if state.is_null() || out_buf.is_null() || max_len <= 0 {
+        return -1;
+    }
+    let mut s = unsafe { (*state).to_rust() };
+    let mut xfer = XferSave::new();
+    if s.xfer(&mut xfer).is_err() {
+        return -1;
+    }
+    let bytes = xfer.as_bytes();
+    if bytes.len() > (max_len as usize) {
+        return -1;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+    }
+    bytes.len() as i32
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn zh_exp_tracker_xfer_load(
+    state: *mut ZhExpTrackerState,
+    in_buf: *const u8,
+    len: i32,
+) -> u8 {
+    if state.is_null() || in_buf.is_null() || len <= 0 {
+        return FALSE;
+    }
+    let bytes = unsafe { slice::from_raw_parts(in_buf, len as usize) };
+    let mut xfer = XferLoad::new(bytes);
+    let mut s = unsafe { (*state).to_rust() };
+    if s.xfer(&mut xfer).is_err() {
+        return FALSE;
+    }
+    unsafe { (*state).write_from_rust(&s) };
+    TRUE
+}

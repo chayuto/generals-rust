@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zh_common",
+    "crates/zh_logic",
+    "crates/zh_ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/chayuto/generals-rust"
+
+[profile.dev]
+opt-level = 1
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

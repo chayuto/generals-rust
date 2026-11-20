@@ -33,6 +33,13 @@ jobs:
       - name: Run Full Repository Bootstrap, Manifest, Slicer, Gate V1 Linter & Hook V&V
         run: ./scripts/bootstrap_repo.sh
 
+      - name: Verify Zero-Dependency Cargo Workspace & Gate V2 Golden Vectors (ubuntu-latest)
+        run: |
+          cargo check --workspace --tests
+          for gvec in docs/golden_vectors/PKT-001.json docs/golden_vectors/PKT-002.json docs/golden_vectors/PKT-003.json; do
+            test -s "$gvec"
+          done
+
       - name: Verify Phase 1 Translation Packets Integrity
         run: |
           for pkt in packets/phase1/PKT-001_crc.md packets/phase1/PKT-002_RandomValue.md packets/phase1/PKT-003_ExperienceTracker.md; do
@@ -70,8 +77,10 @@ jobs:
           echo "Using pre-installed Python: $PY_BIN ($($PY_BIN --version))"
           "$PY_BIN" scripts/validate_manifest.py
           "$PY_BIN" scripts/test_prep_packet.py
+          "$PY_BIN" scripts/test_apply_ffi_seam.py
           "$PY_BIN" scripts/test_lint_determinism.py
           "$PY_BIN" scripts/lint_determinism.py
+          cargo check --workspace --tests
 
       - name: Run POSIX Repository Bootstrap & Git Hook V&V (macOS)
         if: runner.os == 'macOS'
