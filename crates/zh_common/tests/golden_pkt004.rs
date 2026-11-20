@@ -9,7 +9,6 @@ use zh_common::xfer::bit_flags::{ArmorSetFlags, BitFlags, ARMOR_SET_BIT_NAMES};
 const PKT004_JSON: &str = include_str!("../../../docs/golden_vectors/PKT-004.json");
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-004 (crates/zh_common/src/xfer/bit_flags.rs)"]
 fn test_pkt004_bitflags_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT004_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-004.json");

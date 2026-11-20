@@ -169,102 +169,214 @@ impl<const NUMBITS: usize> BitFlags<NUMBITS> {
     }
 
     pub fn new_set_all() -> Self {
-        todo!("PKT-004: Implement BitFlags::new_set_all from packets/phase2/PKT-004_BitFlags.md")
+        Self {
+            bits: [true; NUMBITS],
+        }
     }
 
     pub fn from_unsigned_int(value: UnsignedInt) -> Self {
-        todo!("PKT-004: Implement BitFlags::from_unsigned_int from packets/phase2/PKT-004_BitFlags.md")
+        let mut result = Self::new();
+        let limit = NUMBITS.min(32);
+        for i in 0..limit {
+            result.bits[i] = ((value >> i) & 1) != 0;
+        }
+        result
     }
 
     pub fn from_single_index(idx1: Int) -> Self {
-        todo!("PKT-004: Implement BitFlags::from_single_index from packets/phase2/PKT-004_BitFlags.md")
+        let mut result = Self::new();
+        if idx1 >= 0 {
+            let i = idx1 as usize;
+            if i < NUMBITS {
+                result.bits[i] = true;
+            }
+        }
+        result
     }
 
     pub fn from_indices(idxs: &[Int]) -> Self {
-        todo!("PKT-004: Implement BitFlags::from_indices from packets/phase2/PKT-004_BitFlags.md")
+        let mut result = Self::new();
+        for &idx in idxs {
+            if idx >= 0 {
+                let i = idx as usize;
+                if i < NUMBITS {
+                    result.bits[i] = true;
+                }
+            }
+        }
+        result
     }
 
     pub fn set(&mut self, i: Int, val: Int) {
-        todo!("PKT-004: Implement BitFlags::set from packets/phase2/PKT-004_BitFlags.md")
+        if i >= 0 {
+            let i = i as usize;
+            if i < NUMBITS {
+                self.bits[i] = val != 0;
+            }
+        }
     }
 
     pub fn test(&self, i: Int) -> Bool {
-        todo!("PKT-004: Implement BitFlags::test from packets/phase2/PKT-004_BitFlags.md")
+        if i >= 0 {
+            let i = i as usize;
+            if i < NUMBITS {
+                return Bool::from(self.bits[i]);
+            }
+        }
+        0
     }
 
     pub fn test_for_any(&self, that: &Self) -> Bool {
-        todo!("PKT-004: Implement BitFlags::test_for_any from packets/phase2/PKT-004_BitFlags.md")
+        u8::from(self.bits.iter().zip(that.bits.iter()).any(|(&a, &b)| a && b))
     }
 
     pub fn test_for_all(&self, that: &Self) -> Bool {
-        todo!("PKT-004: Implement BitFlags::test_for_all from packets/phase2/PKT-004_BitFlags.md")
+        u8::from(self
+            .bits
+            .iter()
+            .zip(that.bits.iter())
+            .all(|(&a, &b)| !b || a))
     }
 
     pub fn test_for_none(&self, that: &Self) -> Bool {
-        todo!("PKT-004: Implement BitFlags::test_for_none from packets/phase2/PKT-004_BitFlags.md")
+        u8::from(!self
+            .bits
+            .iter()
+            .zip(that.bits.iter())
+            .any(|(&a, &b)| a && b))
     }
 
     pub fn size(&self) -> Int {
-        todo!("PKT-004: Implement BitFlags::size from packets/phase2/PKT-004_BitFlags.md")
+        NUMBITS as Int
     }
 
     pub fn count(&self) -> Int {
-        todo!("PKT-004: Implement BitFlags::count from packets/phase2/PKT-004_BitFlags.md")
+        self.bits.iter().filter(|&&bit| bit).count() as Int
     }
 
     pub fn any(&self) -> Bool {
-        todo!("PKT-004: Implement BitFlags::any from packets/phase2/PKT-004_BitFlags.md")
+        u8::from(self.bits.iter().any(|&bit| bit))
     }
 
     pub fn flip(&mut self) {
-        todo!("PKT-004: Implement BitFlags::flip from packets/phase2/PKT-004_BitFlags.md")
+        for bit in &mut self.bits {
+            *bit = !*bit;
+        }
     }
 
     pub fn clear(&mut self) {
-        todo!("PKT-004: Implement BitFlags::clear from packets/phase2/PKT-004_BitFlags.md")
+        self.bits.fill(false);
     }
 
     pub fn count_intersection(&self, that: &Self) -> Int {
-        todo!("PKT-004: Implement BitFlags::count_intersection from packets/phase2/PKT-004_BitFlags.md")
+        self.bits
+            .iter()
+            .zip(that.bits.iter())
+            .filter(|(&a, &b)| a && b)
+            .count() as Int
     }
 
     pub fn count_inverse_intersection(&self, that: &Self) -> Int {
-        todo!("PKT-004: Implement BitFlags::count_inverse_intersection from packets/phase2/PKT-004_BitFlags.md")
+        self.bits
+            .iter()
+            .zip(that.bits.iter())
+            .filter(|(&a, &b)| !a && b)
+            .count() as Int
     }
 
     pub fn any_intersection_with(&self, that: &Self) -> Bool {
-        todo!("PKT-004: Implement BitFlags::any_intersection_with from packets/phase2/PKT-004_BitFlags.md")
+        u8::from(self.bits.iter().zip(that.bits.iter()).any(|(&a, &b)| a && b))
     }
 
     pub fn clear_flags(&mut self, that: &Self) {
-        todo!("PKT-004: Implement BitFlags::clear_flags from packets/phase2/PKT-004_BitFlags.md")
+        for (bit, clear) in self.bits.iter_mut().zip(that.bits.iter()) {
+            if *clear {
+                *bit = false;
+            }
+        }
     }
 
     pub fn set_flags(&mut self, that: &Self) {
-        todo!("PKT-004: Implement BitFlags::set_flags from packets/phase2/PKT-004_BitFlags.md")
+        for (bit, set) in self.bits.iter_mut().zip(that.bits.iter()) {
+            if *set {
+                *bit = true;
+            }
+        }
     }
 
     pub fn clear_and_set(&mut self, flags_to_clear: &Self, flags_to_set: &Self) {
-        todo!("PKT-004: Implement BitFlags::clear_and_set from packets/phase2/PKT-004_BitFlags.md")
+        self.clear_flags(flags_to_clear);
+        self.set_flags(flags_to_set);
     }
 
     pub fn test_set_and_clear(&self, must_be_set: &Self, must_be_clear: &Self) -> Bool {
-        todo!("PKT-004: Implement BitFlags::test_set_and_clear from packets/phase2/PKT-004_BitFlags.md")
+        u8::from(self.test_for_none(must_be_clear) != 0 && self.test_for_all(must_be_set) != 0)
     }
 
     pub fn to_unsigned_int(&self) -> UnsignedInt {
-        todo!("PKT-004: Implement BitFlags::to_unsigned_int from packets/phase2/PKT-004_BitFlags.md")
+        let mut value = 0u32;
+        for i in 0..NUMBITS.min(32) {
+            if self.bits[i] {
+                value |= 1u32 << i;
+            }
+        }
+        value
     }
 
     pub fn to_hex_string(&self) -> String {
-        todo!("PKT-004: Implement BitFlags::to_hex_string from packets/phase2/PKT-004_BitFlags.md")
+        if NUMBITS == 0 {
+            return "0".to_string();
+        }
+
+        let num_chunks = (NUMBITS + 63) / 64;
+        let mut result = String::new();
+        let mut printed_any = false;
+
+        for chunk in (0..num_chunks).rev() {
+            let mut value = 0u64;
+            let base = chunk * 64;
+            let limit = 64.min(NUMBITS.saturating_sub(base));
+            for bit in 0..limit {
+                if self.bits[base + bit] {
+                    value |= 1u64 << bit;
+                }
+            }
+
+            if value != 0 || chunk == 0 || printed_any {
+                if printed_any {
+                    result.push_str(&format!("{value:016X}"));
+                } else if value == 0 {
+                    result.push('0');
+                } else {
+                    result.push_str(&format!("{value:X}"));
+                }
+                printed_any = true;
+            }
+        }
+
+        if !printed_any {
+            "0".to_string()
+        } else {
+            result
+        }
     }
 
     pub fn get_name_from_single_bit<'a>(names: &'a [&'a str], i: Int) -> Option<&'a str> {
-        todo!("PKT-004: Implement BitFlags::get_name_from_single_bit from packets/phase2/PKT-004_BitFlags.md")
+        if i >= 0 {
+            let i = i as usize;
+            if i < NUMBITS && i < names.len() {
+                return Some(names[i]);
+            }
+        }
+        None
     }
 
     pub fn get_single_bit_from_name(names: &[&str], token: &str) -> Int {
-        todo!("PKT-004: Implement BitFlags::get_single_bit_from_name from packets/phase2/PKT-004_BitFlags.md")
+        for (i, &name) in names.iter().enumerate() {
+            if i < NUMBITS && name.eq_ignore_ascii_case(token) {
+                return i as Int;
+            }
+        }
+        -1
     }
 }
