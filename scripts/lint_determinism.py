@@ -77,6 +77,26 @@ RULES: Tuple[LintRule, ...] = (
             re.IGNORECASE,
         ),
     ),
+    LintRule(
+        code="DET008",
+        description="c_long/c_ulong is 32-bit on 64-bit Windows (LLP64) vs 64-bit on Linux/macOS (LP64); use explicit i32/u32/i64/u64.",
+        pattern=re.compile(r"\b(?:c_long|c_ulong)\b"),
+    ),
+    LintRule(
+        code="DET009",
+        description="c_char is unsigned (u8) on Linux aarch64 vs signed (i8) on Windows/macOS/x86_64; use explicit i8 (Byte) or u8 (UnsignedByte).",
+        pattern=re.compile(r"\bc_char\b"),
+    ),
+    LintRule(
+        code="DET010",
+        description="RefCell/Rc/Mutex/RwLock is forbidden in simulation state; use SimWorld arenas (ObjectArena/ModuleArena) and slot handles.",
+        pattern=re.compile(r"\b(?:RefCell|Mutex|RwLock|Rc)\s*<"),
+    ),
+    LintRule(
+        code="DET011",
+        description="Rust str::parse::<f32/i32/u32> differs from SAGE INI scanners on trailing tokens/overflow; use zh_common::ini::scan_*.",
+        pattern=re.compile(r"\.parse\s*::\s*<\s*(?:f32|f64|i32|u32|i16|u16|i8|u8)\s*>\s*\("),
+    ),
 )
 
 EXEMPT_MARKER = "determinism-ok:"

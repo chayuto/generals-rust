@@ -85,6 +85,30 @@ class TestDeterminismLinter(unittest.TestCase):
         violations = linter.lint_source_text(bad_rs, self.dummy_path)
         self.assertEqual([v.code for v in violations], ["DET006"])
 
+    def test_det008_rejects_c_long_and_c_ulong(self) -> None:
+        bad_rs = "pub extern \"C\" fn foo(x: c_long) -> c_ulong { x as c_ulong }"
+        violations = linter.lint_source_text(bad_rs, self.dummy_path)
+        self.assertTrue(any(v.code == "DET008" for v in violations))
+
+    def test_det009_rejects_c_char(self) -> None:
+        bad_rs = "pub struct Obj { pub cond: c_char }"
+        violations = linter.lint_source_text(bad_rs, self.dummy_path)
+        self.assertEqual([v.code for v in violations], ["DET009"])
+
+    def test_det010_rejects_refcell_rc_mutex_in_sim(self) -> None:
+        bad_rs = """
+        let a: Rc<RefCell<ObjectRecord>> = todo!();
+        let b: Mutex<i32> = Mutex::new(0);
+        """
+        violations = linter.lint_source_text(bad_rs, self.dummy_path)
+        codes = [v.code for v in violations]
+        self.assertEqual(codes, ["DET010", "DET010"])
+
+    def test_det011_rejects_std_str_parse_numeric(self) -> None:
+        bad_rs = "let pct = token.parse::<f32>().unwrap();"
+        violations = linter.lint_source_text(bad_rs, self.dummy_path)
+        self.assertEqual([v.code for v in violations], ["DET011"])
+
     def test_exemption_comment_suppresses_rule(self) -> None:
         exempt_rs = (
             "let table: HashMap<u32, u32> = HashMap::new(); "

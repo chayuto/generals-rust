@@ -1,0 +1,8 @@
+# Enforce consistent LF line endings across Windows, Linux, and macOS
+# so byte counts, hashes, and bash scripts (.sh / .githooks) never diverge on Windows.
+* text=auto eol=lf
+
+# Binary fixtures must never undergo line-ending conversion
+*.rep binary
+*.REP binary
+*.bin binary
