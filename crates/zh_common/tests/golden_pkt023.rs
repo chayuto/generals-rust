@@ -22,7 +22,6 @@ fn rotate_crc(crc: u32, word: u32) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-023 (crates/zh_common/src/math/partition_solver.rs)"]
 fn test_pkt023_partition_solver_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT023_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-023.json");
