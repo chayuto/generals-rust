@@ -1,5 +1,6 @@
-//! `zh_common`: Deterministic foundation types, CRC (`PKT-001`), PRNG (`PKT-002`), `Xfer`, and math helpers.
+//! `zh_common`: Deterministic foundation types, CRC (`PKT-001`), PRNG (`PKT-002`), `Xfer`, `core`, and `math` helpers.
 
+pub mod core;
 pub mod crc;
 pub mod golden_json;
 pub mod math;

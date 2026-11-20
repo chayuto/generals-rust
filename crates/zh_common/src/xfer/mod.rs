@@ -1,5 +1,7 @@
-//! Deterministic `Xfer`, `XferCrc`, `XferSave`, `XferLoad`, and `Snapshot` serialization contracts
+//! Deterministic `Xfer`, `XferCrc`, `XferSave`, `XferLoad`, `Snapshot`, and `BitFlags` (`PKT-004`)
 //! matching `Core/GameEngine/Source/Common/System/XferCRC.cpp`.
+
+pub mod bit_flags;
 
 use crate::types::{Bool, Int, ObjectId, Real, UnsignedByte, UnsignedInt, UnsignedShort, XferVersion};
 

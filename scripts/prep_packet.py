@@ -113,8 +113,12 @@ def render_packet_markdown(
         f"- **Complexity & Assigned Tier:** Class `{pkt['complexity_class']}` -> `{pkt['agent_tier']}`",
         f"- **Environment Access:** `{pkt['env_access']}`",
         f"- **FFI Seam Pattern:** {pkt['ffi_pattern']}",
-        f"- **Allowed Rust Output File:** `{pkt['rust_target']}` *(Do not modify files outside this boundary)*",
+        f"- **Allowed Rust Output File:** `{pkt['rust_target']}` *(Plus removing `#[ignore]` in the corresponding `crates/{pkt['rust_crate']}/tests/golden_*.rs` test file; do not modify other files)*",
         f"- **Mandatory V&V Gates:** `{', '.join(pkt['vv_gates'])}`",
+        "- **Local / Ephemeral-Web Verification Commands:**",
+        "  ```bash",
+        "  python3 scripts/lint_determinism.py && cargo test --workspace",
+        "  ```",
         "",
         "## 2. AST/Source-Extracted Determinism Invariants",
     ]
