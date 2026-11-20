@@ -116,6 +116,7 @@ To prevent two agents from duplicating work on the same module:
 ## 5. Repository Map
 
 - [PLAN.md](PLAN.md) — Master architectural blueprint, `SimContext`/`ObjectArena`/`ModuleArena`/`SleepyUpdateHeap` design, 3 FFI strangler patterns, and 337-packet roadmap across Phases 0–7.
+- [docs/MULTI_AGENT_ROADMAP.md](docs/MULTI_AGENT_ROADMAP.md) — Complete task/subtask dependency DAG (`Issues #4..#33` & `PKT-001..PKT-463`), 6 master unblockers, and Milestones `M0`–`M7`.
 - [docs/RESEARCH.md](docs/RESEARCH.md) — Verified technical reference for `fbraz3/GeneralsX` at `84a7a20` (48-singleton init table, 16-step `GameLogic::update()` pipeline, `m_sleepyUpdates` heap rules, `Object` + 222 `BehaviorModule` layout, `XferCRC` / `GameLogic::getCRC()` specification).
 - [docs/AGENT_WORKFLOW_AND_CI.md](docs/AGENT_WORKFLOW_AND_CI.md) — Tier 0 AST Context Slicer design, 4-Tier Agent Routing matrix, 4-Gate V&V Funnel specification, and Free Public GitHub Actions CI Offload Pipeline.
 - [docs/RUST_CONVENTIONS.md](docs/RUST_CONVENTIONS.md) — Mandatory C++-to-Rust determinism translation rules, type mappings, and worker cheat sheet.

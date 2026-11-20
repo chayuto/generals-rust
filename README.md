@@ -61,6 +61,7 @@ flowchart LR
 | Document / Path | Description |
 | :--- | :--- |
 | **[PLAN.md](PLAN.md)** | Master architectural blueprint, 3-layer `SimContext` design, FFI strangler patterns, and Work Packages `WP-0.1`..`WP-7.3`. |
+| **[docs/MULTI_AGENT_ROADMAP.md](docs/MULTI_AGENT_ROADMAP.md)** | End-to-end multi-agent task dependency DAG (`Blocked By` $\rightarrow$ `Unblocks`), 6 master unblockers, parallel swarm fan-out windows, and Milestones `M0`–`M7`. |
 | **[AGENTS.md](AGENTS.md)** | Contributors & multi-agent constitution, V&V Golden Rule (*"Never build something you cannot verify"*), 2D task classification (`tier:*` $\times$ `env:*`), and GitHub Issue claiming protocol. |
 | **[docs/ARCHITECTURE_SPEC.md](docs/ARCHITECTURE_SPEC.md)** | Frozen Rust & C-ABI (`zh_ffi.h`) interface contracts for `SimWorld::with_module_dispatch`, `Pattern 1–3` FFI bridges, and the Gate V2 Golden-Vector JSON schema. |
 | **[docs/RESEARCH.md](docs/RESEARCH.md)** | Technical reference for `fbraz3/GeneralsX` at `84a7a20` (48-singleton init sequence, 16-step `GameLogic::update()` loop, `m_sleepyUpdates` heap rules, and `XferCRC` pipeline). |
