@@ -62,20 +62,35 @@ We use **GitHub Issues** and **GitHub Discussions** on `chayuto/generals-rust` a
   - **Phase Execution Boards & Handoffs:** Session handoff summaries, Phase 1 spike telemetry tables, and CI cache status are posted to the active Phase Discussion thread.
 - **GitHub Issues (Executable Work Packages & Atomic Translation Packets):**
   - Every Work Package (`WP-0.1`..`WP-7.3`) has a tracking Issue under its Phase Milestone (`Phase 0`..`Phase 7`).
-  - Individual module translations are tracked as `[Packet]` sub-issues (or checklist items linked to the parent `WP-*` issue) labeled with their Complexity Class and Agent Tier:
-    - `tier:1a-lite` (Class `C1` leaf modules)
-    - `tier:1b-fast` (Class `C2` standard modules)
-    - `tier:2-engineer` (Class `C3` complex/multi-facet modules)
-    - `tier:3-architect` (Class `C4` spine, FFI seams, & desync triage)
+  - Every task is classified across **two orthogonal axes**:
+    1. **Model Complexity Tier (`tier:*`):**
+       - `tier:1a-lite` (Class `C1` leaf modules)
+       - `tier:1b-fast` (Class `C2` standard modules)
+       - `tier:2-engineer` (Class `C3` complex/multi-facet modules)
+       - `tier:3-architect` (Class `C4` spine, FFI seams, & desync triage)
+    2. **Execution Environment & Access Capability (`env:*`):**
+       - `env:local-full` — **Full Local Workstation Agent:** Has access to retail `.big` game assets at `~/Games/generalszh`, the local `vendor/GeneralsX` C++ reference clone/build (`GeneralsXZH`, `compile_commands.json`, `z_googletest`), and local replay directories. Required for Phase 0 setup, C++ CMake/FFI seam bring-up (`WP-1.1`, `WP-5.0`), generating Tier 0 AST packets + C++ Golden Test Vectors (`scripts/prep_packet.py`), retail `.big`/`.map` reader verification (`WP-2.4`, `WP-7.2`, `WP-7.3`), and interactive CRC desync debugging.
+       - `env:ephemeral-web` — **Ephemeral Web / Cloud Sandbox Agent (Codebase-Only Access):** Has access **only** to this git repository (`chayuto/generals-rust`) and a standard Rust/Python toolchain (no local `~/Games/generalszh` `.big` files and no local `vendor/GeneralsX` C++ binary). Translates modules from committed Tier 0 packets (`packets/<phase>/<module>.md`), runs **Gate V1** (`scripts/lint_determinism.py` + `cargo check`) and **Gate V2-Golden** (`cargo test` against committed C++-generated Golden Test Vectors) locally in-container, and pushes branches/PRs to trigger **Gate V2-FFI / Gate V3 / Gate V4** on public GitHub Actions CI!
+       - `env:hybrid-ci` — Work packages where an `env:local-full` agent seeds the FFI seam and Golden Vectors first, unlocking parallel `env:ephemeral-web` execution for all child module packets.
 
-### 4.2 Agent Task-Claiming & State-Transition Protocol
+### 4.2 Producer–Consumer Contract Between `env:local-full` and `env:ephemeral-web` Agents
+Because an `env:ephemeral-web` agent cannot read `~/Games/generalszh` or a local `vendor/GeneralsX` build tree, **an issue may only be marked `status:ready-for-agent` + `env:ephemeral-web` after an `env:local-full` agent (or CI job) has committed:**
+1. **The Self-Contained Translation Packet (`packets/<phase>/<module>.md`):** Contains the stripped GPLv3 C++ `.h`/`.cpp` source from `fbraz3/GeneralsX` (`84a7a20`), the AST-extracted dependency signatures, and the Rust `ModuleData`/`Snapshot` skeleton.
+2. **The In-Repo Golden Vector Oracle (`crates/*/tests/golden_<module>.rs` or `tests/golden/<module>.json`):** 1,000-seed input/output + `XferSave` bytes + `XferCRC` + `GetGameLogicRandomSeedCRC()` test vectors recorded from the C++ reference build. This guarantees the `env:ephemeral-web` agent has a runnable `cargo test` V&V oracle inside its codebase-only sandbox before pushing to GitHub Actions CI.
+
+### 4.3 Agent Task-Claiming & State-Transition Protocol
 To prevent two agents from duplicating work on the same module:
 
-1. **Discover Ready Work:**
-   Query open issues whose dependencies are met and that carry `status:ready-for-agent` matching your tier:
-   ```bash
-   gh issue list --repo chayuto/generals-rust --label "status:ready-for-agent"
-   ```
+1. **Discover Ready Work Matching Your Environment & Tier:**
+   - If you are an **Ephemeral Web Agent (codebase-only access)**:
+     ```bash
+     gh issue list --repo chayuto/generals-rust --label "status:ready-for-agent" --label "env:ephemeral-web"
+     ```
+     *(Never claim an issue labeled only `env:local-full` from an ephemeral web container!)*
+   - If you are a **Local Full-Access Agent (running on the host Mac with `~/Games/generalszh` and `vendor/GeneralsX`)**:
+     ```bash
+     gh issue list --repo chayuto/generals-rust --label "status:ready-for-agent"
+     ```
    *(Never start an issue labeled `status:blocked-on-vv` until its verification harness issue is closed!)*
 2. **Claim the Issue Atomically:**
    Swap the label from `status:ready-for-agent` to `status:in-progress` and post a short claim comment stating the target branch/commit and the V&V gates that will be run:

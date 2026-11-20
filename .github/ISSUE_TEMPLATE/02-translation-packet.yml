@@ -21,6 +21,15 @@ body:
         - "Tier 3 (Class C4 — Architect)"
     validations:
       required: true
+  - type: dropdown
+    id: env_access
+    attributes:
+      label: Execution Environment & Access Requirement
+      options:
+        - "env:ephemeral-web (Codebase-only access; committed packet in packets/ + Golden Vectors in tests/golden/)"
+        - "env:local-full (Requires local ~/Games/generalszh retail assets or local vendor/GeneralsX build)"
+    validations:
+      required: true
   - type: textarea
     id: file_boundary
     attributes:

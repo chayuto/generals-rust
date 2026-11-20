@@ -58,6 +58,29 @@ flowchart TD
 
 ---
 
+### 1.4 Two-Dimensional Task Classification: Agent Tier $\times$ Execution Environment (`env:local-full` vs. `env:ephemeral-web`)
+
+Agents working on `generals-rust` operate in one of two distinct physical environments with different access limitations:
+
+1. **`env:local-full` — Full Local Workstation Agents (Retail Assets + Local Comparative C++ Build):**
+   - **Access:** Has read-only access to retail `.big` archives at `~/Games/generalszh` (`-assetPath ~/Games/generalszh`), the local `vendor/GeneralsX` C++ build (`GeneralsXZH`, `compile_commands.json`, `libz_gameengine.a`, `z_googletest`), and the local replay corpus (`~/Library/Application Support/GeneralsX/GeneralsZH/`).
+   - **Exclusive Tasks (`env:local-full`):**
+     - `WP-0.1..0.4`: Retail asset download (`steamcmd`), local `GeneralsXZH` build, replay corpus assembly, running `scripts/prep_packet.py` against `compile_commands.json`.
+     - `WP-1.1` & `WP-5.0`: C++ `CMakeLists.txt` FFI seam bring-up, `RustBehaviorModuleAdapter` C++ compilation, and generating **In-Repo Golden Test Vectors** from the C++ reference engine.
+     - `WP-2.4` (retail `INI.big` `m_iniCRC` check), `WP-7.2` (retail `.big`/`.map`/`.csf` parser verification), `WP-7.3` (local standalone `zh-sim` benchmark), and interactive `-SaveDebugCRCPerFrame` desync debugging.
+2. **`env:ephemeral-web` — Ephemeral Web / Cloud Sandbox Agents (Codebase-Only Access):**
+   - **Limitations:** Has access **only** to the `chayuto/generals-rust` git repository and a standard Rust/Python toolchain. It has **no access** to `~/Games/generalszh` (`.big` files are never in git) and **no access** to a local `vendor/GeneralsX` C++ binary.
+   - **How We Enable `env:ephemeral-web` Agents to Execute & Verify ~85% of the Project (295+ of 337 Packets):**
+     - **Step 1 (Producer Step by `env:local-full`):** Before marking a translation packet `status:ready-for-agent` + `env:ephemeral-web`, an `env:local-full` agent runs `scripts/prep_packet.py` and commits into `chayuto/generals-rust`:
+       1. `packets/<phase>/<module>.md`: The self-contained GPLv3 C++ `.h`/`.cpp` source slice from `fbraz3/GeneralsX` (`84a7a20`), the AST-sliced dependency signatures, and the Rust struct/INI/Xfer skeleton.
+       2. `crates/*/tests/golden_<module>.rs` (or `tests/golden/<module>.json`): **1,000-seed Golden Test Vectors** (inputs -> outputs, `XferSave` snapshot bytes, `XferCRC`, and `GetGameLogicRandomSeedCRC()`) recorded directly from the C++ reference build.
+     - **Step 2 (Consumer Step by `env:ephemeral-web`):** The ephemeral web agent claims an issue labeled `status:ready-for-agent` + `env:ephemeral-web`, reads `packets/<phase>/<module>.md` directly from the repo, writes the single isolated `.rs` module file, and runs its local V&V oracle (`python3 scripts/lint_determinism.py && cargo test` against the committed Golden Vectors) entirely inside its codebase-only container!
+     - **Step 3 (Public CI Verification):** When the ephemeral web agent pushes its branch/PR to public `chayuto/generals-rust`, GitHub Actions CI automatically runs the full C++ FFI link (`Gate V2`) and the 6-way headless replay matrix (`Gate V3/V4`).
+3. **`env:hybrid-ci` — Two-Stage Work Packages:**
+   - Used on multi-packet work packages where an `env:local-full` agent seeds the C++ FFI harness + Golden Vectors first, unlocking parallel `env:ephemeral-web` translation across all child packets.
+
+---
+
 ## 2. Compartmentalization with Strict V&V Checkpoints
 
 To allow multiple worker agents to translate Class C1/C2/C3 modules in parallel without stepping on each other or introducing hidden replay desyncs, we enforce **strict physical compartmentalization** and a **4-Gate V&V Funnel**.

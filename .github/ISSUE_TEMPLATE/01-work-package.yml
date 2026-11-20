@@ -29,6 +29,16 @@ body:
         - "Tier 3: Architect (Class C4 Spine/FFI/Scheduler)"
     validations:
       required: true
+  - type: dropdown
+    id: env_access
+    attributes:
+      label: Execution Environment & Access Requirement
+      options:
+        - "env:ephemeral-web (Codebase-only access; uses committed Tier 0 packets + Golden Vectors + Public GitHub Actions CI)"
+        - "env:local-full (Requires local Mac access to ~/Games/generalszh retail assets and/or local vendor/GeneralsX C++ build)"
+        - "env:hybrid-ci (Local-full seeds FFI harness + Golden Vectors; Ephemeral-web translates child packets)"
+    validations:
+      required: true
   - type: textarea
     id: vv_precondition
     attributes:
