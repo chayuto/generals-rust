@@ -43,7 +43,6 @@ fn rotate_crc(crc: u32, word: u32) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-064 (crates/zh_common/src/core/name_key_generator.rs)"]
 fn test_pkt064_name_key_generator_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT064_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-064.json");
