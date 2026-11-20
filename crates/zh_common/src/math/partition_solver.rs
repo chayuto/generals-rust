@@ -33,11 +33,37 @@ pub struct PartitionSolver {
 
 impl PartitionSolver {
     pub fn new(elements: &[PairObjectIdAndUInt], spaces: &[PairObjectIdAndUInt], solve_how: SolutionType) -> Self {
-        todo!("PKT-023: Implement PartitionSolver::new from packets/phase2/PKT-023_PartitionSolver.md")
+        Self {
+            how_to_solve: solve_how,
+            data: elements.to_vec(),
+            spaces_for_data: spaces.to_vec(),
+            current_solution: Vec::new(),
+            current_solution_leftovers: 0,
+            best_solution: Vec::new(),
+        }
     }
 
     pub fn solve(&mut self) {
-        todo!("PKT-023: Implement PartitionSolver::solve from packets/phase2/PKT-023_PartitionSolver.md")
+        self.best_solution.clear();
+        self.current_solution.clear();
+        self.current_solution_leftovers = 0x7fff_ffff;
+
+        self.data.sort_by(|a, b| b.1.cmp(&a.1));
+        self.spaces_for_data.sort_by(|a, b| b.1.cmp(&a.1));
+
+        if self.how_to_solve == SolutionType::PreferFastSolution {
+            let mut spaces_available = self.spaces_for_data.clone();
+            for &(entry_id, entry_size) in &self.data {
+                for j in 0..spaces_available.len() {
+                    let (space_id, space_size) = spaces_available[j];
+                    if entry_size <= space_size {
+                        spaces_available[j].1 -= entry_size;
+                        self.best_solution.push((entry_id, space_id));
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     pub fn get_solution(&self) -> &[PairObjectId] {
