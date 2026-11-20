@@ -327,100 +327,131 @@ If a full replay check fails with `CRC Mismatch in Frame F (InGame: 0xAAAA != Re
 
 ## 6. In-Depth Phased Execution Roadmap & Work-Package Breakdown
 
-### Phase 0: Ground Truth & Replay Corpus (C++ Baseline)
-**Goal:** Build unmodified `fbraz3/GeneralsX` at commit `84a7a20769aa5749f388b1f49bd542c79b3c33e8` on this Mac, assemble a multi-replay verification corpus, and prove 100% headless replay pass rate on C++.
+### 5.3 Token Optimization: Tier 0 Context Slicer & 4-Tier Agent Routing
+Full operational specification: [docs/AGENT_WORKFLOW_AND_CI.md](docs/AGENT_WORKFLOW_AND_CI.md).
 
-| Work Package | Scope & Tasks | Gate / Deliverable |
-|---|---|---|
-| **WP-0.1: Disk Budget & Retail Game Data** | Verify free disk space (~13 GiB available; cap total build + assets under 7 GiB). Populate `~/Games/generalszh` (Steam App `2732960` via interactive `steamcmd +@sSteamCmdForcePlatformType windows`, or existing read-only path). Never copy `.big` archives; pass `-assetPath ~/Games/generalszh` (`CNC_GENERALS_ZH_PATH`). | `~/Games/generalszh/*.big` readable in place. |
-| **WP-0.2: Reference C++ Build (`GeneralsXZH`)** | Shallow-clone `fbraz3/GeneralsX` at `84a7a20769aa5749f388b1f49bd542c79b3c33e8` into ignored `vendor/GeneralsX`. Configure preset `macos-vulkan` with `-DRTS_BUILD_OPTION_DEBUG=OFF -DRTS_BUILD_GENERALS=OFF -DRTS_BUILD_CORE_TOOLS=OFF` and build target `z_generals` (`GeneralsXZH`). | `GeneralsXZH` `arm64` binary builds cleanly. |
-| **WP-0.3: Replay Corpus Assembly** | Install `generalsx-project/GeneralsXReplays` (6 cross-platform Zero Hour replays: `linux_2p_vanilla_map.rep`, `linux_2p_custom_map.rep`, `linux_6p_custom_map.rep`, `macos_2p_vanilla_map.rep`, `macos_2p_custom_map.rep`, `macos_6p_custom_map.rep` + custom maps) into `~/Library/Application Support/GeneralsX/GeneralsZH/`. Record additional local skirmish replays covering USA/China/GLA generals, superweapons, air/ground combat, veterancy, and power brownouts into `replays/`. Characterize `TheSuperHackers/GeneralsReplays` under `-ignoreReplaySyncErrors`. | Corpus installed and indexed. |
-| **WP-0.4: Automated Verification Harness** | Write `scripts/check_replays.sh` running `GeneralsXZH -headless -replay "*.rep" -jobs 4`. Record wall-clock time, frame count, and pass status per replay in `docs/BASELINE.md`. | **Gate 0:** 100% pass (`exit 0`, zero CRC mismatches) on stock C++. |
+1. **Tier 0 Deterministic Context Slicer (`scripts/prep_packet.py`, 0 LLM Tokens):**
+   - Uses `compile_commands.json` (`clang++ -Xclang -ast-dump=json`) to extract a self-contained **3.5–4.5k token Translation Packet** per module (`target.h` + `target.cpp` stripped of license/includes, AST-sliced dependency signatures, mechanically generated `ModuleData` INI field parse table + `Snapshot::crc`/`xfer` skeleton, and a 1-page `RUST_CONVENTIONS_CHEATSHEET.md`).
+   - Eliminates multi-turn codebase grepping and repeated reads of 40 KB headers (`Object.h`, `GameLogic.h`, `ThingTemplate.h`), reducing per-module input token consumption by **~88%**.
+2. **4-Tier Complexity Routing Across All 871 Files (~330k LOC):**
+   - **Class C1 (~35% LOC, ~310 files) -> Tier 1A (Fastest/Lite Model, Single-Turn Zero-Search Sandbox):** Leaf trackers (`RandomValue`, `crc`, `Money`, `Energy`, `ScoreKeeper`, `Armor`, `ExperienceTracker`, `FiringTracker`), 28 `INI` scanners, and simple module categories (`Destroy` [1], `Damage` [3], `Create` [8], `Helper` [8], `Die` [12], `Upgrade` [21], `SpecialPower` [11], `Collide` [20], simple `Body` [6]).
+   - **Class C2 (~40% LOC, ~380 files) -> Tier 1B (Fast Model, Single-Turn + 1 Compiler Retry):** ~60 standard `Object/Update/*` modules, ~22 standard `Object/Behavior/*` modules, `ActiveBody`, `StructureBody`, `CrateSystem`, `CaveSystem`, `SidesList`, `PolygonTrigger`, `VictoryConditions`.
+   - **Class C3 (~18% LOC, ~130 files) -> Tier 2 (Mid-Tier Engineer Model with `Gate V1/V2` Loop):** `Object/Contain/*` (13), multi-facet `Object/Behavior/*` (8: `Bridge`, `ParkingPlace`, `PropagandaTower`, `RebuildHole`, `SlowDeath`, `Spawn`, etc.), complex `Object/Update/*` (26: `PhysicsUpdate`, `MissileAIUpdate`, `LaserUpdate`, `JetAIUpdate`, `ChinookAIUpdate`, `SupplyTruckAIUpdate`, `WorkerAIUpdate`, `ProductionUpdate`), `Weapon`, `Locomotor`, `TurretAI`, `ScriptConditions` (10 packets), `ScriptActions` (15 packets).
+   - **Class C4 (~7% LOC, ~51 files) -> Tier 3 (Lead Architect / Frontier Model):** `SimContext`, `ObjectArena`, `ModuleArena`, `SleepyUpdateHeap`, `RustBehaviorModuleAdapter`, `Object.cpp`, `PartitionManager.cpp`, `TerrainLogic.cpp`, `Pathfinder`, `AI`/`AIGroup`/`AIPlayer`/`AIUpdate`/`AIStateMachine`, `Player`/`Team`, `GameLogic.cpp`, `Recorder.cpp`, plus any `Gate V2/V3/V4` desync escalations.
+
+### 5.4 Compartmentalization & The 4-Gate Automated V&V Funnel
+1. **Strict File Isolation:** Each of the 222 `BehaviorModule` classes lives in its own isolated file (`crates/zh_logic/src/modules/<category>/<mod>.rs`). Worker agents can only write to their assigned module file against pre-locked `SimWorld` trait signatures — enabling 5–10 parallel workers with zero merge conflicts. Mega-files (`ScriptConditions.cpp` 170 KB, `ScriptActions.cpp` 270 KB, `GameLogic.cpp` 180 KB) are sliced into 15–20 KB function-group files.
+2. **4-Gate Automated Verification Funnel:**
+   - **Gate V1 (< 1s, 0 tokens):** `scripts/lint_determinism.py` rejects `HashMap`/`HashSet`/`BinaryHeap`, std `f32` transcendentals (`sin`/`cos`/`sqrt`/`floor`/`ceil`/`atan2`/`mul_add`), pointer ordering, and `usize` serialization + `cargo check`.
+   - **Gate V2 (~2s, zero `.big` files needed):** In-process C++-vs-Rust Differential Micro-Harness instantiates the C++ class and Rust struct side-by-side via `libzh_ffi.a`, runs 1,000 seeded fuzz & edge-case steps, and asserts bit-exact equality on return values, `XferSave` snapshot bytes, `XferCRC`, and `GetGameLogicRandomSeedCRC()`.
+   - **Gate V3 (~15s):** Lockstep `shadow-verify` smoke replay (`macos_2p_vanilla_map.rep`) comparing C++ and Rust on every live frame call.
+   - **Gate V4 (~45s in CI):** Full 6-replay cross-platform headless matrix (`exit 0`, zero CRC mismatches).
+
+### 5.5 Free GitHub Actions Public-Repo CI Offload Strategy
+- **Public Repo Free Tier:** Making `chayuto/generals-rust` public unlocks **unlimited free GitHub Actions minutes** on `macos-15` (Apple Silicon `arm64`) and `ubuntu-latest` (`x86_64`) with up to 20 parallel jobs. (The repo is already trademark-clean and GPL-3.0 + EA Section 7 compliant.)
+- **Cloud Build & 6-Way Parallel Replay Matrix:**
+  - `ci-fast-verify.yml` runs `Gate V1` + `cargo test`, restores `ccache` and `vcpkg-bincache` via `actions/cache`, links `libzh_ffi.a` into `z_gameengine` in ~2 minutes, runs **Gate V2 (In-Process C++ vs Rust Differential Tests)** without needing retail assets, and publishes the linked `GeneralsXZH` macOS `arm64` bundle as an artifact.
+  - `ci-replay-matrix.yml` pulls public `generalsx-project/GeneralsXReplays` + cached headless `.big` archives (encrypted via repo secret `secrets.ASSETS_KEY`) and runs all 6 replays concurrently across 6 runners in **~45 seconds wall-clock time**.
+- **Lightening Local Mac Disk & CPU:** Your Mac only needs `~/Games/generalszh` (~3.2 GiB), the local Rust `target/` (~350 MB), and a lightweight C++ link archive or CI artifact (~250 MB), keeping total local disk usage under **~3.8 GiB** (preserving >9 GiB free on `/`).
+
+---
+
+## 6. In-Depth Phased Execution Roadmap & Work-Package Breakdown
+
+### Phase 0: Ground Truth & Replay Corpus (C++ Baseline)
+**Goal:** Build unmodified `fbraz3/GeneralsX` at commit `84a7a20769aa5749f388b1f49bd542c79b3c33e8`, assemble the verification corpus, and configure local + GitHub Actions CI harnesses.
+
+| Work Package | Tier / Class | Scope & Tasks | Gate / Deliverable |
+|---|---|---|---|
+| **WP-0.1: Disk Budget & Retail Game Data (`steamcmd`)** | Ops / Setup | Verify free disk space (~13 GiB available; cap total local footprint). Download Steam App `2732960` into `~/Games/generalszh` via interactive `steamcmd +@sSteamCmdForcePlatformType windows +force_install_dir ~/Games/generalszh +login <user> +app_update 2732960 validate +quit`. Never copy `.big` archives; pass `-assetPath ~/Games/generalszh` (`CNC_GENERALS_ZH_PATH`). | `~/Games/generalszh/*.big` readable in place. |
+| **WP-0.2: Reference C++ Build (`GeneralsXZH`)** | Ops / Setup | Shallow-clone `fbraz3/GeneralsX` at `84a7a20769aa5749f388b1f49bd542c79b3c33e8` into ignored `vendor/GeneralsX`. Configure preset `macos-vulkan` with `-DRTS_BUILD_OPTION_DEBUG=OFF -DRTS_BUILD_GENERALS=OFF -DRTS_BUILD_CORE_TOOLS=OFF` and build target `z_generals` (`GeneralsXZH`). Prune intermediate object bloat after static archives are built. | `GeneralsXZH` `arm64` binary builds cleanly. |
+| **WP-0.3: Replay Corpus Assembly** | Ops / Setup | Install `generalsx-project/GeneralsXReplays` (6 cross-platform Zero Hour replays: `linux_2p_vanilla_map.rep`, `linux_2p_custom_map.rep`, `linux_6p_custom_map.rep`, `macos_2p_vanilla_map.rep`, `macos_2p_custom_map.rep`, `macos_6p_custom_map.rep` + custom maps) into `~/Library/Application Support/GeneralsX/GeneralsZH/`. Record additional local skirmish replays into `replays/`. Characterize `TheSuperHackers/GeneralsReplays` under `-ignoreReplaySyncErrors`. | Corpus installed and indexed. |
+| **WP-0.4: Verification Harness & CI Workflows** | Tier 3 (`C4`) | Write `scripts/check_replays.sh`, `scripts/lint_determinism.py` (`Gate V1`), `scripts/prep_packet.py` (`Tier 0` context slicer), and `.github/workflows/{ci-fast-verify,ci-replay-matrix}.yml`. Record baseline timings and frame counts in `docs/BASELINE.md`. | **Gate 0:** 100% pass (`exit 0`, zero CRC mismatches) on stock C++. |
 
 ---
 
 ### Phase 1: Translation Spike (Go / No-Go Gate)
-**Goal:** Validate the multi-model translation workflow, FFI build integration, and determinism conventions on two real modules (`RandomValue` + `CRC` and `ExperienceTracker`) before scaling to 330k lines.
+**Goal:** Validate the Tier 0 Context Slicer, Tier 1A cheap-model translation workflow, `Gate V1–V4` funnel, and FFI build integration on two real modules (`RandomValue` + `CRC` and `ExperienceTracker`).
 
-| Work Package | Scope & Tasks | Gate / Deliverable |
-|---|---|---|
-| **WP-1.1: Rust Conventions, Workspace & FFI Seam (Lead Model)** | Author `docs/RUST_CONVENTIONS.md` encoding all 10 determinism rules from `docs/RESEARCH.md` with C++ -> Rust templates. Create Cargo workspace (`crates/zh_common`, `crates/zh_logic`, `crates/zh_ffi`) compiling `libzh_ffi.a`. Link `libzh_ffi.a` into `z_gameengine` in `GeneralsMD/Code/GameEngine/CMakeLists.txt`. Define C-ABI header `zh_ffi.h`. | Hybrid C++/Rust `GeneralsXZH` links and passes Gate 0. |
-| **WP-1.2: Autonomous Translation of `RandomValue` + `CRC` & `ExperienceTracker` (Cost-Optimized Model)** | Cost-optimized model translates under `docs/RUST_CONVENTIONS.md`:<br>1. `RandomValue.cpp` + `crc.h`/`crc.cpp` (~320 LOC, Pattern 1 FFI): 3 `[u32; 6]` seed banks, `ADC` carry chain, `InitRandom`, `GetGameLogicRandomSeed`, `GetGameLogicRandomSeedCRC`, `GetGameLogicRandomValue`, `GetGameLogicRandomValueReal`, `*Unchanged`, `GameLogicRandomVariable`.<br>2. `ExperienceTracker.cpp` (~280 LOC, Pattern 2 FFI): veterancy state, float-scaled XP truncation (`((gain as f32) * scalar) as i32`), sink forwarding (`m_experienceSink`), level threshold promotion, `ExperienceTracker::crc` / `xfer`. | Both modules compiled into `libzh_ffi.a` and wired into `z_gameengine`. |
-| **WP-1.3: Spike Verification & Telemetry Report** | Run `cargo test` + `scripts/check_replays.sh` (with and without `shadow-verify`). Record prompt/completion tokens consumed, first-pass compile & replay pass rate, and exact count/category of lead-model fixes in `docs/PHASE1_SPIKE_REPORT.md`. | **Gate 1 (Owner Go/No-Go):** All replays green; owner reviews `docs/PHASE1_SPIKE_REPORT.md`. |
+| Work Package | Tier / Class | Packets | Scope & Tasks | Gate / Deliverable |
+|---|---|---:|---|---|
+| **WP-1.1: Rust Conventions, Workspace & FFI Seam** | Tier 3 (`C4`) | 1 | Author `docs/RUST_CONVENTIONS.md` + `RUST_CONVENTIONS_CHEATSHEET.md` encoding all 10 determinism rules. Create Cargo workspace (`crates/zh_common`, `crates/zh_logic`, `crates/zh_ffi`) compiling `libzh_ffi.a`. Link `libzh_ffi.a` into `z_gameengine`. | Hybrid C++/Rust `GeneralsXZH` links and passes Gate 0. |
+| **WP-1.2: Autonomous Translation of `RandomValue` + `CRC` & `ExperienceTracker`** | Tier 1A (`C1`) | 2 | Run `scripts/prep_packet.py` to generate 2 context packets (~3.5k tokens each) and dispatch to **Tier 1A (cheap/fast model)** in zero-search mode:<br>1. `RandomValue.cpp` + `crc.h`/`crc.cpp` (~320 LOC, Pattern 1 FFI)<br>2. `ExperienceTracker.cpp` (~280 LOC, Pattern 2 FFI, tests `Int * Real` float-scaled XP truncation trap). | Both modules compiled into `libzh_ffi.a` and wired into `z_gameengine`. |
+| **WP-1.3: Spike V&V (`Gates V1–V4`) & Telemetry Report** | Tier 3 (`C4`) | 1 | Run `Gate V1` linter, `Gate V2` 1,000-seed C++-vs-Rust differential tests, `Gate V3` shadow-verify replay, and `Gate V4` full replay suite. Record exact input/output tokens, pass rate, and any fixes in `docs/PHASE1_SPIKE_REPORT.md`. | **Gate 1 (Owner Go/No-Go):** All replays green; owner reviews `docs/PHASE1_SPIKE_REPORT.md`. |
 
 ---
 
 ### Phase 2: Foundation, Math & Serialization (`Common` Layer, ~40k LOC)
 **Goal:** Move the core deterministic primitives, serialization backbone, and INI scanners into `crates/zh_common` (Pattern 1 FFI).
 
-| Work Package | Files & Subsystems | Approx. LOC | Verification Gate |
-|---|---|---:|---|
-| **WP-2.1: Checksums, BitFlags & Xfer** | `Xfer.cpp`, `XferCRC.cpp`, `XferDeepCRC`, `BitFlags.h`/`BitFlags.cpp` (`ObjectStatusMaskType`, `UpgradeMaskType` [`BitFlags<128>`], `KindOfMaskType`, `DisabledMaskType`), `Snapshot` trait. | ~6,500 | `XferCRC` unit tests + full replay suite green. |
-| **WP-2.2: Deterministic Math & Geometry** | FFI bindings + Rust wrappers/port of `TheSuperHackers/GameMath` (`gm_sinf`, `gm_cosf`, `gm_tanf`, `gm_acosf`, `gm_asinf`, `gm_atan2f`, `gm_sqrtf`, `gm_floorf`, `gm_ceilf`), `Coord2D`, `Coord3D`, `ICoord2D`, `ICoord3D`, `Region2D`, `Region3D`, `Matrix3D`, `Vector3`, `GeometryInfo`, `BezierSegment`, `DiscreteCircle`, `PartitionSolver`. | ~11,000 | Math bit-parity fuzz tests against C++ `GameMath` + full replay suite green. |
-| **WP-2.3: NameKeys, Strings, Dict & StateMachine** | `NameKeyGenerator.cpp`, `AsciiString` / `UnicodeString` FFI views, `Dict.cpp` (ordered key-value dictionary used by maps/scripts), `StateMachine.cpp` (base finite state machine engine used by AI). | ~9,500 | Verify exact `NameKeyType` IDs after `GameEngine::init()` + full replay suite green. |
-| **WP-2.4: INI Parser & Numeric Scanners** | `Core/GameEngine/Source/Common/INI/*` (28 files: tokenizers, `from_chars` numeric scanners, `scanPercentToReal`, `scanIndexList`, `BitFlagsIO`, `MultiIniFieldParse`). | ~13,000 | Verify `TheGlobalData->m_iniCRC` matches C++ bit-exact + full replay suite green. |
+| Work Package | Tier / Class | Packets | Files & Subsystems | Approx. LOC | Verification Gate |
+|---|---|---:|---|---:|---|
+| **WP-2.1: Checksums, BitFlags & Xfer** | Tier 1A (`C1`) + Tier 3 (`Snapshot` trait) | 4 | `Xfer.cpp`, `XferCRC.cpp`, `XferDeepCRC`, `BitFlags.h`/`BitFlags.cpp` (`ObjectStatusMaskType`, `UpgradeMaskType` [`BitFlags<128>`], `KindOfMaskType`, `DisabledMaskType`), `Snapshot` trait. | ~6,500 | `Gate V1` + `Gate V2` (`XferCRC` byte/word parity) + `Gate V4`. |
+| **WP-2.2: Deterministic Math & Geometry** | Tier 1B (`C2`) | 6 | FFI bindings + Rust wrappers/port of `TheSuperHackers/GameMath` (`gm_sinf`, `gm_cosf`, `gm_tanf`, `gm_acosf`, `gm_asinf`, `gm_atan2f`, `gm_sqrtf`, `gm_floorf`, `gm_ceilf`), `Coord2D`, `Coord3D`, `ICoord2D`, `ICoord3D`, `Region2D`, `Region3D`, `Matrix3D`, `Vector3`, `GeometryInfo`, `BezierSegment`, `DiscreteCircle`, `PartitionSolver`. | ~11,000 | `Gate V2` (100k-input bit-parity fuzz test vs C++ `GameMath` & `Matrix3D`) + `Gate V4`. |
+| **WP-2.3: NameKeys, Strings, Dict & StateMachine** | Tier 1B (`C2`) | 4 | `NameKeyGenerator.cpp`, `AsciiString` / `UnicodeString` FFI views, `Dict.cpp` (ordered key-value dictionary), `StateMachine.cpp` (base finite state machine engine). | ~9,500 | `Gate V2` + verify exact `NameKeyType` IDs after `GameEngine::init()` + `Gate V4`. |
+| **WP-2.4: INI Parser & Numeric Scanners** | Tier 1A (`C1`) | 10 | `Core/GameEngine/Source/Common/INI/*` (28 files: tokenizers, `from_chars` numeric scanners, `scanPercentToReal`, `scanIndexList`, `BitFlagsIO`, `MultiIniFieldParse`). | ~13,000 | `Gate V2` + verify `TheGlobalData->m_iniCRC` matches C++ bit-exact + `Gate V4`. |
 
 ---
 
 ### Phase 3: Core RTS Domain Models & Leaf Trackers (~35k LOC)
 **Goal:** Port self-contained gameplay value trackers and template stores into `crates/zh_logic` (Pattern 2 FFI).
 
-| Work Package | Files & Subsystems | Approx. LOC | Verification Gate |
-|---|---|---:|---|
-| **WP-3.1: Economy & Player Leaf Trackers** | `Money.cpp`, `Energy.cpp` (power production/consumption, brownout callbacks, sabotage frame checks, `Energy::crc`), `ScoreKeeper.cpp`, `Handicap.cpp`, `MissionStats.cpp`, `AcademyStats.cpp`. | ~8,000 | `MARKER:ThePlayerList` CRCs bit-exact across all replays. |
-| **WP-3.2: Tech Tree, Upgrades & Special Powers** | `Science.cpp`, `RankInfo.cpp`, `Upgrade.cpp` (`UpgradeCenter`, `UpgradeTemplate`), `SpecialPower.cpp` (`SpecialPowerStore`), `ProductionPrerequisite.cpp`, `PlayerTemplate.cpp`, `MultiplayerSettings.cpp`. | ~11,500 | Full replay suite green. |
-| **WP-3.3: Combat & Locomotion Leaf Models** | `Armor.cpp` (`ArmorTemplate`, `ArmorSet`), `Damage.cpp`, `FiringTracker.cpp`, `TurretAI.cpp`, `Locomotor.cpp` & `LocomotorSet.cpp` (ground, wheeled, tracks, hover, wings, thrust, cliff, parachute physics math). | ~15,500 | Shadow-verify `Locomotor` trajectories & `TurretAI` angles + full replay suite green. |
+| Work Package | Tier / Class | Packets | Files & Subsystems | Approx. LOC | Verification Gate |
+|---|---|---:|---|---:|---|
+| **WP-3.1: Economy & Player Leaf Trackers** | Tier 1A (`C1`) | 6 | `Money.cpp`, `Energy.cpp` (power production/consumption, brownout callbacks, sabotage frame checks, `Energy::crc`), `ScoreKeeper.cpp`, `Handicap.cpp`, `MissionStats.cpp`, `AcademyStats.cpp`. | ~8,000 | `Gate V1–V4` (`MARKER:ThePlayerList` CRCs bit-exact). |
+| **WP-3.2: Tech Tree, Upgrades & Special Powers** | Tier 1A (`C1`) | 7 | `Science.cpp`, `RankInfo.cpp`, `Upgrade.cpp` (`UpgradeCenter`, `UpgradeTemplate`), `SpecialPower.cpp` (`SpecialPowerStore`), `ProductionPrerequisite.cpp`, `PlayerTemplate.cpp`, `MultiplayerSettings.cpp`. | ~11,500 | `Gate V1–V4`. |
+| **WP-3.3: Combat & Locomotion Leaf Models** | Tier 1A (`Armor`, `FiringTracker`) + Tier 2 (`Locomotor`, `TurretAI`) | 8 | `Armor.cpp` (`ArmorTemplate`, `ArmorSet`), `Damage.cpp`, `FiringTracker.cpp`, `TurretAI.cpp`, `Locomotor.cpp` & `LocomotorSet.cpp` (ground, wheeled, tracks, hover, wings, thrust, cliff, parachute physics math). | ~15,500 | `Gate V2` + `Gate V3` (shadow-verify `Locomotor` trajectories & `TurretAI` angles) + `Gate V4`. |
 
 ---
 
 ### Phase 4: Spatial & World Subsystems (~30k LOC)
 **Goal:** Port map geometry, triggers, and the spatial partition grid (`MARKER:ThePartitionManager` in `GameLogic::getCRC`).
 
-| Work Package | Files & Subsystems | Approx. LOC | Verification Gate |
-|---|---|---:|---|
-| **WP-4.1: TerrainLogic, Triggers & Map Metadata** | `TerrainLogic.cpp` (heightmap interpolation, normal calculation, cliff/water/bridge queries), `PolygonTrigger.cpp`, `SidesList.cpp`, `CrateSystem.cpp`, `CaveSystem.cpp`. | ~11,000 | Shadow-verify `getGroundHeight` & trigger area checks + full replay suite green. |
-| **WP-4.2: PartitionManager, Shroud/Sight & GhostObject** | `PartitionManager.cpp` (~55 KB header + ~140 KB source: `PartitionCell`, `PartitionData`, `SightingInfo`, `m_pendingUndoShroudReveals`, threat/value maps, range/geometric object iterators, `PartitionManager::crc`), `SimpleObjectIterator.cpp`, `GhostObject.cpp`. | ~19,000 | `MARKER:ThePartitionManager` CRCs bit-exact across all replays. |
+| Work Package | Tier / Class | Packets | Files & Subsystems | Approx. LOC | Verification Gate |
+|---|---|---:|---|---:|---|
+| **WP-4.1: TerrainLogic, Triggers & Map Metadata** | Tier 3 (`TerrainLogic`) + Tier 1B (`Triggers`, `SidesList`, `Crate`, `Cave`) | 6 | `TerrainLogic.cpp` (heightmap interpolation, normal calculation, cliff/water/bridge queries), `PolygonTrigger.cpp`, `SidesList.cpp`, `CrateSystem.cpp`, `CaveSystem.cpp`. | ~11,000 | `Gate V2` + `Gate V3` (shadow-verify `getGroundHeight` & trigger area checks) + `Gate V4`. |
+| **WP-4.2: PartitionManager, Shroud/Sight & GhostObject** | Tier 3 (`C4`) | 6 | `PartitionManager.cpp` (~55 KB header + ~140 KB source: `PartitionCell`, `PartitionData`, `SightingInfo`, `m_pendingUndoShroudReveals`, threat/value maps, range/geometric object iterators, `PartitionManager::crc`), `SimpleObjectIterator.cpp`, `GhostObject.cpp`. | ~19,000 | `Gate V2–V4` (`MARKER:ThePartitionManager` CRCs bit-exact across all replays). |
 
 ---
 
 ### Phase 5: `Object`, `Weapon`, and the 222 `BehaviorModule` Classes (~135k LOC)
-**Goal:** Deploy the Universal `RustBehaviorModuleAdapter` proxy (Pattern 3 FFI) and strangle all 222 object modules plus `Weapon` and `Object` into `crates/zh_logic` (`MARKER:Objects` in `GameLogic::getCRC`).
+**Goal:** Deploy the Universal `RustBehaviorModuleAdapter` proxy (Pattern 3 FFI) and fan out across Tier 1A/1B/2 worker agents to strangle all 222 object modules plus `Weapon` and `Object` into `crates/zh_logic` (`MARKER:Objects` in `GameLogic::getCRC`).
 
-| Work Package | Files & Subsystems | Approx. LOC | Verification Gate |
-|---|---|---:|---|
-| **WP-5.0: `ModuleArena` & Universal `RustBehaviorModuleAdapter`** | Build `ModuleArena`, `FacetMask`, and the single C++ `RustBehaviorModuleAdapter` class in `z_gameengine` + `ModuleFactory` hook. | ~2,500 | Adapter verified with 1 test module; full replay suite green. |
-| **WP-5.1: Helpers, Destroy, Damage, Create & Body (28 files)** | `Object/Helper/*` (8 sleep helpers: `ObjectSMCHelper`, `StatusDamageHelper`, `SubdualDamageHelper`, `ObjectRepulsorHelper`, `ObjectDefectionHelper`, `ObjectWeaponStatusHelper`, `TempWeaponBonusHelper`, `ObjectSpecialPowerHelper`), `Object/Destroy/*` (1), `Object/Damage/*` (3), `Object/Create/*` (8), `Object/Body/*` (8: `BodyModule`, `ActiveBody`, `StructureBody`, `HighlanderBody`, `HiveStructureBody`, `ImmortalBody`, `InactiveBody`, `UndeadBody`). | ~13,500 | All 28 modules running in `ModuleArena`; `Object::crc` health/damageScalar bit-exact. |
-| **WP-5.2: Die, SpecialPower, Upgrade & Collide (64 files)** | `Object/Die/*` (12), `Object/SpecialPower/*` (11), `Object/Upgrade/*` (21), `Object/Collide/*` (20, including `CrateCollide`). | ~26,000 | All 64 modules running in `ModuleArena`; full replay suite green. |
-| **WP-5.3: Contain & Behavior Modules (43 files)** | `Object/Contain/*` (13: `OpenContain`, `TransportContain`, `GarrisonContain`, `OverlordContain`, `HelixContain`, `TunnelContain`, `CaveContain`, `HealContain`, `InternetHackContain`, `MobNexusContain`, `ParachuteContain`, `RailedTransportContain`), `Object/Behavior/*` (30: `AutoHealBehavior`, `BridgeBehavior`, `BridgeTowerBehavior`, `BridgeScaffoldBehavior`, `CountermeasuresBehavior`, `DumbProjectileBehavior`, `FirestormDynamicGeometryInfoUpdate`, `GrantStealthBehavior`, `InstantDeathBehavior`, `JetSlowDeathBehavior`, `MinefieldBehavior`, `NeutronBlastBehavior`, `OverchargeBehavior`, `ParkingPlaceBehavior`, `PoisonedBehavior`, `POWTruckBehavior`, `PrisonBehavior`, `PropagandaTowerBehavior`, `RebuildHoleBehavior`, `SlowDeathBehavior`, `SpawnBehavior`, `SupplyWarehouseCripplingBehavior`, `TechBuildingBehavior`). | ~42,000 | All 43 modules running in `ModuleArena`; full replay suite green. |
-| **WP-5.4a: Update Modules Batch A — Timers, Stealth & Detectors (18 files)** | `UpdateModule`, `AutoFindHealingUpdate`, `AudioLoopUpgrade`, `BoneFXUpdate`, `CheckpointUpdate`, `CleanupHazardUpdate`, `CommandButtonHuntUpdate`, `DeletionUpdate`, `DemoTrapUpdate`, `DynamicGeometryInfoUpdate`, `EnemyNearUpdate`, `FireOCLAfterWeaponCooldownUpdate`, `FireSpreadUpdate`, `FlammableUpdate`, `FloatUpdate`, `HeightDieUpdate`, `LifetimeUpdate`, `StealthDetectorUpdate`, `StealthUpdate`. | ~11,000 | Full replay suite green. |
-| **WP-5.4b: Update Modules Batch B — Physics, Projectiles & Beams (17 files)** | `PhysicsUpdate` (`PhysicsBehavior`), `MissileAIUpdate`, `LaserUpdate`, `FireWeaponUpdate`, `FireWeaponWhenDamagedBehavior`, `FireWeaponWhenDeadBehavior`, `NeutronMissileUpdate`, `NeutronMissileSlowDeathBehavior`, `PartTheCloudUpdate`, `PointDefenseLaserUpdate`, `ProjectileStreamUpdate`, `RadiusDecalUpdate`, `SmartBombTargetHomingUpdate`, `SpectreGunshipUpdate`, `SpectreGunshipDeploymentUpdate`, `StickyBombUpdate`, `StrafeAreaUpdate`, `WaveGuideUpdate`. | ~13,500 | Full replay suite green. |
-| **WP-5.4c: Update Modules Batch C — Production, Economy, Dock & Workers (17 files)** | `ProductionUpdate`, `ProductionExitUpdate` (`DefaultProductionExitUpdate`, `QueueProductionExitUpdate`, `SpawnPointProductionExitUpdate`, `SupplyCenterProductionExitUpdate`), `DockUpdate`, `SupplyCenterDockUpdate`, `SupplyWarehouseDockUpdate`, `RepairDockUpdate`, `RailedTransportDockUpdate`, `PrisonDockUpdate`, `AutoDepositUpdate`, `SupplyTruckAIUpdate`, `WorkerAIUpdate`, `DozerAIUpdate`, `EMPUpdate`, `PowerPlantUpdate`, `RadarUpdate`. | ~15,000 | Full replay suite green. |
-| **WP-5.4d: Update Modules Batch D — Aircraft, Vehicles & Transports (17 files)** | `JetAIUpdate`, `ChinookAIUpdate`, `TransportAIUpdate`, `AssaultTransportAIUpdate`, `RailedTransportAIUpdate`, `HackInternetAIUpdate`, `POWTruckAIUpdate`, `WanderAIUpdate`, `DeliverPayloadAIUpdate`, `DeliverPayloadStateMachine`, `DeployStyleAIUpdate`, `AssistedTargetingUpdate`, `BattlePlanUpdate`, `HordeUpdate`, `LargeGroupAudioUpdate`, `MobMemberSlavedUpdate`, `SlavedUpdate`. | ~17,500 | Full replay suite green. |
-| **WP-5.4e: Update Modules Batch E — Core `AIUpdate`, Superweapons & Topple (17 files)** | `AIUpdate.cpp` (base unit AI state machine driver), `OCLUpdate`, `SpecialPowerUpdateModule`, `SpecialAbilityUpdate`, `ParticleUplinkCannonUpdate`, `BaikonurLaunchPower`, `SpyVisionUpdate`, `ToppleUpdate`, `StructureToppleUpdate`, `StructureCollapseUpdate`, `HijackerUpdate`, `PilotFindVehicleUpdate`, `DynamicShroudClearingRangeUpdate`, `BaseRegenerateUpdate`, `ProneUpdate`, `TensileFormationUpdate`. | ~18,000 | All 86 `Update` modules running in `ModuleArena`; full replay suite green. |
-| **WP-5.5: `Weapon`, `WeaponSet`, `ObjectCreationList` & `Object` Core** | `Weapon.cpp` (`Weapon`, `WeaponTemplate`, `Weapon::crc`), `WeaponSet.cpp`, `ObjectCreationList.cpp`, `Object.cpp` (`ObjectRecord` in `ObjectArena`, `Object::crc`). Delete `RustBehaviorModuleAdapter` proxy once `Object` owns `ModuleSlot`s directly in Rust. | ~26,000 | `MARKER:Objects` CRCs 100% computed by Rust across all replays. |
+| Work Package | Tier / Class | Packets | Files & Subsystems | Approx. LOC | Verification Gate |
+|---|---|---:|---|---:|---|
+| **WP-5.0: `ModuleArena` & Universal `RustBehaviorModuleAdapter`** | Tier 3 (`C4`) | 1 | Build `ModuleArena`, `FacetMask`, and the single C++ `RustBehaviorModuleAdapter` class in `z_gameengine` + `ModuleFactory` hook. | ~2,500 | Adapter verified with 1 test module; `Gate V4` green. |
+| **WP-5.1: Helpers, Destroy, Damage, Create & Body (28 files)** | Tier 1A (`C1`) + Tier 1B (`ActiveBody`, `StructureBody`) | 28 | `Object/Helper/*` (8 sleep helpers), `Object/Destroy/*` (1), `Object/Damage/*` (3), `Object/Create/*` (8), `Object/Body/*` (8: `BodyModule`, `ActiveBody`, `StructureBody`, `HighlanderBody`, `HiveStructureBody`, `ImmortalBody`, `InactiveBody`, `UndeadBody`). | ~13,500 | `Gate V1–V4` (`Object::crc` health/damageScalar bit-exact). |
+| **WP-5.2: Die, SpecialPower, Upgrade & Collide (64 files)** | Tier 1A (`C1`) | 64 | `Object/Die/*` (12), `Object/SpecialPower/*` (11), `Object/Upgrade/*` (21), `Object/Collide/*` (20, including `CrateCollide`). | ~26,000 | `Gate V1–V4` (all 64 modules verified via `Gate V2` differential harness + CI replays). |
+| **WP-5.3: Contain & Behavior Modules (43 files)** | Tier 1B (22 `Behavior` files) + Tier 2 (13 `Contain` + 8 complex `Behavior` files) | 43 | `Object/Contain/*` (13: `OpenContain`, `TransportContain`, `GarrisonContain`, `OverlordContain`, `HelixContain`, `TunnelContain`, `CaveContain`, `HealContain`, `InternetHackContain`, `MobNexusContain`, `ParachuteContain`, `RailedTransportContain`), `Object/Behavior/*` (30). | ~42,000 | `Gate V1–V4`. |
+| **WP-5.4a: Update Modules Batch A — Timers, Stealth & Detectors (18 files)** | Tier 1B (`C2`) | 18 | `UpdateModule`, `AutoFindHealingUpdate`, `AudioLoopUpgrade`, `BoneFXUpdate`, `CheckpointUpdate`, `CleanupHazardUpdate`, `CommandButtonHuntUpdate`, `DeletionUpdate`, `DemoTrapUpdate`, `DynamicGeometryInfoUpdate`, `EnemyNearUpdate`, `FireOCLAfterWeaponCooldownUpdate`, `FireSpreadUpdate`, `FlammableUpdate`, `FloatUpdate`, `HeightDieUpdate`, `LifetimeUpdate`, `StealthDetectorUpdate`, `StealthUpdate`. | ~11,000 | `Gate V1–V4`. |
+| **WP-5.4b: Update Modules Batch B — Physics, Projectiles & Beams (17 files)** | Tier 1B (11 files) + Tier 2 (`PhysicsUpdate`, `MissileAIUpdate`, `LaserUpdate`, `SpectreGunship*`, `WaveGuide`) | 17 | `PhysicsUpdate` (`PhysicsBehavior`), `MissileAIUpdate`, `LaserUpdate`, `FireWeaponUpdate`, `FireWeaponWhenDamagedBehavior`, `FireWeaponWhenDeadBehavior`, `NeutronMissileUpdate`, `NeutronMissileSlowDeathBehavior`, `PartTheCloudUpdate`, `PointDefenseLaserUpdate`, `ProjectileStreamUpdate`, `RadiusDecalUpdate`, `SmartBombTargetHomingUpdate`, `SpectreGunshipUpdate`, `SpectreGunshipDeploymentUpdate`, `StickyBombUpdate`, `StrafeAreaUpdate`, `WaveGuideUpdate`. | ~13,500 | `Gate V1–V4`. |
+| **WP-5.4c: Update Modules Batch C — Production, Economy, Dock & Workers (17 files)** | Tier 1B (12 files) + Tier 2 (`ProductionUpdate`, `SupplyTruckAI`, `WorkerAI`, `DozerAI`, `RailedTransportDock`) | 17 | `ProductionUpdate`, `ProductionExitUpdate` (4), `DockUpdate` (6), `AutoDepositUpdate`, `SupplyTruckAIUpdate`, `WorkerAIUpdate`, `DozerAIUpdate`, `EMPUpdate`, `PowerPlantUpdate`, `RadarUpdate`. | ~15,000 | `Gate V1–V4`. |
+| **WP-5.4d: Update Modules Batch D — Aircraft, Vehicles & Transports (17 files)** | Tier 1B (7 files) + Tier 2 (10 aircraft/transport AIUpdates) | 17 | `JetAIUpdate`, `ChinookAIUpdate`, `TransportAIUpdate`, `AssaultTransportAIUpdate`, `RailedTransportAIUpdate`, `HackInternetAIUpdate`, `POWTruckAIUpdate`, `WanderAIUpdate`, `DeliverPayloadAIUpdate`, `DeliverPayloadStateMachine`, `DeployStyleAIUpdate`, `AssistedTargetingUpdate`, `BattlePlanUpdate`, `HordeUpdate`, `LargeGroupAudioUpdate`, `MobMemberSlavedUpdate`, `SlavedUpdate`. | ~17,500 | `Gate V1–V4`. |
+| **WP-5.4e: Update Modules Batch E — Core `AIUpdate`, Superweapons & Topple (17 files)** | Tier 3 (`AIUpdate.cpp`) + Tier 1B (16 files) | 17 | `AIUpdate.cpp` (base unit AI state machine driver), `OCLUpdate`, `SpecialPowerUpdateModule`, `SpecialAbilityUpdate`, `ParticleUplinkCannonUpdate`, `BaikonurLaunchPower`, `SpyVisionUpdate`, `ToppleUpdate`, `StructureToppleUpdate`, `StructureCollapseUpdate`, `HijackerUpdate`, `PilotFindVehicleUpdate`, `DynamicShroudClearingRangeUpdate`, `BaseRegenerateUpdate`, `ProneUpdate`, `TensileFormationUpdate`. | ~18,000 | `Gate V1–V4`. |
+| **WP-5.5: `Weapon`, `WeaponSet`, `ObjectCreationList` & `Object` Core** | Tier 2 (`Weapon`, `WeaponSet`, `OCL`) + Tier 3 (`Object.cpp`) | 8 | `Weapon.cpp` (`Weapon`, `WeaponTemplate`, `Weapon::crc`), `WeaponSet.cpp`, `ObjectCreationList.cpp`, `Object.cpp` (`ObjectRecord` in `ObjectArena`, `Object::crc`). Delete `RustBehaviorModuleAdapter` proxy once `Object` owns `ModuleSlot`s directly in Rust. | ~26,000 | `Gate V1–V4` (`MARKER:Objects` CRCs 100% computed by Rust). |
 
 ---
 
 ### Phase 6: `Player`, `Team`, `Pathfinder`, `AI`, and `ScriptEngine` (~70k LOC)
 **Goal:** Port player management, A* pathfinding, tactical/skirmish AI, and map scripting (`MARKER:ThePlayerList` and `MARKER:TheAI` in `GameLogic::getCRC`).
 
-| Work Package | Files & Subsystems | Approx. LOC | Verification Gate |
-|---|---|---:|---|
-| **WP-6.1: `Player`, `PlayerList`, `Team`, `Squad` & `BuildAssistant`** | `Player.cpp` (~90 KB), `PlayerList.cpp` (`PlayerList::crc`), `Team.cpp` (~55 KB), `Squad.cpp`, `BuildAssistant.cpp`, `ResourceGatheringManager.cpp`, `ActionManager.cpp`. | ~18,500 | `MARKER:ThePlayerList` CRCs 100% computed by Rust across all replays. |
-| **WP-6.2: `Pathfinder` (`Core` + `GeneralsMD`)** | `Core/GameEngine/Source/GameLogic/AI/Pathfind*.cpp` (10 files) + `GeneralsMD/.../AIPathfind.cpp` (pathfind grid cells, zones, hierarchical A*, unit footprint collision, tunnel/bridge pathing, `Pathfinder::crc`). | ~16,500 | Shadow-verify path output & `CRC after AI pathfinder` bit-exact across all replays. |
-| **WP-6.3: `AI`, `AIGroup`, `AIPlayer`, `AISkirmishPlayer` & `AIStateMachine`** | `AI.cpp` (`AI::crc`), `AIGroup.cpp` (`AIGroup::crc`), `AIPlayer.cpp`, `AISkirmishPlayer.cpp`, `AIStateMachine.cpp`, `AIStates.cpp`, `AITNGuard.cpp`. | ~18,000 | `MARKER:TheAI` CRCs 100% computed by Rust across all replays. |
-| **WP-6.4: `ScriptEngine`, `ScriptConditions`, `ScriptActions` & `VictoryConditions`** | `Scripts.cpp`, `ScriptEngine.cpp`, `ScriptConditions.cpp` (~170 KB), `ScriptActions.cpp` (~270 KB), `SequentialScript.cpp`, `VictoryConditions.cpp`. | ~22,000 | Map scripts execute 100% in Rust; full replay suite green. |
+| Work Package | Tier / Class | Packets | Files & Subsystems | Approx. LOC | Verification Gate |
+|---|---|---:|---|---:|---|
+| **WP-6.1: `Player`, `PlayerList`, `Team`, `Squad` & `BuildAssistant`** | Tier 3 (`Player`, `Team`) + Tier 1B (`PlayerList`, `Squad`, `BuildAssistant`, `ResourceGathering`, `ActionManager`) | 9 | `Player.cpp` (~90 KB), `PlayerList.cpp` (`PlayerList::crc`), `Team.cpp` (~55 KB), `Squad.cpp`, `BuildAssistant.cpp`, `ResourceGatheringManager.cpp`, `ActionManager.cpp`. | ~18,500 | `Gate V1–V4` (`MARKER:ThePlayerList` CRCs 100% computed by Rust). |
+| **WP-6.2: `Pathfinder` (`Core` + `GeneralsMD`)** | Tier 3 (`C4`) | 11 | `Core/GameEngine/Source/GameLogic/AI/Pathfind*.cpp` (10 files) + `GeneralsMD/.../AIPathfind.cpp` (`Pathfinder::crc`). | ~16,500 | `Gate V2–V4` (`CRC after AI pathfinder` bit-exact across all replays). |
+| **WP-6.3: `AI`, `AIGroup`, `AIPlayer`, `AISkirmishPlayer` & `AIStateMachine`** | Tier 3 (`C4`) | 8 | `AI.cpp` (`AI::crc`), `AIGroup.cpp` (`AIGroup::crc`), `AIPlayer.cpp`, `AISkirmishPlayer.cpp`, `AIStateMachine.cpp`, `AIStates.cpp`, `AITNGuard.cpp`. | ~18,000 | `Gate V2–V4` (`MARKER:TheAI` CRCs 100% computed by Rust). |
+| **WP-6.4: `ScriptEngine`, `ScriptConditions`, `ScriptActions` & `VictoryConditions`** | Tier 3 (`ScriptEngine`, `Scripts`) + Tier 2 (10 `ScriptConditions` packets + 15 `ScriptActions` packets) + Tier 1B (`SequentialScript`, `VictoryConditions`) | 29 | `Scripts.cpp`, `ScriptEngine.cpp`, `ScriptConditions.cpp` (~170 KB split into 10 packets), `ScriptActions.cpp` (~270 KB split into 15 packets), `SequentialScript.cpp`, `VictoryConditions.cpp`. | ~22,000 | `Gate V1–V4` (map scripts execute 100% in Rust). |
 
 ---
 
 ### Phase 7: Top-Level `GameLogic` Loop & Standalone Stage 1 Milestone (~20k LOC)
 **Goal:** Port `GameLogic.cpp` (`SleepyUpdateHeap`, `processCommandList`, `getCRC`), `Recorder.cpp` (`.rep` parser & CRC verifier), `ArchiveFileSystem` (`.big` reader), and `MapReader` so the simulation runs as a standalone 100% pure-Rust executable (`zh-sim`) with zero C++ linked.
 
-| Work Package | Files & Subsystems | Approx. LOC | Verification Gate |
-|---|---|---:|---|
-| **WP-7.1: `GameLogic` Frame Scheduler & Command Dispatcher** | `GameLogic.cpp`: `SleepyUpdateHeap` (`m_sleepyUpdates`), all 55 `on*` `GameMessage` command handlers in `logicMessageDispatcher`, `startNewGame`, `processDestroyList`, `GameLogic::update()`, `GameLogic::getCRC()`. | ~9,500 | Entire 16-step `GameLogic::update()` runs in Rust inside `GeneralsXZH`. |
-| **WP-7.2: Pure-Rust `.big`, `.map`, `.csf` & `.rep` Readers** | `ArchiveFileSystem` / `BIGFileSystem` (`.big` archive directory reader), `.map` chunk reader (`DataChunk.cpp`, `MapObject.cpp`), `Recorder.cpp` (`GENREP` header, UTF-16/UTF-32 string probe, command stream, `handleCRCMessage`). | ~7,500 | Standalone Rust readers parse retail `.big`, `.map`, and `.rep` files identically to C++. |
-| **WP-7.3: Standalone `zh-sim` Binary & Stage 1 Benchmark** | Wire `crates/zh_sim` (`zh-sim -headless -replay <glob> -jobs N`). Run the entire replay corpus in 100% pure Rust with zero C++ linked. Compare every frame's CRC and benchmark simulation throughput (frames/sec) vs the Phase 0 C++ baseline. | ~3,000 | **Stage 1 Milestone Complete:** 100% bit-exact replay parity in standalone pure Rust. |
+| Work Package | Tier / Class | Packets | Files & Subsystems | Approx. LOC | Verification Gate |
+|---|---|---:|---|---:|---|
+| **WP-7.1: `GameLogic` Frame Scheduler & Command Dispatcher** | Tier 3 (`SleepyUpdateHeap`, `update`, `getCRC`, `destroy`) + Tier 2 (55 `on*` command handlers in 4 packets) | 8 | `GameLogic.cpp`: `SleepyUpdateHeap` (`m_sleepyUpdates`), 55 `on*` `GameMessage` command handlers in `logicMessageDispatcher`, `startNewGame`, `processDestroyList`, `GameLogic::update()`, `GameLogic::getCRC()`. | ~9,500 | Entire 16-step `GameLogic::update()` runs in Rust inside `GeneralsXZH`. |
+| **WP-7.2: Pure-Rust `.big`, `.map`, `.csf` & `.rep` Readers** | Tier 2 (`C3`) | 5 | `ArchiveFileSystem` / `BIGFileSystem` (`.big` archive directory reader), `.map` chunk reader (`DataChunk.cpp`, `MapObject.cpp`), `Recorder.cpp` (`GENREP` header, UTF-16/UTF-32 string probe, command stream, `handleCRCMessage`). | ~7,500 | Standalone Rust readers parse retail `.big`, `.map`, and `.rep` files identically to C++. |
+| **WP-7.3: Standalone `zh-sim` Binary & Stage 1 Benchmark** | Tier 3 (`C4`) | 2 | Wire `crates/zh_sim` (`zh-sim -headless -replay <glob> -jobs N`). Run the entire replay corpus in 100% pure Rust with zero C++ linked. Compare every frame's CRC and benchmark simulation throughput (frames/sec) vs the Phase 0 C++ baseline. | ~3,000 | **Stage 1 Milestone Complete:** 100% bit-exact replay parity in standalone pure Rust. |
 
 ---
 
@@ -430,15 +461,15 @@ Once Stage 1 is complete and signed off:
 
 ---
 
-## 7. Sign-Off Checkpoints Before Phase 0 / Phase 1 Execution
+## 7. Deliverables & Next Steps
 
-This repository (`chayuto/generals-rust`, local path `/Users/chayut/repos/generals-rust`) contains the complete architectural blueprint and first deliverable:
-- `PLAN.md` (this architectural & work-package execution plan)
-- `docs/RESEARCH.md` (deep technical reference: 48-singleton `GameEngine::init()` sequence, 16-step `GameLogic::update()` pipeline, `m_sleepyUpdates` heap invariants, `Object` + 222 `BehaviorModule` facet architecture, `XferCRC` / `GameLogic::getCRC()` specification, determinism regimes, and disk budget analysis)
-- `LICENSE.md` (GPL-3.0-or-later + EA Section 7 Additional Terms + Notice of Modification)
-- `.gitignore` (blocks all retail `.big`, `.map`, `.w3d`, `.dds`, `.bik`, audio/video, binary, and C++/Rust build artifacts)
-- `.githooks/pre-commit` and `.githooks/commit-msg` (installed via `git config core.hooksPath .githooks`)
+This repository (`chayuto/generals-rust`, local path `/Users/chayut/repos/generals-rust`) now holds the complete architectural and operational blueprint:
+- [PLAN.md](PLAN.md) — Architectural design (`SimContext`, `ObjectArena`, `ModuleArena` + `FacetMask`, `SleepyUpdateHeap`), 3 FFI strangler patterns (`RustBehaviorModuleAdapter`), 4-tier agent routing, 4-gate V&V funnel, public CI offload strategy, and 337 micro-packets across Phases 0–7.
+- [docs/RESEARCH.md](docs/RESEARCH.md) — Deep technical reference: 48-singleton `GameEngine::init()` sequence, 16-step `GameLogic::update()` pipeline, `m_sleepyUpdates` heap invariants, `Object` + 222 `BehaviorModule` facet architecture, `XferCRC` / `GameLogic::getCRC()` specification, determinism regimes, and disk budget analysis.
+- [docs/AGENT_WORKFLOW_AND_CI.md](docs/AGENT_WORKFLOW_AND_CI.md) — Token optimization math (~88% reduction via Tier 0 Clang AST context slicer), 4-Tier Agent Routing matrix (`C1`–`C4`), 4-Gate Compartmentalized V&V Funnel (`V1` Linter, `V2` In-Process C++-vs-Rust Differential Micro-Harness, `V3` Lockstep Shadow-Verify, `V4` Full Replay Matrix), and Free Public GitHub Actions CI Offload Architecture.
+- [LICENSE.md](LICENSE.md), [.gitignore](.gitignore), [.githooks/pre-commit](.githooks/pre-commit), [.githooks/commit-msg](.githooks/commit-msg).
 
-**Ready for your OK on:**
-1. **Retail Game Data (`~/Games/generalszh`) for Phase 0:** How would you like to populate `~/Games/generalszh` (interactive `steamcmd` download of Steam App `2732960`, or pointing `-assetPath` to an existing copy)?
-2. **Proceed to Phase 0 & Phase 1:** Do you approve this architectural plan to begin Phase 0 (building the C++ reference baseline and replay harness) and Phase 1 (the `RandomValue` + `CRC` + `ExperienceTracker` translation spike)?
+**Decisions Recorded & Final Sign-Off Check:**
+- **Game Data (`WP-0.1`):** Confirmed — `steamcmd` download of Steam App `2732960` into `~/Games/generalszh`.
+- **Public Repo for Free GitHub Actions CI:** Should we keep `chayuto/generals-rust` private during Phase 0 local baseline setup and flip it public as soon as we wire `.github/workflows/` in `WP-0.4`, or flip it public right away?
+- **Proceed to Phase 0:** Give the word when you are ready to start Phase 0 (`steamcmd` login + `GeneralsXZH` baseline build).
