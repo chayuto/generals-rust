@@ -3,42 +3,81 @@ name: Cross-Platform Architecture & V&V Guardrails CI
 permissions:
   contents: read
 
+# Cancel any superseded in-flight run on the same branch/PR immediately
+# so rapid agent pushes never queue up or waste runner slots.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: ["main", "packet/**", "wp/**"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 jobs:
-  verify-guardrails:
-    name: "Gate V1 Linter, Manifest & Tier 0 Slicer V&V (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-15, windows-latest]
+  # ---------------------------------------------------------------------------
+  # TIER 1: Fast Linux Gate (~10s on ubuntu-latest, 20-job free concurrency)
+  # Runs on EVERY push (including packet/** and wp/** worker branches) & PR.
+  # Uses pre-installed runner Python 3 (zero setup-python download overhead).
+  # ---------------------------------------------------------------------------
+  fast-linux-gate:
+    name: "Fast Gate V1 Linter, Manifest & Hook V&V (ubuntu-latest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Checkout repository (LF preserved via .gitattributes)
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Run Manifest, Tier 0 Slicer & Gate V1 Linter V&V Test Suites (Cross-Platform Python)
-        run: |
-          python scripts/validate_manifest.py
-          python scripts/test_prep_packet.py
-          python scripts/test_lint_determinism.py
-          python scripts/lint_determinism.py
-
-      - name: Run Full POSIX Repository Bootstrap & Git Hook V&V (Linux & macOS)
-        if: runner.os != 'Windows'
+      - name: Run Full Repository Bootstrap, Manifest, Slicer, Gate V1 Linter & Hook V&V
         run: ./scripts/bootstrap_repo.sh
 
-      - name: Verify Phase 1 Translation Packets Integrity (All OSes)
+      - name: Verify Phase 1 Translation Packets Integrity
+        run: |
+          for pkt in packets/phase1/PKT-001_crc.md packets/phase1/PKT-002_RandomValue.md packets/phase1/PKT-003_ExperienceTracker.md; do
+            if [[ ! -s "$pkt" ]]; then
+              echo "ERROR: Missing or empty Phase 1 packet: $pkt" >&2
+              exit 1
+            fi
+            echo "Verified Phase 1 packet on ubuntu-latest: $pkt ($(wc -c < "$pkt") bytes)"
+          done
+
+  # ---------------------------------------------------------------------------
+  # TIER 2: Native Windows & macOS Parity Gate (~25s, free public runners)
+  # Runs ONLY after fast-linux-gate passes, and ONLY on pushes/PRs to `main`
+  # or manual workflow_dispatch (skipping intermediate packet/** WIP pushes
+  # to preserve the 5-job macOS concurrency pool and avoid Windows VM boot wait).
+  # ---------------------------------------------------------------------------
+  cross-os-parity:
+    name: "Native OS Parity V&V (${{ matrix.os }})"
+    needs: fast-linux-gate
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [macos-15, windows-latest]
+    steps:
+      - name: Checkout repository (LF preserved via .gitattributes)
+        uses: actions/checkout@v4
+
+      - name: Run Cross-Platform Python V&V Suites (Pre-Installed Runner Python)
+        shell: bash
+        run: |
+          PY_BIN=$(command -v python3 || command -v python)
+          echo "Using pre-installed Python: $PY_BIN ($($PY_BIN --version))"
+          "$PY_BIN" scripts/validate_manifest.py
+          "$PY_BIN" scripts/test_prep_packet.py
+          "$PY_BIN" scripts/test_lint_determinism.py
+          "$PY_BIN" scripts/lint_determinism.py
+
+      - name: Run POSIX Repository Bootstrap & Git Hook V&V (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/bootstrap_repo.sh
+
+      - name: Verify Phase 1 Translation Packets & LF Line Endings (${{ matrix.os }})
         shell: bash
         run: |
           for pkt in packets/phase1/PKT-001_crc.md packets/phase1/PKT-002_RandomValue.md packets/phase1/PKT-003_ExperienceTracker.md; do

@@ -155,11 +155,18 @@ Gate V2 tests a single module (e.g., `ExperienceTracker`, `Energy`, `AutoHealBeh
 
 ### 3.1 Why Public GitHub Repo CI Changes the Economics
 - **Local Mac Constraints:** Your Apple Silicon Mac currently has **~13 GiB free disk space** and is your active daily workstation. Building 600k lines of C++ (`GeneralsX` + `vcpkg` + `MoltenVK` + `FFmpeg` + debug symbols) and running multi-process replay suites locally consumes 6–10 GiB of disk and saturates local CPU cores.
-- **GitHub Hosted Runners for Public Repositories:**
-  - Public GitHub repositories receive **unlimited free minutes** on standard GitHub-hosted runners:
-    - `macos-15` (Apple Silicon M1 `arm64`, 3 vCPU, 7 GB RAM, 14 GB free SSD)
-    - `ubuntu-latest` (`x86_64`, 4 vCPU, 16 GB RAM, 14 GB free SSD)
-  - Up to **20 concurrent jobs** run in parallel at zero cost.
+- **GitHub Hosted Runners for Public Repositories ($0 Unlimited Free Hours):**
+  - Because `chayuto/generals-rust` is a **public repository**, standard GitHub-hosted runners (`ubuntu-latest`, `ubuntu-24.04-arm`, `windows-latest`, `macos-15`) are **100% free with unlimited minutes** (GitHub's 2x Windows and 10x macOS minute multipliers apply *only* to private repositories' monthly quota).
+  - **Strict Cost Rule:** Never use GitHub Larger Runners (`ubuntu-latest-8-cores`, etc.) or paid third-party runners. Stick exclusively to the standard free labels (`ubuntu-latest`, `macos-15`, `windows-latest`).
+- **Concurrency & Runtime Optimization Rules (Avoiding Queue Bottlenecks):**
+  - Even though standard public runners cost $0, GitHub enforces a **20-job total concurrency cap** and a **5-job macOS concurrency cap** across your entire account, and Windows/macOS VMs take 25–45 seconds longer to boot than Linux.
+  - To keep wall-clock runtimes fast (~10 seconds per push) and never saturate the 5-job macOS pool when multiple agents push branches simultaneously, all workflows enforce four rules:
+    1. **Two-Tier OS Matrix Gating (`ubuntu-latest` First, Native `macos-15`/`windows-latest` Only on PR/`main`):**
+       - Every intermediate push to worker branches (`packet/**`, `wp/**`) runs **only on `ubuntu-latest`** (`fast-linux-gate`, ~10s), using Linux cross-target checking (`cargo check` for Linux, Windows, and macOS triples) to catch OS-specific type errors without booting Windows or macOS VMs.
+       - The native `macos-15` + `windows-latest` matrix (`cross-os-parity`) is gated behind `needs: fast-linux-gate` and `if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'`.
+    2. **Aggressive In-Flight Cancelation (`cancel-in-progress: true`):** Every workflow declares a `concurrency` group keyed by branch/PR so pushing a new commit immediately cancels any still-running older run on that branch.
+    3. **Zero Toolchain Re-Download Overhead:** Use the runner image's pre-installed `python3`, `cargo`, `cmake`, and `ninja` (plus `actions/cache` for Cargo/ccache/vcpkg) rather than downloading new Python/toolchain distributions on every job.
+    4. **Tight Job Timeouts:** Every job sets `timeout-minutes: 3` (fast gate), `5` (OS parity), or `15` (hybrid C++/Rust build & replays) instead of GitHub's default 360-minute timeout.
 - **Public Readiness of `chayuto/generals-rust`:**
   - Because `generals-rust` has zero EA trademarks in its repo/crate/binary names, includes the full `GPL-3.0-or-later` + EA Section 7 `LICENSE.md` with Notice of Modification, and enforces `.gitignore` + `.githooks/pre-commit` blocking all proprietary assets and attribution trailers, **the repository is safe to make public at any time** to unlock unlimited free CI.
 

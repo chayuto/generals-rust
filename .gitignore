@@ -136,3 +136,8 @@ _deps/
 .env.*
 *.pem
 *.key
+
+# Python bytecode & test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
