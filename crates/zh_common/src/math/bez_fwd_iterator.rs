@@ -7,7 +7,7 @@
 
 use crate::math::bezier_segment::BezierSegment;
 use crate::math::Coord3D;
-use crate::types::{Bool, Int};
+use crate::types::{Bool, Int, Real};
 
 #[derive(Debug, Clone, Default)]
 pub struct BezFwdIterator {
@@ -26,15 +26,82 @@ impl BezFwdIterator {
     }
 
     pub fn with_segment(steps_desired: Int, bez_seg: &BezierSegment) -> Self {
-        todo!("PKT-015: Implement BezFwdIterator::with_segment from packets/phase2/PKT-015_BezFwdIterator.md")
+        Self {
+            steps_desired,
+            bez_seg: *bez_seg,
+            ..Self::default()
+        }
     }
 
     pub fn start(&mut self) {
-        todo!("PKT-015: Implement BezFwdIterator::start from packets/phase2/PKT-015_BezFwdIterator.md")
+        self.step = 0;
+        if self.steps_desired <= 1 {
+            return;
+        }
+        let d = 1.0 / (self.steps_desired - 1) as Real;
+        let d2 = d * d;
+        let d3 = d * d2;
+        let axes = [
+            [
+                self.bez_seg.control_points[0].x,
+                self.bez_seg.control_points[1].x,
+                self.bez_seg.control_points[2].x,
+                self.bez_seg.control_points[3].x,
+            ],
+            [
+                self.bez_seg.control_points[0].y,
+                self.bez_seg.control_points[1].y,
+                self.bez_seg.control_points[2].y,
+                self.bez_seg.control_points[3].y,
+            ],
+            [
+                self.bez_seg.control_points[0].z,
+                self.bez_seg.control_points[1].z,
+                self.bez_seg.control_points[2].z,
+                self.bez_seg.control_points[3].z,
+            ],
+        ];
+        let mut coeffs = [[0.0; 4]; 3];
+        for axis in 0..3 {
+            coeffs[axis] = crate::math::bezier_segment::BezierMath::vec4_transform(
+                axes[axis],
+                &crate::math::bezier_segment::BEZ_BASIS_MATRIX,
+            );
+        }
+        self.curr_point = self.bez_seg.control_points[0];
+        for axis in 0..3 {
+            let a = coeffs[axis][0];
+            let b = coeffs[axis][1];
+            let c = coeffs[axis][2];
+            let d1 = a * d3 + b * d2 + c * d;
+            let dd = 6.0 * a * d3 + 2.0 * b * d2;
+            let ddd = 6.0 * a * d3;
+            match axis {
+                0 => {
+                    self.dq.x = d1;
+                    self.ddq.x = dd;
+                    self.dddq.x = ddd;
+                }
+                1 => {
+                    self.dq.y = d1;
+                    self.ddq.y = dd;
+                    self.dddq.y = ddd;
+                }
+                _ => {
+                    self.dq.z = d1;
+                    self.ddq.z = dd;
+                    self.dddq.z = ddd;
+                }
+            }
+        }
     }
 
     pub fn done(&self) -> Bool {
-        todo!("PKT-015: Implement BezFwdIterator::done from packets/phase2/PKT-015_BezFwdIterator.md")
+        if self.step >= self.steps_desired {
+            crate::types::TRUE
+        } else {
+            crate::types::FALSE
+        }
     }
 
     pub fn get_current(&self) -> &Coord3D {
@@ -42,6 +109,9 @@ impl BezFwdIterator {
     }
 
     pub fn next(&mut self) {
-        todo!("PKT-015: Implement BezFwdIterator::next from packets/phase2/PKT-015_BezFwdIterator.md")
+        self.curr_point.add(&self.dq);
+        self.dq.add(&self.ddq);
+        self.ddq.add(&self.dddq);
+        self.step += 1;
     }
 }

@@ -14,10 +14,13 @@ fn rotate_crc(crc: u32, word: u32) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-015 & PKT-016 (bez_fwd_iterator.rs & bezier_segment.rs)"]
 fn test_pkt015_016_bezier_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT016_JSON);
-    assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-016.json");
+    assert_eq!(
+        lines.len(),
+        1000,
+        "Expected 1,000 golden vectors in PKT-016.json"
+    );
 
     for line in lines {
         let seed = get_u32(line, "seed").expect("seed");
@@ -59,7 +62,12 @@ fn test_pkt015_016_bezier_1000_golden_vectors() {
             pts_crc = rotate_crc(pts_crc, p.y.to_bits());
             pts_crc = rotate_crc(pts_crc, p.z.to_bits());
         }
-        assert_eq!(pts_crc, get_u32(line, "pts_crc").unwrap(), "seed {} pts_crc", seed);
+        assert_eq!(
+            pts_crc,
+            get_u32(line, "pts_crc").unwrap(),
+            "seed {} pts_crc",
+            seed
+        );
 
         let approx_len = seg.get_approximate_length(1.0);
         assert_eq!(
