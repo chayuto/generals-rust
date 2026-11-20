@@ -86,100 +86,184 @@ impl ExperienceTrackerState {
         self.is_trainable = trainable;
     }
 
-    pub fn reset_trainable(&mut self, _parent: &dyn ExperienceParentAccess) {
-        // Pending PKT-003 translation in WP-1.2b
+    pub fn reset_trainable(&mut self, parent: &dyn ExperienceParentAccess) {
+        self.is_trainable = parent.is_template_trainable();
     }
 
     pub fn is_accepting_experience_points(&self) -> Bool {
-        // Pending PKT-003 translation in WP-1.2b
-        FALSE
+        if self.is_trainable() != FALSE || self.experience_sink != ObjectId::INVALID {
+            TRUE
+        } else {
+            FALSE
+        }
     }
 
-    #[inline]
-    pub fn set_experience_sink(&mut self, sink: ObjectId) {
-        self.experience_sink = sink;
-    }
-
-    #[inline]
-    pub const fn get_experience_sink(&self) -> ObjectId {
-        self.experience_sink
-    }
-
-    #[inline]
-    pub const fn get_experience_scalar(&self) -> Real {
-        self.experience_scalar
-    }
-
-    #[inline]
-    pub fn set_experience_scalar(&mut self, scalar: Real) {
-        self.experience_scalar = scalar;
-    }
-
-    pub fn get_experience_value(&self, _parent: &dyn ExperienceParentAccess) -> Int {
-        // Pending PKT-003 translation in WP-1.2b
-        0
+    pub fn get_experience_value(&self, parent: &dyn ExperienceParentAccess) -> Int {
+        if parent.get_relationship_with_killer() == Relationship::Allies {
+            0
+        } else {
+            parent.get_experience_value(self.current_level.as_i32())
+        }
     }
 
     pub fn set_min_veterancy_level(
         &mut self,
-        _parent: &mut dyn ExperienceParentAccess,
-        _new_level: VeterancyLevel,
-        _provide_feedback: Bool,
+        parent: &mut dyn ExperienceParentAccess,
+        new_level: VeterancyLevel,
+        provide_feedback: Bool,
     ) {
-        // Pending PKT-003 translation in WP-1.2b
+        if self.current_level < new_level {
+            let old_level = self.current_level;
+            self.current_level = new_level;
+            self.current_experience = parent.get_experience_required(self.current_level.as_i32());
+            parent.on_veterancy_level_changed(old_level, new_level, provide_feedback);
+        }
     }
 
     pub fn set_veterancy_level(
         &mut self,
-        _parent: &mut dyn ExperienceParentAccess,
-        _new_level: VeterancyLevel,
-        _provide_feedback: Bool,
+        parent: &mut dyn ExperienceParentAccess,
+        new_level: VeterancyLevel,
+        provide_feedback: Bool,
     ) {
-        // Pending PKT-003 translation in WP-1.2b
+        if self.current_level != new_level {
+            let old_level = self.current_level;
+            self.current_level = new_level;
+            self.current_experience = parent.get_experience_required(self.current_level.as_i32());
+            parent.on_veterancy_level_changed(old_level, new_level, provide_feedback);
+        }
     }
 
     pub fn gain_exp_for_level(
         &mut self,
-        _parent: &mut dyn ExperienceParentAccess,
-        _levels_to_gain: Int,
-        _can_scale_for_bonus: Bool,
+        parent: &mut dyn ExperienceParentAccess,
+        levels_to_gain: Int,
+        can_scale_for_bonus: Bool,
     ) -> Bool {
-        // Pending PKT-003 translation in WP-1.2b
-        FALSE
+        let mut new_level = self.current_level.as_i32().wrapping_add(levels_to_gain);
+        if new_level > VeterancyLevel::LAST {
+            new_level = VeterancyLevel::LAST;
+        }
+        if new_level > self.current_level.as_i32() {
+            let experience_needed = parent.get_experience_required(new_level).wrapping_sub(self.current_experience);
+            self.add_experience_points(parent, experience_needed, can_scale_for_bonus);
+            TRUE
+        } else {
+            FALSE
+        }
     }
 
-    pub fn can_gain_exp_for_level(&self, _levels_to_gain: Int) -> Bool {
-        // Pending PKT-003 translation in WP-1.2b
-        FALSE
+    pub fn can_gain_exp_for_level(&self, levels_to_gain: Int) -> Bool {
+        let mut new_level = self.current_level.as_i32().wrapping_add(levels_to_gain);
+        if new_level > VeterancyLevel::LAST {
+            new_level = VeterancyLevel::LAST;
+        }
+        if new_level > self.current_level.as_i32() {
+            TRUE
+        } else {
+            FALSE
+        }
     }
 
     pub fn add_experience_points(
         &mut self,
-        _parent: &mut dyn ExperienceParentAccess,
-        _experience_gain: Int,
-        _can_scale_for_bonus: Bool,
+        parent: &mut dyn ExperienceParentAccess,
+        experience_gain: Int,
+        can_scale_for_bonus: Bool,
     ) {
-        // Pending PKT-003 translation in WP-1.2b
+        if self.experience_sink != ObjectId::INVALID {
+            let scaled_for_sink = zh_common::math::cpp_mul_i32_f32(experience_gain, self.experience_scalar);
+            if parent.forward_experience_to_sink(self.experience_sink, scaled_for_sink, can_scale_for_bonus) {
+                return;
+            }
+        }
+
+        if self.is_trainable() == FALSE {
+            return;
+        }
+
+        let old_level = self.current_level;
+        let mut amount_to_gain = experience_gain;
+        if can_scale_for_bonus != FALSE {
+            amount_to_gain = zh_common::math::cpp_mul_i32_f32(amount_to_gain, self.experience_scalar);
+        }
+        self.current_experience = self.current_experience.wrapping_add(amount_to_gain);
+
+        let mut level_index: Int = 0;
+        while (level_index.wrapping_add(1)) < VeterancyLevel::COUNT && self.current_experience >= parent.get_experience_required(level_index.wrapping_add(1)) {
+            level_index = level_index.wrapping_add(1);
+        }
+        self.current_level = VeterancyLevel::from_i32(level_index);
+
+        if old_level != self.current_level {
+            parent.on_veterancy_level_changed(old_level, self.current_level, TRUE);
+        }
     }
 
     pub fn set_experience_and_level(
         &mut self,
-        _parent: &mut dyn ExperienceParentAccess,
-        _experience_in: Int,
-        _provide_feedback: Bool,
+        parent: &mut dyn ExperienceParentAccess,
+        experience_in: Int,
+        provide_feedback: Bool,
     ) {
-        // Pending PKT-003 translation in WP-1.2b
+        if self.experience_sink != ObjectId::INVALID {
+            if parent.forward_set_exp_and_level_to_sink(self.experience_sink, experience_in, provide_feedback) {
+                return;
+            }
+        }
+
+        if self.is_trainable() == FALSE {
+            return;
+        }
+
+        let old_level = self.current_level;
+        self.current_experience = experience_in;
+
+        let mut level_index: Int = 0;
+        while (level_index.wrapping_add(1)) < VeterancyLevel::COUNT && self.current_experience >= parent.get_experience_required(level_index.wrapping_add(1)) {
+            level_index = level_index.wrapping_add(1);
+        }
+        self.current_level = VeterancyLevel::from_i32(level_index);
+
+        if old_level != self.current_level {
+            parent.on_veterancy_level_changed(old_level, self.current_level, provide_feedback);
+        }
     }
 }
 
 impl Snapshot for ExperienceTrackerState {
-    fn crc(&self, _xfer: &mut dyn Xfer) {
-        // Pending PKT-003 translation in WP-1.2b
+    fn crc(&self, xfer: &mut dyn Xfer) {
+        let mut exp = self.current_experience;
+        let _ = xfer.xfer_int(&mut exp);
+        let mut level_i32 = self.current_level.as_i32();
+        let _ = xfer.xfer_enum_i32(&mut level_i32);
+        #[cfg(not(feature = "retail-crc"))]
+        {
+            let mut trainable = self.is_trainable;
+            let _ = xfer.xfer_bool(&mut trainable);
+        }
     }
 
-    fn xfer(&mut self, _xfer: &mut dyn Xfer) -> Result<(), XferError> {
-        // Pending PKT-003 translation in WP-1.2b
-        let _ = TRUE;
+    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        #[cfg(feature = "retail-xfer-save")]
+        let current_version: zh_common::types::XferVersion = 1;
+        #[cfg(not(feature = "retail-xfer-save"))]
+        let current_version: zh_common::types::XferVersion = 2;
+
+        let mut version = current_version;
+        xfer.xfer_version(&mut version, current_version)?;
+
+        let mut level_i32 = self.current_level.as_i32();
+        xfer.xfer_enum_i32(&mut level_i32)?;
+        self.current_level = VeterancyLevel::from_i32(level_i32);
+
+        xfer.xfer_int(&mut self.current_experience)?;
+        xfer.xfer_object_id(&mut self.experience_sink)?;
+        xfer.xfer_real(&mut self.experience_scalar)?;
+
+        if version >= 2 {
+            xfer.xfer_bool(&mut self.is_trainable)?;
+        }
         Ok(())
     }
 

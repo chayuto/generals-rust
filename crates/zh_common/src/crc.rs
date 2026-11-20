@@ -23,8 +23,16 @@ impl Crc {
     /// Computes the byte-wise rotate-left-add CRC for `buf[..len]`, folded into `self.crc`.
     /// If `len < 1` or `buf.is_empty()`, leaves `self.crc` unchanged.
     #[inline]
-    pub fn compute_crc(&mut self, _buf: &[u8], _len: Int) {
-        // Pending PKT-001 translation in WP-1.2a
+    pub fn compute_crc(&mut self, buf: &[u8], len: Int) {
+        if buf.is_empty() || len < 1 {
+            return;
+        }
+        let count = (len as usize).min(buf.len());
+        for i in 0..count {
+            let val = buf[i];
+            let hibit = if (self.crc & 0x8000_0000) != 0 { 1u32 } else { 0u32 };
+            self.crc = (self.crc << 1).wrapping_add(val as u32).wrapping_add(hibit);
+        }
     }
 
     #[inline]

@@ -35,7 +35,7 @@ jobs:
 
       - name: Verify Zero-Dependency Cargo Workspace & Gate V2 Golden Vectors (ubuntu-latest)
         run: |
-          cargo check --workspace --tests
+          cargo test --workspace
           for gvec in docs/golden_vectors/PKT-001.json docs/golden_vectors/PKT-002.json docs/golden_vectors/PKT-003.json; do
             test -s "$gvec"
           done
@@ -80,7 +80,7 @@ jobs:
           "$PY_BIN" scripts/test_apply_ffi_seam.py
           "$PY_BIN" scripts/test_lint_determinism.py
           "$PY_BIN" scripts/lint_determinism.py
-          cargo check --workspace --tests
+          cargo test --workspace
 
       - name: Run POSIX Repository Bootstrap & Git Hook V&V (macOS)
         if: runner.os == 'macOS'
