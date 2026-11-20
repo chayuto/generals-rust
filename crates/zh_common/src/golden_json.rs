@@ -66,6 +66,64 @@ pub fn get_u32(obj_line: &str, key: &str) -> Option<u32> {
     parse_i64_token(&rest[..end]).map(|v| v as u32)
 }
 
+/// Parses a signed 64-bit integer from JSON.
+pub fn get_i64(obj_line: &str, key: &str) -> Option<i64> {
+    let rest = find_key_value_slice(obj_line, key)?;
+    let end = rest.find([',', '}', ']']).unwrap_or(rest.len());
+    parse_i64_token(&rest[..end])
+}
+
+/// Parses a variable-length `[i32, ...]` array (including empty `[]`).
+pub fn get_i32_vec(obj_line: &str, key: &str) -> Option<Vec<i32>> {
+    let rest = find_key_value_slice(obj_line, key)?;
+    if !rest.starts_with('[') {
+        return None;
+    }
+    let end = rest.find(']')?;
+    let inner = rest[1..end].trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    for part in inner.split(',') {
+        out.push(parse_i64_token(part)? as i32);
+    }
+    Some(out)
+}
+
+/// Parses a variable-length `[u16, ...]` array (including empty `[]`).
+pub fn get_u16_vec(obj_line: &str, key: &str) -> Option<Vec<u16>> {
+    let rest = find_key_value_slice(obj_line, key)?;
+    if !rest.starts_with('[') {
+        return None;
+    }
+    let end = rest.find(']')?;
+    let inner = rest[1..end].trim();
+    if inner.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    for part in inner.split(',') {
+        out.push(parse_i64_token(part)? as u16);
+    }
+    Some(out)
+}
+
+/// Parses an unsigned 64-bit integer (e.g. `f64` bit patterns up to `u64::MAX`).
+pub fn get_u64(obj_line: &str, key: &str) -> Option<u64> {
+    let rest = find_key_value_slice(obj_line, key)?.trim_start();
+    let end = rest.find([',', '}', ']']).unwrap_or(rest.len());
+    let token = rest[..end].trim();
+    if token.is_empty() || !token.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut acc: u64 = 0;
+    for b in token.bytes() {
+        acc = acc.checked_mul(10)?.checked_add((b - b'0') as u64)?;
+    }
+    Some(acc)
+}
+
 pub fn get_i32_array<const N: usize>(obj_line: &str, key: &str) -> Option<[i32; N]> {
     let rest = find_key_value_slice(obj_line, key)?;
     if !rest.starts_with('[') {
