@@ -13,7 +13,6 @@ fn rotate_crc(crc: u32, word: u32) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-017 (crates/zh_common/src/math/discrete_circle.rs)"]
 fn test_pkt017_discrete_circle_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT017_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-017.json");
