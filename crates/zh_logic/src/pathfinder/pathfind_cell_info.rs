@@ -93,27 +93,87 @@ impl PathfindCellInfoPool {
 
     /// Allocates the `CELL_INFOS_TO_ALLOCATE` (`30,000`) free-list slab.
     pub fn allocate_cell_infos(&mut self) {
-        todo!("PKT-414: allocate 30,000 PathfindCellInfo free-list entries")
+        if !self.infos.is_empty() {
+            return;
+        }
+        let capacity = CELL_INFOS_TO_ALLOCATE as usize;
+        self.infos = vec![PathfindCellInfo::default(); capacity];
+        for i in 0..capacity {
+            self.infos[i].is_free = true;
+            self.infos[i].next_free = if i + 1 < capacity {
+                Some(InfoIdx(i + 1))
+            } else {
+                None
+            };
+        }
+        self.first_free = Some(InfoIdx(0));
+        self.free_count = CELL_INFOS_TO_ALLOCATE;
     }
 
     /// Releases the slab pool (`releaseCellInfos`).
     pub fn release_cell_infos(&mut self) {
-        todo!("PKT-414: verify free list integrity and clear slab")
+        self.infos.clear();
+        self.first_free = None;
+        self.free_count = 0;
     }
 
     /// Clears open/closed list links across all allocated infos (`forceCleanPathFindCellInfos`).
     pub fn force_clean_pathfind_cell_infos(&mut self) {
-        todo!("PKT-414: clear next_open, prev_open, open, closed for 0..CELL_INFOS_TO_ALLOCATE-1")
+        let limit = (CELL_INFOS_TO_ALLOCATE - 1) as usize;
+        for info in self.infos.iter_mut().take(limit) {
+            info.next_open = None;
+            info.prev_open = None;
+            info.open = false;
+            info.closed = false;
+        }
     }
 
     /// Acquires and zero-initializes one `PathfindCellInfo` (`getACellInfo`).
     pub fn get_a_cell_info(&mut self, cell: CellIdx, pos: ICoord2D) -> Option<InfoIdx> {
-        todo!("PKT-414: pop head from free list and initialize fields")
+        let idx = self.first_free?;
+        let info = self.infos.get_mut(idx.0)?;
+        if !info.is_free {
+            return None;
+        }
+        self.first_free = info.next_free;
+        self.free_count = self.free_count.saturating_sub(1);
+        *info = PathfindCellInfo {
+            next_free: None,
+            is_free: false,
+            cell: Some(cell),
+            pos,
+            ..PathfindCellInfo::default()
+        };
+        Some(idx)
     }
 
     /// Returns an entry to the free list head (`releaseACellInfo`).
     pub fn release_a_cell_info(&mut self, info: InfoIdx) {
-        todo!("PKT-414: mark free and push back onto first_free")
+        if let Some(slot) = self.infos.get_mut(info.0) {
+            if slot.is_free {
+                return;
+            }
+            slot.is_free = true;
+            slot.next_open = None;
+            slot.prev_open = None;
+            slot.path_parent = None;
+            slot.next_free = self.first_free;
+            slot.cell = None;
+            slot.total_cost = 0;
+            slot.cost_so_far = 0;
+            slot.pos = ICoord2D { x: 0, y: 0 };
+            slot.goal_unit_id = ObjectId::INVALID;
+            slot.pos_unit_id = ObjectId::INVALID;
+            slot.goal_aircraft_id = ObjectId::INVALID;
+            slot.obstacle_id = ObjectId::INVALID;
+            slot.blocked_by_ally = false;
+            slot.obstacle_is_fence = false;
+            slot.obstacle_is_transparent = false;
+            slot.open = false;
+            slot.closed = false;
+            self.first_free = Some(info);
+            self.free_count = self.free_count.wrapping_add(1);
+        }
     }
 
     #[inline]

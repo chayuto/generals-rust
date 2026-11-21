@@ -53,6 +53,19 @@ impl PathfindCellList {
         pool: &PathfindCellInfoPool,
         current_cell: CellIdx,
     ) -> bool {
-        todo!("PKT-415: compare getTotalCostDifference from head vs tail strictly with '>'")
+        let Some(head) = self.head else { return false };
+        let Some(tail) = self.tail else { return false };
+        let Some(head_info) = cells[head.0].info_idx.and_then(|idx| pool.get(idx)) else {
+            return false;
+        };
+        let Some(tail_info) = cells[tail.0].info_idx.and_then(|idx| pool.get(idx)) else {
+            return false;
+        };
+        let Some(cur_info) = cells[current_cell.0].info_idx.and_then(|idx| pool.get(idx)) else {
+            return false;
+        };
+        let head_diff = (head_info.total_cost as i32 - cur_info.total_cost as i32).unsigned_abs();
+        let tail_diff = (tail_info.total_cost as i32 - cur_info.total_cost as i32).unsigned_abs();
+        head_diff > tail_diff
     }
 }

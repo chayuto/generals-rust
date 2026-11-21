@@ -11,7 +11,10 @@
 
 use crate::pathfinder::pathfind_cell_info::{CellIdx, InfoIdx, PathfindCellInfoPool};
 use crate::pathfinder::pathfind_cell_list::PathfindCellList;
-use crate::pathfinder::pathfind_constants::{PathfindLayerEnum, PathfindMode};
+use crate::pathfinder::pathfind_constants::{
+    PathfindLayerEnum, PathfindMode, COST_DIAGONAL, COST_ORTHOGONAL,
+    PATHFIND_CELLS_PER_FRAME,
+};
 use zh_common::math::ICoord2D;
 use zh_common::types::{Int, ObjectId, UnsignedInt, UnsignedShort};
 
@@ -241,25 +244,46 @@ impl PathfindCell {
     }
 
     pub fn total_cost_difference(&self, other: &PathfindCell, pool: &PathfindCellInfoPool) -> UnsignedInt {
-        todo!("PKT-413: abs(totalCost_self - totalCost_other) or u32::MAX if info missing")
+        match (self.info_idx, other.info_idx) {
+            (Some(a), Some(b)) => {
+                let a_cost = pool.get(a).map_or(0, |info| info.total_cost) as i32;
+                let b_cost = pool.get(b).map_or(0, |info| info.total_cost) as i32;
+                (a_cost - b_cost).unsigned_abs()
+            }
+            _ => UnsignedInt::MAX,
+        }
     }
 
     pub fn types_match(target: &PathfindCell, source: &PathfindCell) -> bool {
-        todo!("PKT-413: target.cell_type == source.cell_type")
+        target.cell_type == source.cell_type
     }
 
     /// Note C++ bitwise quirk: checks `(type & CELL_WATER)` against `CELL_CLEAR`,
     /// which also matches `CELL_RUBBLE` (`3`) and `CELL_BRIDGE_IMPASSABLE` (`5`).
     pub fn water_ground(target: &PathfindCell, source: &PathfindCell) -> bool {
-        todo!("PKT-413: bitwise (type & CELL_WATER) check matching PathfindCell::waterGround")
+        ((target.cell_type == CellType::Clear)
+            && ((source.cell_type as i32 & CellType::Water as i32) != 0))
+            || ((source.cell_type == CellType::Clear)
+                && ((target.cell_type as i32 & CellType::Water as i32) != 0))
     }
 
     pub fn ground_rubble(target: &PathfindCell, source: &PathfindCell) -> bool {
-        todo!("PKT-413: Clear <-> Rubble check")
+        (target.cell_type == CellType::Clear && source.cell_type == CellType::Rubble)
+            || (source.cell_type == CellType::Clear && target.cell_type == CellType::Rubble)
     }
 
     pub fn terrain(target: &PathfindCell, source: &PathfindCell) -> bool {
-        todo!("PKT-413: treats Obstacle as Clear before comparing types")
+        let target_type = if target.cell_type == CellType::Obstacle {
+            CellType::Clear
+        } else {
+            target.cell_type
+        };
+        let source_type = if source.cell_type == CellType::Obstacle {
+            CellType::Clear
+        } else {
+            source.cell_type
+        };
+        target_type == source_type
     }
 
     pub fn crusher_ground(
@@ -268,11 +292,17 @@ impl PathfindCell {
         pool: &PathfindCellInfoPool,
         mode: PathfindMode,
     ) -> bool {
-        todo!("PKT-413: fence obstacle <-> Clear check using is_obstacle_fence")
+        let target_is_fence = target.cell_type == CellType::Obstacle
+            && target.is_obstacle_fence(pool, mode);
+        let source_is_fence = source.cell_type == CellType::Obstacle
+            && source.is_obstacle_fence(pool, mode);
+        (target.cell_type == CellType::Clear && source_is_fence)
+            || (source.cell_type == CellType::Clear && target_is_fence)
     }
 
     pub fn ground_cliff(target: &PathfindCell, source: &PathfindCell) -> bool {
-        todo!("PKT-413: Clear <-> Cliff check")
+        (target.cell_type == CellType::Clear && source.cell_type == CellType::Cliff)
+            || (source.cell_type == CellType::Clear && target.cell_type == CellType::Cliff)
     }
 }
 
@@ -352,11 +382,26 @@ impl PathfindCellGrid {
     }
 
     pub fn reset_cell(&mut self, idx: CellIdx) {
-        todo!("PKT-413: PathfindCell::reset")
+        let old_info = self.cells[idx.0].info_idx.take();
+        if let Some(info) = old_info {
+            self.pool.release_a_cell_info(info);
+        }
+        self.cells[idx.0] = PathfindCell::new();
     }
 
     pub fn set_type(&mut self, idx: CellIdx, cell_type: CellType) {
-        todo!("PKT-413: PathfindCell::setType")
+        let blocked = if self.mode.use_fixed_pathfinding {
+            self.cells[idx.0].obstacle_id != ObjectId::INVALID
+        } else {
+            self.cells[idx.0].info_idx
+                .and_then(|ii| self.pool.get(ii))
+                .is_some_and(|info| info.obstacle_id != ObjectId::INVALID)
+        };
+        if !blocked {
+            self.cells[idx.0].cell_type = cell_type;
+        } else {
+            self.cells[idx.0].cell_type = CellType::Obstacle;
+        }
     }
 
     pub fn set_type_as_obstacle(
@@ -365,43 +410,245 @@ impl PathfindCellGrid {
         obstacle: &ObstacleDescriptor,
         pos: ICoord2D,
     ) -> bool {
-        todo!("PKT-413: PathfindCell::setTypeAsObstacle")
+        if self.cells[idx.0].cell_type != CellType::Clear
+            && self.cells[idx.0].cell_type != CellType::Impassable
+        {
+            return false;
+        }
+        if obstacle.is_rubble {
+            self.cells[idx.0].cell_type = CellType::Rubble;
+            self.cells[idx.0].obstacle_id = ObjectId::INVALID;
+            self.cells[idx.0].obstacle_is_fence = false;
+            self.cells[idx.0].obstacle_is_transparent = false;
+            if !self.mode.use_fixed_pathfinding {
+                if let Some(info) = self.cells[idx.0].info_idx {
+                    if let Some(slot) = self.pool.get_mut(info) {
+                        slot.obstacle_id = ObjectId::INVALID;
+                    }
+                    self.release_info(idx);
+                }
+            }
+            return true;
+        }
+
+        self.cells[idx.0].cell_type = CellType::Obstacle;
+        self.cells[idx.0].obstacle_id = obstacle.id;
+        self.cells[idx.0].obstacle_is_fence = obstacle.is_fence;
+        self.cells[idx.0].obstacle_is_transparent = obstacle.is_transparent;
+        if !self.mode.use_fixed_pathfinding {
+            if self.cells[idx.0].info_idx.is_none() {
+                if !self.allocate_info(idx, pos) {
+                    return false;
+                }
+            }
+            if let Some(info) = self.cells[idx.0].info_idx {
+                if let Some(slot) = self.pool.get_mut(info) {
+                    slot.obstacle_id = obstacle.id;
+                    slot.obstacle_is_fence = obstacle.is_fence;
+                    slot.obstacle_is_transparent = obstacle.is_transparent;
+                }
+            }
+        }
+        true
     }
 
     pub fn remove_obstacle(&mut self, idx: CellIdx, obstacle_id: ObjectId) -> bool {
-        todo!("PKT-413: PathfindCell::removeObstacle")
+        if self.cells[idx.0].cell_type == CellType::Rubble {
+            self.cells[idx.0].cell_type = CellType::Clear;
+        }
+        let matches = if self.mode.use_fixed_pathfinding {
+            self.cells[idx.0].obstacle_id == obstacle_id
+        } else {
+            self.cells[idx.0].info_idx
+                .and_then(|ii| self.pool.get(ii))
+                .is_some_and(|info| info.obstacle_id == obstacle_id)
+        };
+        if !matches {
+            return false;
+        }
+        self.cells[idx.0].cell_type = CellType::Clear;
+        if !self.mode.use_fixed_pathfinding {
+            if let Some(info) = self.cells[idx.0].info_idx {
+                if let Some(slot) = self.pool.get_mut(info) {
+                    slot.obstacle_id = ObjectId::INVALID;
+                }
+            }
+            self.release_info(idx);
+        }
+        self.cells[idx.0].cell_type = CellType::Clear;
+        self.cells[idx.0].obstacle_id = ObjectId::INVALID;
+        self.cells[idx.0].obstacle_is_fence = false;
+        self.cells[idx.0].obstacle_is_transparent = false;
+        true
     }
 
     pub fn allocate_info(&mut self, idx: CellIdx, pos: ICoord2D) -> bool {
-        todo!("PKT-413: PathfindCell::allocateInfo")
+        if self.cells[idx.0].info_idx.is_some() {
+            return true;
+        }
+        match self.pool.get_a_cell_info(idx, pos) {
+            Some(info) => {
+                self.cells[idx.0].info_idx = Some(info);
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn release_info(&mut self, idx: CellIdx) {
-        todo!("PKT-413: PathfindCell::releaseInfo")
+        if let Some(info_idx) = self.cells[idx.0].info_idx {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.path_parent = None;
+            }
+        }
+        let cell = &self.cells[idx.0];
+        if cell.cell_type == CellType::Obstacle
+            || cell.flags != CellFlags::NoUnits
+            || cell.aircraft_goal
+        {
+            return;
+        }
+        let Some(info_idx) = cell.info_idx else { return };
+        let should_release = self.pool.get(info_idx).is_some_and(|info| {
+            info.prev_open.is_none()
+                && info.next_open.is_none()
+                && !info.open
+                && !info.closed
+                && info.goal_unit_id == ObjectId::INVALID
+                && info.pos_unit_id == ObjectId::INVALID
+                && info.goal_aircraft_id == ObjectId::INVALID
+        });
+        if should_release {
+            self.pool.release_a_cell_info(info_idx);
+            self.cells[idx.0].info_idx = None;
+        }
     }
 
     pub fn start_pathfind(&mut self, idx: CellIdx, goal: Option<CellIdx>) -> bool {
-        todo!("PKT-413: PathfindCell::startPathfind")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return false };
+        let total_cost = goal.map_or(0, |goal_idx| self.cost_to_goal(idx, goal_idx) as UnsignedShort);
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.next_open = None;
+            info.prev_open = None;
+            info.path_parent = None;
+            info.cost_so_far = 0;
+            info.total_cost = total_cost;
+            info.closed = false;
+            info.open = !self.mode.use_fixed_pathfinding;
+        }
+        true
     }
 
     pub fn set_goal_unit(&mut self, idx: CellIdx, unit_id: ObjectId, pos: ICoord2D) {
-        todo!("PKT-413: PathfindCell::setGoalUnit")
+        if unit_id == ObjectId::INVALID {
+            if let Some(info_idx) = self.cells[idx.0].info_idx {
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.goal_unit_id = ObjectId::INVALID;
+                    if info.pos_unit_id == ObjectId::INVALID {
+                        self.cells[idx.0].flags = CellFlags::NoUnits;
+                        self.release_info(idx);
+                    } else {
+                        self.cells[idx.0].flags = CellFlags::UnitPresentMoving;
+                    }
+                }
+            } else if self.cells[idx.0].flags != CellFlags::NoUnits {
+                self.cells[idx.0].flags = CellFlags::NoUnits;
+            }
+            return;
+        }
+        if self.cells[idx.0].info_idx.is_none() {
+            self.allocate_info(idx, pos);
+        }
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        let pos_unit_id = self.pool.get(info_idx).map_or(ObjectId::INVALID, |i| i.pos_unit_id);
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.goal_unit_id = unit_id;
+        }
+        self.cells[idx.0].flags = if unit_id == pos_unit_id {
+            CellFlags::UnitPresentFixed
+        } else if pos_unit_id == ObjectId::INVALID {
+            CellFlags::UnitGoal
+        } else {
+            CellFlags::UnitGoalOtherMoving
+        };
     }
 
     pub fn set_pos_unit(&mut self, idx: CellIdx, unit_id: ObjectId, pos: ICoord2D) {
-        todo!("PKT-413: PathfindCell::setPosUnit")
+        if unit_id == ObjectId::INVALID {
+            if let Some(info_idx) = self.cells[idx.0].info_idx {
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.pos_unit_id = ObjectId::INVALID;
+                    if info.goal_unit_id == ObjectId::INVALID {
+                        self.cells[idx.0].flags = CellFlags::NoUnits;
+                        self.release_info(idx);
+                    } else {
+                        self.cells[idx.0].flags = CellFlags::UnitGoal;
+                    }
+                }
+            }
+            return;
+        }
+        if self.cells[idx.0].info_idx.is_none() {
+            self.allocate_info(idx, pos);
+        }
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        let (goal_unit_id, pos_unit_id) = self.pool.get(info_idx)
+            .map_or((ObjectId::INVALID, ObjectId::INVALID), |i| (i.goal_unit_id, i.pos_unit_id));
+        if goal_unit_id != ObjectId::INVALID && goal_unit_id == pos_unit_id {
+            return;
+        }
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.pos_unit_id = unit_id;
+        }
+        self.cells[idx.0].flags = if unit_id == goal_unit_id {
+            CellFlags::UnitPresentFixed
+        } else if goal_unit_id == ObjectId::INVALID {
+            CellFlags::UnitPresentMoving
+        } else {
+            CellFlags::UnitGoalOtherMoving
+        };
     }
 
     pub fn set_goal_aircraft(&mut self, idx: CellIdx, unit_id: ObjectId, pos: ICoord2D) {
-        todo!("PKT-413: PathfindCell::setGoalAircraft")
+        if unit_id == ObjectId::INVALID {
+            if let Some(info_idx) = self.cells[idx.0].info_idx {
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.goal_aircraft_id = ObjectId::INVALID;
+                }
+                self.cells[idx.0].aircraft_goal = false;
+                self.release_info(idx);
+            }
+            return;
+        }
+        if self.cells[idx.0].info_idx.is_none() {
+            self.allocate_info(idx, pos);
+        }
+        if let Some(info_idx) = self.cells[idx.0].info_idx {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.goal_aircraft_id = unit_id;
+            }
+            self.cells[idx.0].aircraft_goal = true;
+        }
     }
 
     pub fn set_blocked_by_ally(&mut self, idx: CellIdx, blocked: bool) {
-        todo!("PKT-413: PathfindCell::setBlockedByAlly")
+        if self.mode.use_fixed_pathfinding {
+            self.cells[idx.0].blocked_by_ally = blocked;
+        } else if let Some(info_idx) = self.cells[idx.0].info_idx {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.blocked_by_ally = blocked;
+            }
+        }
     }
 
     pub fn is_blocked_by_ally(&self, idx: CellIdx) -> Option<bool> {
-        todo!("PKT-413: Some(bool) when fixed or has_info, else None")
+        if self.mode.use_fixed_pathfinding {
+            Some(self.cells[idx.0].blocked_by_ally)
+        } else {
+            self.cells[idx.0].info_idx
+                .and_then(|ii| self.pool.get(ii))
+                .map(|info| info.blocked_by_ally)
+        }
     }
 
     pub fn set_pinched(&mut self, idx: CellIdx, pinched: bool) {
@@ -421,67 +668,445 @@ impl PathfindCellGrid {
     }
 
     pub fn set_cost_so_far(&mut self, idx: CellIdx, cost: UnsignedInt) {
-        todo!("PKT-413: PathfindCell::setCostSoFar (truncates to u16)")
+        if let Some(info_idx) = self.cells[idx.0].info_idx {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.cost_so_far = cost as UnsignedShort;
+            }
+        }
     }
 
     pub fn set_total_cost(&mut self, idx: CellIdx, cost: UnsignedInt) {
-        todo!("PKT-413: PathfindCell::setTotalCost (truncates to u16)")
+        if let Some(info_idx) = self.cells[idx.0].info_idx {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.total_cost = cost as UnsignedShort;
+            }
+        }
     }
 
     pub fn set_parent_cell(&mut self, idx: CellIdx, parent: CellIdx) {
-        todo!("PKT-413: PathfindCell::setParentCell")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        let Some(parent_info) = self.cells[parent.0].info_idx else { return };
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.path_parent = Some(parent_info);
+        }
     }
 
     pub fn set_parent_cell_hierarchical(&mut self, idx: CellIdx, parent: CellIdx) {
-        todo!("PKT-413: PathfindCell::setParentCellHierarchical")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        let Some(parent_info) = self.cells[parent.0].info_idx else { return };
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.path_parent = Some(parent_info);
+        }
     }
 
     pub fn clear_parent_cell(&mut self, idx: CellIdx) {
-        todo!("PKT-413: PathfindCell::clearParentCell")
+        if let Some(info_idx) = self.cells[idx.0].info_idx {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.path_parent = None;
+            }
+        }
     }
 
     pub fn is_obstruction_invalid(&self, idx: CellIdx) -> bool {
-        todo!("PKT-413: PathfindCell::isObstructionInvalid")
+        let cell = &self.cells[idx.0];
+        cell.obstacle_id != ObjectId::INVALID
+            && cell.info_idx.is_none()
+            && (cell.cell_type == CellType::Obstacle || cell.cell_type == CellType::Impassable)
     }
 
     pub fn clear_obstruction(&mut self, idx: CellIdx) {
-        todo!("PKT-413: PathfindCell::clearObstruction")
+        self.cells[idx.0].cell_type = CellType::Clear;
+        self.cells[idx.0].obstacle_id = ObjectId::INVALID;
+        self.cells[idx.0].obstacle_is_fence = false;
+        self.cells[idx.0].obstacle_is_transparent = false;
     }
 
     pub fn put_on_sorted_open_list(&mut self, idx: CellIdx, list: &mut PathfindCellList) {
-        todo!("PKT-413: PathfindCell::putOnSortedOpenList")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.open = true;
+            info.closed = false;
+        }
+        if !self.mode.use_fixed_pathfinding {
+            list.tail = None;
+            let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+            if list.head.is_none() {
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.prev_open = None;
+                    info.next_open = None;
+                }
+                list.head = Some(idx);
+                return;
+            }
+            let mut current = list.head;
+            let mut previous = None;
+            let mut cell_count = 0usize;
+            let current_cost = self.pool.get(info_idx).map_or(0, |i| i.total_cost);
+            while let Some(current_idx) = current {
+                if cell_count >= PATHFIND_CELLS_PER_FRAME as usize {
+                    break;
+                }
+                let current_info_idx = self.cells[current_idx.0].info_idx;
+                let cost = current_info_idx.and_then(|ii| self.pool.get(ii)).map_or(0, |i| i.total_cost);
+                if cost > current_cost {
+                    break;
+                }
+                cell_count += 1;
+                previous = Some(current_idx);
+                current = current_info_idx
+                    .and_then(|ii| self.pool.get(ii))
+                    .and_then(|i| i.next_open)
+                    .and_then(|ni| self.pool.get(ni))
+                    .and_then(|n| n.cell);
+            }
+            if let Some(current_idx) = current {
+                let current_prev = self.cells[current_idx.0].info_idx
+                    .and_then(|ii| self.pool.get(ii))
+                    .and_then(|i| i.prev_open);
+                if let Some(prev_info) = current_prev {
+                    if let Some(slot) = self.pool.get_mut(prev_info) {
+                        slot.next_open = Some(info_idx);
+                    }
+                } else {
+                    list.head = Some(idx);
+                }
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.prev_open = current_prev;
+                    info.next_open = self.cells[current_idx.0].info_idx;
+                }
+                if let Some(slot) = self.pool.get_mut(self.cells[current_idx.0].info_idx.unwrap()) {
+                    slot.prev_open = Some(info_idx);
+                }
+            } else if let Some(previous_idx) = previous {
+                if let Some(previous_info) = self.cells[previous_idx.0].info_idx {
+                    if let Some(slot) = self.pool.get_mut(previous_info) {
+                        slot.next_open = Some(info_idx);
+                    }
+                }
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.prev_open = self.cells[previous_idx.0].info_idx;
+                    info.next_open = None;
+                }
+            }
+            return;
+        }
+
+        if list.can_reverse_sort(&self.cells, &self.pool, idx) {
+            self.reverse_sort_open(list, idx);
+        } else {
+            self.forward_sort_open(list, idx);
+        }
     }
 
     pub fn remove_from_open_list(&mut self, idx: CellIdx, list: &mut PathfindCellList) {
-        todo!("PKT-413: PathfindCell::removeFromOpenList")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        let (next, prev) = self.pool.get(info_idx).map_or((None, None), |i| (i.next_open, i.prev_open));
+        if let Some(next_info) = next {
+            if let Some(info) = self.pool.get_mut(next_info) {
+                info.prev_open = prev;
+            }
+        } else {
+            list.tail = prev.and_then(|pi| self.pool.get(pi)).and_then(|i| i.cell);
+        }
+        if let Some(prev_info) = prev {
+            if let Some(info) = self.pool.get_mut(prev_info) {
+                info.next_open = next;
+            }
+        } else {
+            list.head = next.and_then(|ni| self.pool.get(ni)).and_then(|i| i.cell);
+        }
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.open = false;
+            info.next_open = None;
+            info.prev_open = None;
+        }
+    }
+
+    fn forward_sort_open(&mut self, list: &mut PathfindCellList, idx: CellIdx) {
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        if list.head.is_none() {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.prev_open = None;
+                info.next_open = None;
+            }
+            list.head = Some(idx);
+            list.tail = Some(idx);
+            return;
+        }
+        let total = self.pool.get(info_idx).map_or(0, |i| i.total_cost);
+        let head = list.head.unwrap();
+        let head_total = self.cells[head.0].info_idx
+            .and_then(|ii| self.pool.get(ii))
+            .map_or(0, |i| i.total_cost);
+        if total < head_total {
+            if let Some(head_info) = self.cells[head.0].info_idx {
+                if let Some(slot) = self.pool.get_mut(head_info) {
+                    slot.prev_open = Some(info_idx);
+                }
+            }
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.prev_open = None;
+                info.next_open = self.cells[head.0].info_idx;
+            }
+            list.head = Some(idx);
+            return;
+        }
+        let mut current = head;
+        loop {
+            let current_info = match self.cells[current.0].info_idx {
+                Some(ii) => ii,
+                None => break,
+            };
+            let next = self.pool.get(current_info).and_then(|i| i.next_open);
+            let next_total = next
+                .and_then(|ni| self.pool.get(ni))
+                .map_or(0xffff, |i| i.total_cost);
+            if next.is_none() || next_total > total {
+                break;
+            }
+            current = next.and_then(|ni| self.pool.get(ni)).and_then(|i| i.cell).unwrap_or(current);
+        }
+        let current_info = self.cells[current.0].info_idx.unwrap();
+        let next = self.pool.get(current_info).and_then(|i| i.next_open);
+        if let Some(next_info) = next {
+            if let Some(slot) = self.pool.get_mut(next_info) {
+                slot.prev_open = Some(info_idx);
+            }
+        } else {
+            list.tail = Some(idx);
+        }
+        if let Some(slot) = self.pool.get_mut(current_info) {
+            slot.next_open = Some(info_idx);
+        }
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.prev_open = Some(current_info);
+            info.next_open = next;
+        }
+    }
+
+    fn reverse_sort_open(&mut self, list: &mut PathfindCellList, idx: CellIdx) {
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        if list.tail.is_none() {
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.prev_open = None;
+                info.next_open = None;
+            }
+            list.tail = Some(idx);
+            list.head = Some(idx);
+            return;
+        }
+        let tail = list.tail.unwrap();
+        let total = self.pool.get(info_idx).map_or(0, |i| i.total_cost);
+        let tail_total = self.cells[tail.0].info_idx
+            .and_then(|ii| self.pool.get(ii))
+            .map_or(0, |i| i.total_cost);
+        if total >= tail_total {
+            let tail_info = self.cells[tail.0].info_idx.unwrap();
+            if let Some(slot) = self.pool.get_mut(tail_info) {
+                slot.next_open = Some(info_idx);
+            }
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.prev_open = Some(tail_info);
+                info.next_open = None;
+            }
+            list.tail = Some(idx);
+            return;
+        }
+        let mut current = tail;
+        loop {
+            let current_info = match self.cells[current.0].info_idx {
+                Some(ii) => ii,
+                None => break,
+            };
+            let prev = self.pool.get(current_info).and_then(|i| i.prev_open);
+            let prev_total = prev
+                .and_then(|pi| self.pool.get(pi))
+                .map_or(0, |i| i.total_cost);
+            if prev.is_none() || prev_total <= total {
+                break;
+            }
+            current = prev.and_then(|pi| self.pool.get(pi)).and_then(|i| i.cell).unwrap_or(current);
+        }
+        let current_info = self.cells[current.0].info_idx.unwrap();
+        let prev = self.pool.get(current_info).and_then(|i| i.prev_open);
+        if let Some(prev_info) = prev {
+            if let Some(slot) = self.pool.get_mut(prev_info) {
+                slot.next_open = Some(info_idx);
+            }
+        } else {
+            list.head = Some(idx);
+        }
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.prev_open = prev;
+            info.next_open = Some(current_info);
+        }
+        if let Some(slot) = self.pool.get_mut(current_info) {
+            slot.prev_open = Some(info_idx);
+        }
     }
 
     pub fn put_on_closed_list(&mut self, idx: CellIdx, list: &mut PathfindCellList) {
-        todo!("PKT-413: PathfindCell::putOnClosedList")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        if self.pool.get(info_idx).is_some_and(|info| info.closed) {
+            return;
+        }
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.closed = true;
+            info.open = false;
+            info.prev_open = None;
+            info.next_open = list.head
+                .and_then(|head| self.cells[head.0].info_idx);
+        }
+        if let Some(head) = list.head {
+            if let Some(head_info) = self.cells[head.0].info_idx {
+                if let Some(slot) = self.pool.get_mut(head_info) {
+                    slot.prev_open = Some(info_idx);
+                }
+            }
+        }
+        list.head = Some(idx);
     }
 
     pub fn remove_from_closed_list(&mut self, idx: CellIdx, list: &mut PathfindCellList) {
-        todo!("PKT-413: PathfindCell::removeFromClosedList")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return };
+        let (next, prev) = self.pool.get(info_idx).map_or((None, None), |i| (i.next_open, i.prev_open));
+        if let Some(next_info) = next {
+            if let Some(info) = self.pool.get_mut(next_info) {
+                info.prev_open = prev;
+            }
+        }
+        if let Some(prev_info) = prev {
+            if let Some(info) = self.pool.get_mut(prev_info) {
+                info.next_open = next;
+            }
+        } else {
+            list.head = next.and_then(|ni| self.pool.get(ni)).and_then(|i| i.cell);
+        }
+        if let Some(info) = self.pool.get_mut(info_idx) {
+            info.closed = false;
+            info.next_open = None;
+            info.prev_open = None;
+        }
     }
 
     pub fn release_open_list(&mut self, list: &mut PathfindCellList) -> Int {
-        todo!("PKT-413: PathfindCell::releaseOpenList")
+        let mut count = 0i32;
+        while let Some(cur) = list.head {
+            count = count.wrapping_add(1);
+            let Some(info_idx) = self.cells[cur.0].info_idx else {
+                list.reset(None);
+                break;
+            };
+            let next = self.pool.get(info_idx).and_then(|info| info.next_open)
+                .and_then(|ni| self.pool.get(ni))
+                .and_then(|info| info.cell);
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.next_open = None;
+                info.prev_open = None;
+                info.open = false;
+            }
+            self.release_info(cur);
+            list.head = next;
+        }
+        list.tail = None;
+        count
     }
 
     pub fn release_closed_list(&mut self, list: &mut PathfindCellList) -> Int {
-        todo!("PKT-413: PathfindCell::releaseClosedList")
+        let mut count = 0i32;
+        while let Some(cur) = list.head {
+            count = count.wrapping_add(1);
+            let Some(info_idx) = self.cells[cur.0].info_idx else {
+                list.reset(None);
+                break;
+            };
+            let next = self.pool.get(info_idx).and_then(|info| info.next_open)
+                .and_then(|ni| self.pool.get(ni))
+                .and_then(|info| info.cell);
+            if let Some(info) = self.pool.get_mut(info_idx) {
+                info.next_open = None;
+                info.prev_open = None;
+                info.closed = false;
+            }
+            self.release_info(cur);
+            list.head = next;
+        }
+        list.reset(None);
+        count
     }
 
     pub fn cost_to_goal(&self, idx: CellIdx, goal: CellIdx) -> UnsignedInt {
-        todo!("PKT-413: PathfindCell::costToGoal")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return 100_000 };
+        let Some(goal_info) = self.cells[goal.0].info_idx else { return 100_000 };
+        let (self_pos, goal_pos) = match (self.pool.get(info_idx), self.pool.get(goal_info)) {
+            (Some(a), Some(b)) => (a.pos, b.pos),
+            _ => return 100_000,
+        };
+        let mut dx = (self_pos.x - goal_pos.x).abs();
+        let mut dy = (self_pos.y - goal_pos.y).abs();
+        if dx > dy {
+            std::mem::swap(&mut dx, &mut dy);
+        }
+        let cost = (COST_ORTHOGONAL as i32).wrapping_mul(dy)
+            .wrapping_add((COST_ORTHOGONAL as i32).wrapping_mul(dx) / 2);
+        cost as UnsignedInt
     }
 
     pub fn cost_to_hier_goal(&self, idx: CellIdx, goal: CellIdx) -> UnsignedInt {
-        todo!("PKT-413: PathfindCell::costToHierGoal")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return 100_000 };
+        let Some(goal_info) = self.cells[goal.0].info_idx else { return 100_000 };
+        let (self_pos, goal_pos) = match (self.pool.get(info_idx), self.pool.get(goal_info)) {
+            (Some(a), Some(b)) => (a.pos, b.pos),
+            _ => return 100_000,
+        };
+        let dx = self_pos.x.wrapping_sub(goal_pos.x);
+        let dy = self_pos.y.wrapping_sub(goal_pos.y);
+        let dx2 = (dx as i64).wrapping_mul(dx as i64);
+        let dy2 = (dy as i64).wrapping_mul(dy as i64);
+        let dist_sq = (dx2.wrapping_add(dy2)) as f32;
+        let value = 10.0_f32 * zh_common::math::gm_sqrtf(dist_sq) + 0.5_f32;
+        zh_common::math::real_to_int_floor(value) as UnsignedInt
     }
 
     pub fn cost_so_far(&self, idx: CellIdx, parent: Option<CellIdx>) -> UnsignedInt {
-        todo!("PKT-413: PathfindCell::costSoFar")
+        let Some(info_idx) = self.cells[idx.0].info_idx else { return 0 };
+        let Some(parent_idx) = parent else { return 0 };
+        let self_pos = self.pool.get(info_idx).map_or(ICoord2D::default(), |i| i.pos);
+        let parent_info = match self.cells[parent_idx.0].info_idx {
+            Some(ii) => ii,
+            None => return 0,
+        };
+        let parent_pos = self.pool.get(parent_info).map_or(ICoord2D::default(), |i| i.pos);
+        let parent_cost = self.pool.get(parent_info).map_or(0, |i| i.cost_so_far);
+        let prev_dir = ICoord2D {
+            x: parent_pos.x.wrapping_sub(self_pos.x),
+            y: parent_pos.y.wrapping_sub(self_pos.y),
+        };
+        let mut cost: UnsignedInt = if prev_dir.x == 0 || prev_dir.y == 0 {
+            (parent_cost as UnsignedInt).wrapping_add(COST_ORTHOGONAL as u32)
+        } else {
+            (parent_cost as UnsignedInt).wrapping_add(COST_DIAGONAL as u32)
+        };
+        if self.cells[idx.0].pinched {
+            cost = cost.wrapping_add(COST_DIAGONAL as u32);
+        }
+
+        let grand_info = self.pool.get(parent_info)
+            .and_then(|i| i.path_parent);
+        if let Some(grand_info) = grand_info {
+            let grand_pos = self.pool.get(grand_info).map_or(ICoord2D::default(), |i| i.pos);
+            let dir = ICoord2D {
+                x: grand_pos.x.wrapping_sub(parent_pos.x),
+                y: grand_pos.y.wrapping_sub(parent_pos.y),
+            };
+            if dir.x != prev_dir.x || dir.y != prev_dir.y {
+                let dot = (dir.x as i64).wrapping_mul(prev_dir.x as i64)
+                    .wrapping_add((dir.y as i64).wrapping_mul(prev_dir.y as i64));
+                let turns = if dot > 0 { 4 } else if dot == 0 { 8 } else { 16 };
+                cost = cost.wrapping_add(turns);
+            }
+        }
+        cost
     }
 
     pub fn collect_list_ids(&self, list: &PathfindCellList) -> Vec<Int> {
