@@ -54,10 +54,13 @@ fn splitmix32(state: &mut u32) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing WP-3.2a Rules & Enum Bundle (crates/zh_logic/src/rules/)"]
 fn test_wp3_2a_rules_enums_1000_golden_vectors() {
     let lines = extract_vector_lines(WP3_2A_JSON);
-    assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in WP3_2a_RulesEnums.json");
+    assert_eq!(
+        lines.len(),
+        1000,
+        "Expected 1,000 golden vectors in WP3_2a_RulesEnums.json"
+    );
 
     let first = lines[0];
     let expected_counts = get_i32_vec(first, "counts").expect("counts");
@@ -89,10 +92,18 @@ fn test_wp3_2a_rules_enums_1000_golden_vectors() {
     names_crc = table_crc(names_crc, &DEATH_TYPE_NAMES);
     names_crc = table_crc(names_crc, &LOCOMOTOR_SURFACE_TYPE_NAMES);
     names_crc = table_crc(names_crc, &WEAPON_SET_NAMES);
-    assert_eq!(names_crc, get_u32(first, "names_crc").unwrap(), "names_crc mismatch");
+    assert_eq!(
+        names_crc,
+        get_u32(first, "names_crc").unwrap(),
+        "names_crc mismatch"
+    );
 
     let fs_hex_crc = str_crc(0, &kindof_mask_fs().to_hex_string());
-    assert_eq!(fs_hex_crc, get_u32(first, "fs_hex_crc").unwrap(), "fs_hex_crc mismatch");
+    assert_eq!(
+        fs_hex_crc,
+        get_u32(first, "fs_hex_crc").unwrap(),
+        "fs_hex_crc mismatch"
+    );
 
     let mut subdual_mask = 0u64;
     let mut health_dmg_mask = 0u64;
@@ -154,20 +165,44 @@ fn test_wp3_2a_rules_enums_1000_golden_vectors() {
         let kf_match = kf_res.test_set_and_clear(&struct_mask, &kf_b);
 
         let mut dis = DisabledMaskType::new();
-        dis.set((splitmix32(&mut rng) % DISABLED_COUNT as u32) as Int, TRUE as Int);
-        dis.set((splitmix32(&mut rng) % DISABLED_COUNT as u32) as Int, TRUE as Int);
+        dis.set(
+            (splitmix32(&mut rng) % DISABLED_COUNT as u32) as Int,
+            TRUE as Int,
+        );
+        dis.set(
+            (splitmix32(&mut rng) % DISABLED_COUNT as u32) as Int,
+            TRUE as Int,
+        );
 
         let mut st = ObjectStatusMaskType::new();
-        st.set((splitmix32(&mut rng) % OBJECT_STATUS_COUNT as u32) as Int, TRUE as Int);
-        st.set((splitmix32(&mut rng) % OBJECT_STATUS_COUNT as u32) as Int, TRUE as Int);
+        st.set(
+            (splitmix32(&mut rng) % OBJECT_STATUS_COUNT as u32) as Int,
+            TRUE as Int,
+        );
+        st.set(
+            (splitmix32(&mut rng) % OBJECT_STATUS_COUNT as u32) as Int,
+            TRUE as Int,
+        );
 
         let mut sp = SpecialPowerMaskType::new();
-        sp.set((splitmix32(&mut rng) % SPECIALPOWER_COUNT as u32) as Int, TRUE as Int);
-        sp.set((splitmix32(&mut rng) % SPECIALPOWER_COUNT as u32) as Int, TRUE as Int);
+        sp.set(
+            (splitmix32(&mut rng) % SPECIALPOWER_COUNT as u32) as Int,
+            TRUE as Int,
+        );
+        sp.set(
+            (splitmix32(&mut rng) % SPECIALPOWER_COUNT as u32) as Int,
+            TRUE as Int,
+        );
 
         let mut ws = WeaponSetFlags::new();
-        ws.set((splitmix32(&mut rng) % WEAPONSET_COUNT as u32) as Int, TRUE as Int);
-        ws.set((splitmix32(&mut rng) % WEAPONSET_COUNT as u32) as Int, TRUE as Int);
+        ws.set(
+            (splitmix32(&mut rng) % WEAPONSET_COUNT as u32) as Int,
+            TRUE as Int,
+        );
+        ws.set(
+            (splitmix32(&mut rng) % WEAPONSET_COUNT as u32) as Int,
+            TRUE as Int,
+        );
 
         let mut df = DamageTypeFlags::new_set_all();
         let clear_dt = (splitmix32(&mut rng) % DAMAGE_NUM_TYPES as u32) as Int;
@@ -177,7 +212,8 @@ fn test_wp3_2a_rules_enums_1000_golden_vectors() {
         let sp_idx = (splitmix32(&mut rng) % SPECIALPOWER_COUNT as u32) as Int;
         let st_idx = (splitmix32(&mut rng) % OBJECT_STATUS_COUNT as u32) as Int;
 
-        let orig_k = BitFlags::<KINDOF_COUNT>::get_name_from_single_bit(&KINDOF_NAMES, k_idx).unwrap();
+        let orig_k =
+            BitFlags::<KINDOF_COUNT>::get_name_from_single_bit(&KINDOF_NAMES, k_idx).unwrap();
         let k_mix: String = orig_k
             .bytes()
             .enumerate()
@@ -221,6 +257,11 @@ fn test_wp3_2a_rules_enums_1000_golden_vectors() {
             BitFlags::<OBJECT_STATUS_COUNT>::get_name_from_single_bit(&OBJECT_STATUS_NAMES, st_idx)
                 .unwrap(),
         );
-        assert_eq!(out_crc, get_u32(line, "out_crc").unwrap(), "seed {} out_crc", seed);
+        assert_eq!(
+            out_crc,
+            get_u32(line, "out_crc").unwrap(),
+            "seed {} out_crc",
+            seed
+        );
     }
 }
