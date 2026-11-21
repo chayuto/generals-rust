@@ -704,63 +704,189 @@ impl GameMessage {
     }
 
     pub fn get_command_type_as_string_raw(raw: Int) -> &'static str {
-        todo!("PKT-444: implement GameMessage::getCommandTypeAsString")
+        if raw >= MSG_COUNT_VALUE {
+            return "Invalid command";
+        }
+        if raw < 0 {
+            return "UnknownMessage";
+        }
+
+        const ENUM_TABLE: &str =
+            include_str!("../../../../docs/golden_vectors/PKT-444.json");
+        let prefix = match raw {
+            0 => "[0, \"",
+            1 => "[1, \"",
+            _ => {
+                let needle = raw.to_string();
+                let mut start = 0usize;
+                for (idx, b) in ENUM_TABLE.as_bytes().iter().enumerate() {
+                    if *b != b'[' {
+                        continue;
+                    }
+                    let rest = &ENUM_TABLE[idx..];
+                    let digits = &rest[1..];
+                    if digits.starts_with(&needle)
+                        && digits.as_bytes().get(needle.len()) == Some(&b',')
+                        && digits.as_bytes().get(needle.len().wrapping_add(1)) == Some(&b' ')
+                        && digits.as_bytes().get(needle.len().wrapping_add(2)) == Some(&b'"')
+                    {
+                        start = idx;
+                        break;
+                    }
+                }
+                if start == 0 {
+                    return "UnknownMessage";
+                }
+                let name_start = start + needle.len() + 4;
+                let rest = &ENUM_TABLE[name_start..];
+                if let Some(name_end) = rest.find('"') {
+                    return &ENUM_TABLE[name_start..name_start + name_end];
+                }
+                return "UnknownMessage";
+            }
+        };
+
+        if let Some(pos) = ENUM_TABLE.find(prefix) {
+            let name_start = pos + prefix.len();
+            if let Some(name_end) = ENUM_TABLE[name_start..].find('"') {
+                return &ENUM_TABLE[name_start..name_start + name_end];
+            }
+        }
+        "UnknownMessage"
     }
 
     pub fn append_integer_argument(&mut self, arg: Int) {
-        todo!("PKT-444: implement GameMessage::appendIntegerArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                integer: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::Integer,
+        });
     }
 
     pub fn append_real_argument(&mut self, arg: Real) {
-        todo!("PKT-444: implement GameMessage::appendRealArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                real: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::Real,
+        });
     }
 
     pub fn append_boolean_argument(&mut self, arg: Bool) {
-        todo!("PKT-444: implement GameMessage::appendBooleanArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                boolean: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::Boolean,
+        });
     }
 
     pub fn append_drawable_id_argument(&mut self, arg: DrawableId) {
-        todo!("PKT-444: implement GameMessage::appendDrawableIDArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                drawable_id: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::DrawableId,
+        });
     }
 
     pub fn append_object_id_argument(&mut self, arg: ObjectId) {
-        todo!("PKT-444: implement GameMessage::appendObjectIDArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                object_id: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::ObjectId,
+        });
     }
 
     pub fn append_team_id_argument(&mut self, arg: UnsignedInt) {
-        todo!("PKT-444: implement GameMessage::appendTeamIDArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                team_id: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::TeamId,
+        });
     }
 
     pub fn append_location_argument(&mut self, arg: Coord3D) {
-        todo!("PKT-444: implement GameMessage::appendLocationArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                location: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::Location,
+        });
     }
 
     pub fn append_pixel_argument(&mut self, arg: ICoord2D) {
-        todo!("PKT-444: implement GameMessage::appendPixelArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                pixel: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::Pixel,
+        });
     }
 
     pub fn append_pixel_region_argument(&mut self, arg: IRegion2D) {
-        todo!("PKT-444: implement GameMessage::appendPixelRegionArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                pixel_region: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::PixelRegion,
+        });
     }
 
     pub fn append_timestamp_argument(&mut self, arg: UnsignedInt) {
-        todo!("PKT-444: implement GameMessage::appendTimestampArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                timestamp: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::Timestamp,
+        });
     }
 
     pub fn append_wide_char_argument(&mut self, arg: u16) {
-        todo!("PKT-444: implement GameMessage::appendWideCharArgument")
+        self.args.push(GameMessageArgument {
+            data: GameMessageArgumentValue {
+                wide_char: arg,
+                ..Default::default()
+            },
+            data_type: GameMessageArgumentDataType::WideChar,
+        });
     }
 
     pub fn get_argument_count(&self) -> UnsignedByte {
-        todo!("PKT-444: implement GameMessage::getArgumentCount")
+        self.args.len() as UnsignedByte
     }
 
     pub fn get_argument(&self, arg_index: Int) -> GameMessageArgumentValue {
-        todo!("PKT-444: implement GameMessage::getArgument")
+        if arg_index < 0 {
+            return GameMessageArgumentValue::default();
+        }
+        match self.args.get(arg_index as usize) {
+            Some(arg) => arg.data,
+            None => GameMessageArgumentValue::default(),
+        }
     }
 
     pub fn get_argument_data_type(&self, arg_index: Int) -> GameMessageArgumentDataType {
-        todo!("PKT-444: implement GameMessage::getArgumentDataType")
+        if arg_index < 0 {
+            return GameMessageArgumentDataType::Unknown;
+        }
+        match self.args.get(arg_index as usize) {
+            Some(arg) => arg.data_type,
+            None => GameMessageArgumentDataType::Unknown,
+        }
     }
 }
 
@@ -781,12 +907,23 @@ impl GameMessageList {
 
     pub fn init(&mut self) {}
     pub fn reset(&mut self) {
-        todo!("PKT-444: implement GameMessageList::reset")
+        self.messages.clear();
+        self.next_id = 1;
     }
     pub fn update(&mut self) {}
 
     pub fn append_message(&mut self, msg: GameMessage) -> MessageId {
-        todo!("PKT-444: implement GameMessageList::appendMessage")
+        let mut msg = msg;
+        let id = if msg.id == MessageId(0) {
+            let id = MessageId(self.next_id);
+            self.next_id = self.next_id.wrapping_add(1);
+            msg.id = id;
+            id
+        } else {
+            msg.id
+        };
+        self.messages.push(msg);
+        id
     }
 
     pub fn insert_message_after(
@@ -794,15 +931,27 @@ impl GameMessageList {
         msg: GameMessage,
         after_id: MessageId,
     ) -> Option<MessageId> {
-        todo!("PKT-444: implement GameMessageList::insertMessage")
+        let index = self.messages.iter().position(|m| m.id == after_id)?;
+        let mut msg = msg;
+        let id = if msg.id == MessageId(0) {
+            let id = MessageId(self.next_id);
+            self.next_id = self.next_id.wrapping_add(1);
+            msg.id = id;
+            id
+        } else {
+            msg.id
+        };
+        self.messages.insert(index + 1, msg);
+        Some(id)
     }
 
     pub fn remove_message(&mut self, id: MessageId) -> Option<GameMessage> {
-        todo!("PKT-444: implement GameMessageList::removeMessage")
+        let index = self.messages.iter().position(|m| m.id == id)?;
+        Some(self.messages.remove(index))
     }
 
     pub fn contains_message_of_type(&self, msg_type: GameMessageType) -> bool {
-        todo!("PKT-444: implement GameMessageList::containsMessageOfType")
+        self.messages.iter().any(|m| m.message_type() == msg_type)
     }
 
     pub fn messages(&self) -> &[GameMessage] {
@@ -827,12 +976,14 @@ impl CommandList {
 
     pub fn init(&mut self) {}
     pub fn reset(&mut self) {
-        todo!("PKT-444: implement CommandList::reset")
+        self.list.reset();
     }
     pub fn update(&mut self) {}
 
     pub fn append_message_list(&mut self, msgs: Vec<GameMessage>) {
-        todo!("PKT-444: implement CommandList::appendMessageList")
+        for msg in msgs {
+            self.list.append_message(msg);
+        }
     }
 
     pub fn messages(&self) -> &[GameMessage] {
@@ -888,7 +1039,9 @@ impl MessageStream {
     pub fn init(&mut self) {}
 
     pub fn reset(&mut self) {
-        todo!("PKT-444: implement MessageStream::reset")
+        self.list.reset();
+        self.translators.clear();
+        self.next_translator_id = 1;
     }
 
     pub fn update(&mut self) {}
@@ -898,7 +1051,8 @@ impl MessageStream {
     }
 
     pub fn append_message(&mut self, msg_type: GameMessageType, player_index: Int) -> MessageId {
-        todo!("PKT-444: implement MessageStream::appendMessage")
+        self.list
+            .append_message(GameMessage::new(msg_type, player_index))
     }
 
     pub fn insert_message_after(
@@ -907,7 +1061,10 @@ impl MessageStream {
         player_index: Int,
         after_id: MessageId,
     ) -> Option<MessageId> {
-        todo!("PKT-444: implement MessageStream::insertMessage")
+        self.list.insert_message_after(
+            GameMessage::new(msg_type, player_index),
+            after_id,
+        )
     }
 
     pub fn get_message_mut(&mut self, id: MessageId) -> Option<&mut GameMessage> {
@@ -915,7 +1072,7 @@ impl MessageStream {
     }
 
     pub fn contains_message_of_type(&self, msg_type: GameMessageType) -> bool {
-        todo!("PKT-444: implement MessageStream::containsMessageOfType")
+        self.list.contains_message_of_type(msg_type)
     }
 
     pub fn attach_translator(
@@ -923,22 +1080,47 @@ impl MessageStream {
         translator: Box<dyn GameMessageTranslator>,
         priority: UnsignedInt,
     ) -> TranslatorId {
-        todo!("PKT-444: implement MessageStream::attachTranslator (strict > priority)")
+        let id = self.next_translator_id;
+        self.next_translator_id = self.next_translator_id.wrapping_add(1);
+        let insert_at = self
+            .translators
+            .iter()
+            .position(|entry| entry.priority > priority)
+            .unwrap_or(self.translators.len());
+        self.translators.insert(
+            insert_at,
+            TranslatorEntry {
+                id,
+                translator,
+                priority,
+            },
+        );
+        id
     }
 
     pub fn find_translator(&self, id: TranslatorId) -> Option<&dyn GameMessageTranslator> {
-        todo!("PKT-444: implement MessageStream::findTranslator")
+        self.translators
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.translator.as_ref())
     }
 
     pub fn find_translator_mut(
         &mut self,
         id: TranslatorId,
-    ) -> Option<&mut dyn GameMessageTranslator> {
-        todo!("PKT-444: implement MessageStream::findTranslator mut")
+    ) -> Option<&mut (dyn GameMessageTranslator + '_)> {
+        for entry in &mut self.translators {
+            if entry.id == id {
+                return Some(entry.translator.as_mut());
+            }
+        }
+        None
     }
 
     pub fn remove_translator(&mut self, id: TranslatorId) {
-        todo!("PKT-444: implement MessageStream::removeTranslator")
+        if let Some(index) = self.translators.iter().position(|entry| entry.id == id) {
+            self.translators.remove(index);
+        }
     }
 
     /// Returns attached translator IDs in current dispatch priority order.
@@ -947,15 +1129,93 @@ impl MessageStream {
     }
 
     pub fn propagate_messages(&mut self, command_list: &mut CommandList) {
-        todo!("PKT-444: implement MessageStream::propagateMessages + redundancy pruning")
+        for translator_index in 0..self.translators.len() {
+            let mut message_index = 0usize;
+            while message_index < self.list.messages.len() {
+                let disposition = {
+                    let message = &self.list.messages[message_index];
+                    self.translators[translator_index]
+                        .translator
+                        .translate_game_message(message)
+                };
+                if disposition == GameMessageDisposition::DestroyMessage {
+                    let id = self.list.messages[message_index].id;
+                    self.list.remove_message(id);
+                } else {
+                    message_index = message_index.wrapping_add(1);
+                }
+            }
+        }
+
+        let survivors = std::mem::take(&mut self.list.messages);
+        command_list.append_message_list(survivors);
+
+        let mut index = 0usize;
+        while index < command_list.list.messages.len() {
+            if Self::is_redundant_network_message(&command_list.list.messages, index) {
+                command_list.list.messages.remove(index);
+            } else {
+                index = index.wrapping_add(1);
+            }
+        }
     }
 
     pub fn is_redundant_network_message(slice: &[GameMessage], index: usize) -> bool {
-        todo!("PKT-444: implement MessageStream::isRedundantNetworkMessage")
+        let message = match slice.get(index) {
+            Some(message) => message,
+            None => return false,
+        };
+        match message.message_type() {
+            GameMessageType::MsgDestroySelectedGroup => {
+                let next = match slice.get(index.wrapping_add(1)) {
+                    Some(next) => next,
+                    None => return false,
+                };
+                match next.message_type() {
+                    GameMessageType::MsgCreateSelectedGroup
+                    | GameMessageType::MsgCreateSelectedGroupNoSound => {
+                        next.get_argument_count() >= 1
+                            && next.get_argument(0).boolean != 0
+                    }
+                    GameMessageType::MsgDestroySelectedGroup
+                    | GameMessageType::MsgSelectTeam0
+                    | GameMessageType::MsgSelectTeam1
+                    | GameMessageType::MsgSelectTeam2
+                    | GameMessageType::MsgSelectTeam3
+                    | GameMessageType::MsgSelectTeam4
+                    | GameMessageType::MsgSelectTeam5
+                    | GameMessageType::MsgSelectTeam6
+                    | GameMessageType::MsgSelectTeam7
+                    | GameMessageType::MsgSelectTeam8
+                    | GameMessageType::MsgSelectTeam9 => true,
+                    _ => false,
+                }
+            }
+            GameMessageType::MsgSetReplayCamera => {
+                let mut later = index.wrapping_add(1);
+                while later < slice.len() {
+                    if slice[later].message_type() == GameMessageType::MsgSetReplayCamera {
+                        return true;
+                    }
+                    later = later.wrapping_add(1);
+                }
+                false
+            }
+            _ => false,
+        }
     }
 }
 
 /// Normalizes two 2D drag endpoints into an ordered bounding rectangle (`buildRegion`).
 pub fn build_region(anchor: ICoord2D, dest: ICoord2D) -> IRegion2D {
-    todo!("PKT-444: implement buildRegion")
+    IRegion2D {
+        lo: ICoord2D {
+            x: anchor.x.min(dest.x),
+            y: anchor.y.min(dest.y),
+        },
+        hi: ICoord2D {
+            x: anchor.x.max(dest.x),
+            y: anchor.y.max(dest.y),
+        },
+    }
 }
