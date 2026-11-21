@@ -6,8 +6,10 @@
 //! 1000..1011) recorded as FNV-1a 64 digests, whose payloads are regenerated here.
 //!
 //! When implementing `WP-7.2b`, remove the four `#[ignore]` attributes below so these suites
-//! run in `cargo test --workspace` and CI. `test_wp7_2b_payload_generator_matches_cpp` is not
-//! ignored: it checks this file's port of the C++ payload generator and needs no codec code.
+//! run in `cargo test --workspace` and CI. Two tests are not ignored and need no codec code:
+//! `test_wp7_2b_payload_generator_matches_cpp` checks this file's port of the C++ payload
+//! generator, and `test_wp7_2b_oracle_streams_are_big_endian` checks the committed oracle's
+//! byte order (`tests/cpp_harness/README.md` explains why).
 
 use zh_common::golden_json::{decode_hex_bytes, extract_vector_lines, get_str, get_u32};
 use zh_common::io::compression::{
@@ -26,6 +28,8 @@ struct Codec {
     name: &'static str,
     comp_type: CompressionType,
     magic: &'static [u8; 4],
+    /// Big-endian stream type word written by the default-mode encoder.
+    type_word: [u8; 2],
     hex_key: &'static str,
     len_key: &'static str,
     fnv_key: &'static str,
@@ -40,6 +44,7 @@ const CODECS: [Codec; 3] = [
         name: "refpack",
         comp_type: CompressionType::RefPack,
         magic: b"EAR\0",
+        type_word: [0x10, 0xfb],
         hex_key: "ref_hex",
         len_key: "ref_len",
         fnv_key: "ref_fnv",
@@ -52,6 +57,7 @@ const CODECS: [Codec; 3] = [
         name: "btree",
         comp_type: CompressionType::BTree,
         magic: b"EAB\0",
+        type_word: [0x46, 0xfb],
         hex_key: "btree_hex",
         len_key: "btree_len",
         fnv_key: "btree_fnv",
@@ -64,6 +70,7 @@ const CODECS: [Codec; 3] = [
         name: "huff",
         comp_type: CompressionType::Huff,
         magic: b"EAH\0",
+        type_word: [0x30, 0xfb],
         hex_key: "huff_hex",
         len_key: "huff_len",
         fnv_key: "huff_fnv",
@@ -210,6 +217,39 @@ fn test_wp7_2b_payload_generator_matches_cpp() {
             fnv_field(line, "src_fnv"),
             "seed {seed} payload digest"
         );
+    }
+}
+
+#[test]
+fn test_wp7_2b_oracle_streams_are_big_endian() {
+    // Guards the committed oracle against a regeneration from EAC objects built with gimex.h's
+    // `__APPLE__` native-endian branch, which writes `fb 10 05 00 00` instead of
+    // `10 fb 00 00 05` on little-endian Macs (tests/cpp_harness/README.md). The manager
+    // header length is little-endian; the codec stream header is always big-endian.
+    let lines = vector_lines();
+    for line in &lines[..SMALL_COUNT] {
+        let seed = get_u32(line, "seed").expect("seed");
+        let len = get_u32(line, "len").expect("len");
+        for c in &CODECS {
+            let ctx = format!("seed {seed} {}", c.name);
+            let blob = hex_field(line, c.hex_key);
+            assert!(
+                blob.len() >= COMPRESSION_HEADER_LEN + 5,
+                "{ctx}: blob too short"
+            );
+            assert_eq!(&blob[..4], c.magic, "{ctx}: magic");
+            assert_eq!(
+                &blob[4..8],
+                &len.to_le_bytes(),
+                "{ctx}: manager length (LE)"
+            );
+            assert_eq!(&blob[8..10], &c.type_word, "{ctx}: stream type word (BE)");
+            assert_eq!(
+                &blob[10..13],
+                &len.to_be_bytes()[1..],
+                "{ctx}: stream length (24-bit BE)"
+            );
+        }
     }
 }
 
