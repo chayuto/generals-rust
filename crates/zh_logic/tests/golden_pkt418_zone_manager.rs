@@ -50,7 +50,6 @@ fn test_pkt418_oracle_structure_and_constants() {
 }
 
 #[test]
-#[ignore = "PKT-418: remove when ZoneBlock and PathfindZoneManager are implemented"]
 fn test_pkt418_zone_block_helpers_and_boundaries() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
@@ -94,7 +93,6 @@ fn test_pkt418_zone_block_helpers_and_boundaries() {
 }
 
 #[test]
-#[ignore = "PKT-418: remove when ZoneBlock and PathfindZoneManager are implemented"]
 fn test_pkt418_1000_golden_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
