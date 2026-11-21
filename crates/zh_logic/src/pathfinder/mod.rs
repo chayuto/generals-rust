@@ -1,16 +1,20 @@
-//! `WP-6.2`: Deterministic A* pathfinder grid cell, info pool, list, and constants
-//! (`PKT-413`..`PKT-416`).
+//! `WP-6.2`: Deterministic A* pathfinder grid cell, info pool, list, constants,
+//! and zone connectivity (`PKT-413`..`PKT-416`, `PKT-418`, `PKT-420`).
 //!
-//! Reference C++ packet: `packets/phase6/PKT-413_PathfindCell.md`
-//! Golden Vector test: `crates/zh_logic/tests/golden_pkt413_pathfind_cell.rs`
-//! (`docs/golden_vectors/PKT-413.json`)
+//! Reference C++ packets:
+//! - `packets/phase6/PKT-413_PathfindCell.md`
+//! - `packets/phase6/PKT-418_PathfindZoneManager.md`
 
 pub mod pathfind_cell;
 pub mod pathfind_cell_info;
 pub mod pathfind_cell_list;
 pub mod pathfind_constants;
+pub mod pathfind_zone_manager;
+pub mod zone_block;
 
 pub use pathfind_cell::*;
 pub use pathfind_cell_info::*;
 pub use pathfind_cell_list::*;
 pub use pathfind_constants::*;
+pub use pathfind_zone_manager::*;
+pub use zone_block::*;
