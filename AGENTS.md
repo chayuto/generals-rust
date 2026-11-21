@@ -111,6 +111,23 @@ To prevent two agents from duplicating work on the same module:
    - If a `Tier 1A` or `Tier 1B` worker fails `Gate V1` (`cargo check`) after 1 retry, it commits its work to a `wip/packet-<id>` branch, relabels the issue `tier:2-engineer`, posts the compiler error output on the issue, and stops.
    - If any worker fails `Gate V2` (differential test) or `Gate V3/V4` (replay CRC mismatch), it labels the issue `status:crc-desync` + `tier:3-architect` and attaches the mismatch frame / seed diff for Tier 3 diagnosis.
 
+### 4.4 Remote Delegation ROI & Batching Policy (Local vs. `env:ephemeral-web`)
+
+Generating the C++ Golden Vector harness and Rust verification oracle is mandatory work performed locally by an `env:local-full` agent either way. Therefore, opening a remote `env:ephemeral-web` issue only pays off when the translation body itself outweighs the overhead of authoring a compiling `todo!()` skeleton, filing an Issue, and reviewing the PR:
+
+1. **Local-First Threshold (`< ~200` Expected Rust LOC):**
+   - Do **not** open standalone `env:ephemeral-web` Issues for small leaf modules under `~200` expected Rust LOC (e.g., Wave 1's `+28 LOC` `PartitionSolver` or `+60 LOC` `DiscreteCircle`). Either implement them directly locally in the same pass as their C++ Golden Vectors, or bundle them into a larger cohesive ticket.
+2. **Remote Delegation Sweet Spot (`~300–1,100` Expected Rust LOC per Ticket):**
+   - Open `env:ephemeral-web` Issues only for:
+     - Substantial standalone modules (`>= ~250–300` expected Rust LOC of non-trivial logic, such as `GeometryInfo`, `Dict`, `StateMachine`, `INI`, `Locomotor`, `TurretAI`), or
+     - **Cohesive multi-file bundles** combining `3–12` tightly related leaf modules into one `~400–1,100` LOC ticket backed by a unified C++ Golden Vector generator and a single PR (e.g., Phase 3 Enum/BitFlags Registry, Phase 3 Economy Trackers, Phase 5 module family batches).
+3. **Always Keep Local (`env:local-full`):**
+   - Core architectural spines (`GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `Pathfinder`, `GameLogic::update()`), CMake/FFI seams, retail `.big`/`.map`/`.rep` verification, and CRC desync triage remain local.
+4. **PR Merge Hygiene:**
+   - Prefer **Squash & Merge** with a clean conventional commit message on remote PRs so `main` stays free of empty planning commits and remote branch prefixes.
+5. **Phase 5–6 Fan-Out Automation:**
+   - Before fanning out the `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`), automate packet, golden-vector, and issue generation once via the shared adapter (`WP-5.0`) rather than hand-authoring per-module skeletons.
+
 ---
 
 ## 5. Repository Map

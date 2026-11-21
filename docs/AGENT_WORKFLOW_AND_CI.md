@@ -81,6 +81,24 @@ Agents working on `generals-rust` operate in one of two distinct physical enviro
 
 ---
 
+### 1.5 Local Execution vs. Remote `env:ephemeral-web` Delegation Thresholds (Empirical Policy)
+
+Phase 2 Wave 1 (`5 / 5` remote PRs `#39`–`#43` merged in `5–10` min wall-clock time each) established the exact break-even boundary between doing a packet directly in the `env:local-full` session versus delegating it to a sandboxed `env:ephemeral-web` worker:
+
+| Target Shape | Observed Example(s) | Decision | Rationale |
+| :--- | :--- | :--- | :--- |
+| **Tiny Leaf (`< ~200` Rust LOC)** | `PKT-023` (`+28 LOC`), `PKT-017` (`+60 LOC`), `PKT-064` (`+67 LOC`) | **Do Locally** (or bundle) | C++ vector generation + test authoring is mandatory either way; writing a `todo!()` skeleton, ticket, and PR review costs more than writing the module directly. |
+| **Break-Even (`~140–200` Rust LOC)** | `PKT-004` (`+137 LOC`), `PKT-015+016` (`+188 LOC`) | **Bundle if possible** | Only worthwhile remotely when multiple small files share one harness and ~5 min parallel wall-clock offload justifies the PR cycle. |
+| **High-ROI Sweet Spot (`~300–1,100` Rust LOC)** | `PKT-022` (`GeometryInfo`), `PKT-038` (`Dict`), `PKT-077` (`StateMachine`), `PKT-087` (`INI`), `WP-3.2a` (`12`-packet Enum/BitFlags bundle) | **Delegate Remotely (`env:ephemeral-web`)** | Substantial implementation complexity + zero C++ search needed; offloads heavy token/turn volume cleanly onto separate remote quota under 3-OS CI. |
+| **Core Spines & FFI (`C4` / `env:local-full`)** | `GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `Pathfinder`, `GameLogic::update()` | **Always Keep Local** | Requires deep local `vendor/GeneralsX` context, iterative CMake/FFI bring-up, retail `.big`/replay access, or desync triage. |
+
+Operational rules enforced alongside this table:
+1. **Never hand-author skeletons for tiny standalone packets (`< ~200` LOC):** implement them directly alongside their C++ Golden Vectors, or group 3–12 related leaves into one `~400–1,100` LOC bundled ticket.
+2. **Use Squash & Merge on remote PRs** with a clean conventional commit message so `main` stays free of empty planning commits and remote branch prefixes.
+3. **Automate Phase 5–6 Fan-Out Once (`WP-5.0`):** Generate C++ Golden Vectors, packet docs, and GitHub Issues programmatically via the shared adapter before fanning out `WP-5.1`–`WP-5.4` (`221` modules) and `WP-6.4` (`29` script packets).
+
+---
+
 ## 2. Compartmentalization with Strict V&V Checkpoints
 
 To allow multiple worker agents to translate Class C1/C2/C3 modules in parallel without stepping on each other or introducing hidden replay desyncs, we enforce **strict physical compartmentalization** and a **4-Gate V&V Funnel**.

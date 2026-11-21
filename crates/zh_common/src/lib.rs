@@ -3,6 +3,7 @@
 pub mod core;
 pub mod crc;
 pub mod golden_json;
+pub mod ini;
 pub mod math;
 pub mod random_value;
 pub mod types;

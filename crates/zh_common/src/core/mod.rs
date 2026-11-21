@@ -2,3 +2,4 @@
 
 pub mod dict;
 pub mod name_key_generator;
+pub mod state_machine;
