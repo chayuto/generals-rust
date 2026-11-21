@@ -355,7 +355,6 @@ fn sample_crc(s: &IniBlockSample) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-087 (crates/zh_common/src/ini/mod.rs)"]
 fn test_pkt087_ini_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT087_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-087.json");
