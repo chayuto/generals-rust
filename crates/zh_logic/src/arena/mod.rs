@@ -1,0 +1,523 @@
+//! `WP-5.0`: Slot-indexed `ObjectArena`, split-SoA `ModuleArena`, 64-bit `FacetMask`,
+//! and re-entrancy-safe Take-and-Restore dispatch (`docs/ARCHITECTURE_SPEC.md` §1.2).
+
+use std::collections::BTreeMap;
+
+use crate::scheduler::{ScheduleStore, SleepyUpdatePhase, UpdateModuleScheduleState};
+use zh_common::types::{NameKeyType, ObjectId};
+
+/// Typed slot handle into [`ObjectArena`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct ObjectSlot(pub u32);
+
+impl ObjectSlot {
+    pub const INVALID: Self = Self(u32::MAX);
+
+    #[inline]
+    pub const fn is_valid(self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
+/// Typed slot handle into [`ModuleArena`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct ModuleSlot(pub u32);
+
+impl ModuleSlot {
+    pub const INVALID: Self = Self(u32::MAX);
+
+    #[inline]
+    pub const fn is_valid(self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
+/// Identifier for template `ModuleData` definitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct ModuleDataId(pub u32);
+
+impl ModuleDataId {
+    pub const INVALID: Self = Self(0);
+}
+
+/// Identifier for `ThingTemplate` definitions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct ThingTemplateId(pub u32);
+
+impl ThingTemplateId {
+    pub const INVALID: Self = Self(0);
+}
+
+/// 64-bit capability mask identifying all SAGE `ModuleInterfaceType` and sub-facet interfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FacetMask(pub u64);
+
+impl FacetMask {
+    pub const NONE: Self = Self(0);
+    // Primary SAGE ModuleInterfaceType bits (Module.h lines 80-94)
+    pub const UPDATE: Self = Self(1 << 0);
+    pub const DIE: Self = Self(1 << 1);
+    pub const DAMAGE: Self = Self(1 << 2);
+    pub const CREATE: Self = Self(1 << 3);
+    pub const COLLIDE: Self = Self(1 << 4);
+    pub const BODY: Self = Self(1 << 5);
+    pub const CONTAIN: Self = Self(1 << 6);
+    pub const UPGRADE: Self = Self(1 << 7);
+    pub const SPECIAL_POWER: Self = Self(1 << 8);
+    pub const DESTROY: Self = Self(1 << 9);
+    pub const DRAW: Self = Self(1 << 10);
+    pub const CLIENT_UPDATE: Self = Self(1 << 11);
+
+    // Extended sub-facet interface bits
+    pub const AI_UPDATE: Self = Self(1 << 12);
+    pub const PHYSICS_UPDATE: Self = Self(1 << 13);
+    pub const STEALTH_UPDATE: Self = Self(1 << 14);
+    pub const DOCK_UPDATE: Self = Self(1 << 15);
+    pub const EXIT_INTERFACE: Self = Self(1 << 16);
+    pub const SLAVED_UPDATE: Self = Self(1 << 17);
+    pub const PROJECTILE_UPDATE: Self = Self(1 << 18);
+    pub const PRODUCTION_UPDATE: Self = Self(1 << 19);
+    pub const SLOW_DEATH: Self = Self(1 << 20);
+    pub const POWER_PLANT_UPDATE: Self = Self(1 << 21);
+    pub const HORDE_UPDATE: Self = Self(1 << 22);
+
+    #[inline]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[inline]
+    pub const fn contains(self, required: Self) -> bool {
+        (self.0 & required.0) == required.0
+    }
+
+    #[inline]
+    pub const fn intersects(self, other: Self) -> bool {
+        (self.0 & other.0) != 0
+    }
+
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// Context passed to a module handler during Take-and-Restore dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModuleContext {
+    pub mod_slot: ModuleSlot,
+    pub owner_slot: ObjectSlot,
+    pub owner_id: ObjectId,
+    pub tag_key: NameKeyType,
+    pub template_data_id: ModuleDataId,
+}
+
+/// Disjoint module header record stored separately from the `ModuleArena` payload array so
+/// `SleepyUpdateHeap` can always inspect/mutate schedules while any payload is taken out.
+#[derive(Debug, Clone)]
+pub struct ModuleMeta {
+    pub owner_slot: ObjectSlot,
+    pub owner_id: ObjectId,
+    pub tag_key: NameKeyType,
+    pub template_data_id: ModuleDataId,
+    pub facet_mask: FacetMask,
+    pub schedule: UpdateModuleScheduleState,
+    pub alive: bool,
+    pub executing: bool,
+    pub generation: u32,
+}
+
+impl ModuleMeta {
+    pub fn new(
+        owner_slot: ObjectSlot,
+        owner_id: ObjectId,
+        tag_key: NameKeyType,
+        template_data_id: ModuleDataId,
+        facet_mask: FacetMask,
+        phase: SleepyUpdatePhase,
+    ) -> Self {
+        Self {
+            owner_slot,
+            owner_id,
+            tag_key,
+            template_data_id,
+            facet_mask,
+            schedule: UpdateModuleScheduleState::new(phase),
+            alive: true,
+            executing: false,
+            generation: 0,
+        }
+    }
+
+    #[inline]
+    pub const fn context(&self, mod_slot: ModuleSlot) -> ModuleContext {
+        ModuleContext {
+            mod_slot,
+            owner_slot: self.owner_slot,
+            owner_id: self.owner_id,
+            tag_key: self.tag_key,
+            template_data_id: self.template_data_id,
+        }
+    }
+}
+
+/// Split-SoA arena holding module metadata + payloads for re-entrant Take-and-Restore dispatch.
+#[derive(Debug, Clone)]
+pub struct ModuleArena<K> {
+    metas: Vec<ModuleMeta>,
+    payloads: Vec<Option<K>>,
+    free_list: Vec<u32>,
+    active_count: usize,
+}
+
+impl<K> Default for ModuleArena<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K> ModuleArena<K> {
+    pub fn new() -> Self {
+        Self {
+            metas: Vec::new(),
+            payloads: Vec::new(),
+            free_list: Vec::new(),
+            active_count: 0,
+        }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.active_count
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.active_count == 0
+    }
+
+    pub fn allocate(&mut self, mut meta: ModuleMeta, payload: K) -> ModuleSlot {
+        meta.alive = true;
+        meta.executing = false;
+        if let Some(reuse_idx) = self.free_list.pop() {
+            let idx = reuse_idx as usize;
+            let next_gen = self.metas[idx].generation.wrapping_add(1);
+            meta.generation = next_gen;
+            self.metas[idx] = meta;
+            self.payloads[idx] = Some(payload);
+            self.active_count += 1;
+            ModuleSlot(reuse_idx)
+        } else {
+            let slot = ModuleSlot(self.metas.len() as u32);
+            meta.generation = 1;
+            self.metas.push(meta);
+            self.payloads.push(Some(payload));
+            self.active_count += 1;
+            slot
+        }
+    }
+
+    pub fn free(&mut self, slot: ModuleSlot) -> Option<K> {
+        let idx = slot.0 as usize;
+        if idx >= self.metas.len() || !self.metas[idx].alive {
+            return None;
+        }
+        self.metas[idx].alive = false;
+        self.metas[idx].executing = false;
+        self.metas[idx].generation = self.metas[idx].generation.wrapping_add(1);
+        self.metas[idx].schedule.set_index_in_logic(-1);
+        self.free_list.push(slot.0);
+        self.active_count -= 1;
+        self.payloads[idx].take()
+    }
+
+    #[inline]
+    pub fn is_alive(&self, slot: ModuleSlot) -> bool {
+        let idx = slot.0 as usize;
+        idx < self.metas.len() && self.metas[idx].alive
+    }
+
+    #[inline]
+    pub fn meta(&self, slot: ModuleSlot) -> &ModuleMeta {
+        &self.metas[slot.0 as usize]
+    }
+
+    #[inline]
+    pub fn meta_mut(&mut self, slot: ModuleSlot) -> &mut ModuleMeta {
+        &mut self.metas[slot.0 as usize]
+    }
+
+    #[inline]
+    pub fn payload(&self, slot: ModuleSlot) -> Option<&K> {
+        let idx = slot.0 as usize;
+        if idx < self.metas.len() && self.metas[idx].alive {
+            self.payloads[idx].as_ref()
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn payload_mut(&mut self, slot: ModuleSlot) -> Option<&mut K> {
+        let idx = slot.0 as usize;
+        if idx < self.metas.len() && self.metas[idx].alive {
+            self.payloads[idx].as_mut()
+        } else {
+            None
+        }
+    }
+
+    /// Takes the payload out for Take-and-Restore dispatch; returns `(payload, ctx, generation)`.
+    pub fn take_payload(&mut self, slot: ModuleSlot) -> Option<(K, ModuleContext, u32)> {
+        let idx = slot.0 as usize;
+        if idx >= self.metas.len() {
+            return None;
+        }
+        let meta = &mut self.metas[idx];
+        if !meta.alive || meta.executing {
+            return None;
+        }
+        let payload = self.payloads[idx].take()?;
+        meta.executing = true;
+        Some((payload, meta.context(slot), meta.generation))
+    }
+
+    /// Restores a taken payload if the slot was not freed/reallocated during execution.
+    pub fn restore_payload(&mut self, slot: ModuleSlot, generation: u32, payload: K) {
+        let idx = slot.0 as usize;
+        if idx >= self.metas.len() {
+            return;
+        }
+        let meta = &mut self.metas[idx];
+        if meta.alive && meta.executing && meta.generation == generation {
+            self.payloads[idx] = Some(payload);
+            meta.executing = false;
+        }
+    }
+}
+
+impl<K> ScheduleStore<ModuleSlot> for ModuleArena<K> {
+    #[inline]
+    fn schedule(&self, handle: ModuleSlot) -> &UpdateModuleScheduleState {
+        &self.metas[handle.0 as usize].schedule
+    }
+
+    #[inline]
+    fn schedule_mut(&mut self, handle: ModuleSlot) -> &mut UpdateModuleScheduleState {
+        &mut self.metas[handle.0 as usize].schedule
+    }
+}
+
+/// Executes `f(&mut payload, world, ctx)` using Take-and-Restore so `world` (objects, scheduler,
+/// and all sibling modules in the arena) remains mutably accessible with zero borrow conflicts.
+pub fn with_module_dispatch<W, K, R>(
+    world: &mut W,
+    mod_slot: ModuleSlot,
+    arena_mut: fn(&mut W) -> &mut ModuleArena<K>,
+    f: impl FnOnce(&mut K, &mut W, ModuleContext) -> R,
+) -> Option<R> {
+    let (mut payload, ctx, gen_id) = arena_mut(world).take_payload(mod_slot)?;
+    let out = f(&mut payload, world, ctx);
+    arena_mut(world).restore_payload(mod_slot, gen_id, payload);
+    Some(out)
+}
+
+#[derive(Debug, Clone)]
+struct ObjectNode<T> {
+    id: ObjectId,
+    alive: bool,
+    in_world_list: bool,
+    prev_in_world: Option<ObjectSlot>,
+    next_in_world: Option<ObjectSlot>,
+    data: Option<T>,
+}
+
+/// Deterministic slot-indexed object storage with intrusive doubly-linked world list (`m_objList`).
+#[derive(Debug, Clone)]
+pub struct ObjectArena<T> {
+    nodes: Vec<ObjectNode<T>>,
+    id_to_slot: BTreeMap<ObjectId, ObjectSlot>,
+    free_list: Vec<u32>,
+    world_head: Option<ObjectSlot>,
+    world_tail: Option<ObjectSlot>,
+    active_count: usize,
+}
+
+impl<T> Default for ObjectArena<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> ObjectArena<T> {
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            id_to_slot: BTreeMap::new(),
+            free_list: Vec::new(),
+            world_head: None,
+            world_tail: None,
+            active_count: 0,
+        }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.active_count
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.active_count == 0
+    }
+
+    #[inline]
+    pub fn slot_by_id(&self, id: ObjectId) -> Option<ObjectSlot> {
+        self.id_to_slot.get(&id).copied()
+    }
+
+    #[inline]
+    pub fn is_alive(&self, slot: ObjectSlot) -> bool {
+        let idx = slot.0 as usize;
+        idx < self.nodes.len() && self.nodes[idx].alive
+    }
+
+    #[inline]
+    pub fn is_in_world_list(&self, slot: ObjectSlot) -> bool {
+        let idx = slot.0 as usize;
+        idx < self.nodes.len() && self.nodes[idx].alive && self.nodes[idx].in_world_list
+    }
+
+    #[inline]
+    pub fn id_of(&self, slot: ObjectSlot) -> Option<ObjectId> {
+        let idx = slot.0 as usize;
+        if idx < self.nodes.len() && self.nodes[idx].alive {
+            Some(self.nodes[idx].id)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn get(&self, slot: ObjectSlot) -> Option<&T> {
+        let idx = slot.0 as usize;
+        if idx < self.nodes.len() && self.nodes[idx].alive {
+            self.nodes[idx].data.as_ref()
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, slot: ObjectSlot) -> Option<&mut T> {
+        let idx = slot.0 as usize;
+        if idx < self.nodes.len() && self.nodes[idx].alive {
+            self.nodes[idx].data.as_mut()
+        } else {
+            None
+        }
+    }
+
+    pub fn spawn(&mut self, id: ObjectId, data: T, link_world: bool) -> ObjectSlot {
+        debug_assert!(!self.id_to_slot.contains_key(&id), "duplicate ObjectId {:?}", id);
+        let node = ObjectNode {
+            id,
+            alive: true,
+            in_world_list: false,
+            prev_in_world: None,
+            next_in_world: None,
+            data: Some(data),
+        };
+        let slot = if let Some(reuse_idx) = self.free_list.pop() {
+            self.nodes[reuse_idx as usize] = node;
+            ObjectSlot(reuse_idx)
+        } else {
+            let s = ObjectSlot(self.nodes.len() as u32);
+            self.nodes.push(node);
+            s
+        };
+        self.id_to_slot.insert(id, slot);
+        self.active_count += 1;
+        if link_world {
+            self.link_into_world(slot);
+        }
+        slot
+    }
+
+    pub fn link_into_world(&mut self, slot: ObjectSlot) {
+        let idx = slot.0 as usize;
+        if idx >= self.nodes.len() || !self.nodes[idx].alive || self.nodes[idx].in_world_list {
+            return;
+        }
+        let prev_tail = self.world_tail;
+        self.nodes[idx].prev_in_world = prev_tail;
+        self.nodes[idx].next_in_world = None;
+        self.nodes[idx].in_world_list = true;
+        if let Some(tail) = prev_tail {
+            self.nodes[tail.0 as usize].next_in_world = Some(slot);
+        } else {
+            self.world_head = Some(slot);
+        }
+        self.world_tail = Some(slot);
+    }
+
+    pub fn unlink_from_world(&mut self, slot: ObjectSlot) {
+        let idx = slot.0 as usize;
+        if idx >= self.nodes.len() || !self.nodes[idx].alive || !self.nodes[idx].in_world_list {
+            return;
+        }
+        let prev = self.nodes[idx].prev_in_world;
+        let next = self.nodes[idx].next_in_world;
+        if let Some(p) = prev {
+            self.nodes[p.0 as usize].next_in_world = next;
+        } else {
+            self.world_head = next;
+        }
+        if let Some(n) = next {
+            self.nodes[n.0 as usize].prev_in_world = prev;
+        } else {
+            self.world_tail = prev;
+        }
+        self.nodes[idx].prev_in_world = None;
+        self.nodes[idx].next_in_world = None;
+        self.nodes[idx].in_world_list = false;
+    }
+
+    pub fn despawn(&mut self, slot: ObjectSlot) -> Option<T> {
+        let idx = slot.0 as usize;
+        if idx >= self.nodes.len() || !self.nodes[idx].alive {
+            return None;
+        }
+        self.unlink_from_world(slot);
+        let id = self.nodes[idx].id;
+        self.id_to_slot.remove(&id);
+        self.nodes[idx].alive = false;
+        self.free_list.push(slot.0);
+        self.active_count -= 1;
+        self.nodes[idx].data.take()
+    }
+
+    /// Returns a deterministic iterator over active world-list [`ObjectSlot`]s in linked order.
+    #[inline]
+    pub fn world_iter(&self) -> WorldObjectIter<'_, T> {
+        WorldObjectIter {
+            arena: self,
+            next: self.world_head,
+        }
+    }
+}
+
+pub struct WorldObjectIter<'a, T> {
+    arena: &'a ObjectArena<T>,
+    next: Option<ObjectSlot>,
+}
+
+impl<'a, T> Iterator for WorldObjectIter<'a, T> {
+    type Item = ObjectSlot;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let cur = self.next?;
+        self.next = self.arena.nodes[cur.0 as usize].next_in_world;
+        Some(cur)
+    }
+}
