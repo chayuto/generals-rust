@@ -398,7 +398,6 @@ fn exec_step(sm: &mut StateMachine<SimTraceCtx>, ctx: &mut SimTraceCtx, kind: i3
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-077 (crates/zh_common/src/core/state_machine.rs)"]
 fn test_pkt077_state_machine_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT077_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-077.json");
