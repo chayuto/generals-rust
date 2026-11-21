@@ -2,8 +2,8 @@
 //!
 //! - `compression` (`WP-7.2b`): the EA legacy codecs behind `CompressionManager`
 //!   (RefPack `EAR`, BTree `EAB`, Huffman `EAH`).
-//!
-//! `PKT-451` (`DataChunk`, the `.map` chunk container) will land here once it has its own
-//! C++ golden-vector oracle.
+//! - `data_chunk` (`PKT-451`): EA tagged chunk container reader/writer (`CkMp`)
+//!   used by `.map`, `.wak`, and retail binary assets.
 
 pub mod compression;
+pub mod data_chunk;
