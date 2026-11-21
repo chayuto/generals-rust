@@ -15,7 +15,6 @@ use zh_common::xfer::XferCrc;
 const PKT022_JSON: &str = include_str!("../../../docs/golden_vectors/PKT-022.json");
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-022 (crates/zh_common/src/math/geometry.rs)"]
 fn test_pkt022_geometry_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT022_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-022.json");
