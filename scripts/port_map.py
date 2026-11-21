@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parent.parent
 VECTOR_COUNT_RE = re.compile(r'"vector_count"\s*:\s*(\d+)')
-IGNORED_TEST_RE = re.compile(r"#\[\s*ignore\b")
+IGNORED_TEST_RE = re.compile(r"(?m)^\s*#\[\s*ignore\b")
 
 
 def classify_rust_target(path: Path) -> str:
@@ -43,15 +43,22 @@ def inspect_golden_oracles(repo_root: Path) -> List[Dict[str, str]]:
     if not gv_dir.is_dir():
         return rows
     for p in sorted(gv_dir.glob("*.json"), key=lambda x: x.name):
-        header = p.read_text(encoding="utf-8", errors="replace")[:4096]
-        m = VECTOR_COUNT_RE.search(header)
+        with p.open("r", encoding="utf-8", errors="replace") as f:
+            header = f.read(4096)
+            m = VECTOR_COUNT_RE.search(header)
+            has_sha = '"source_sha256"' in header
+            if m is None or not has_sha:
+                full_text = header + f.read()
+                if m is None:
+                    m = VECTOR_COUNT_RE.search(full_text)
+                if not has_sha:
+                    has_sha = '"source_sha256"' in full_text
         vec_count = m.group(1) if m else "-"
-        has_sha = "yes" if '"source_sha256"' in header else "no"
         rows.append(
             {
                 "path": p.relative_to(repo_root).as_posix(),
                 "vector_count": vec_count,
-                "source_sha256": has_sha,
+                "source_sha256": "yes" if has_sha else "no",
             }
         )
     return rows

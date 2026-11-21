@@ -65,8 +65,14 @@ def create_fixture_repo(root: Path) -> None:
     (root / "docs/golden_vectors/PKT-001.json").write_text(
         '{\n  "source_sha256": {},\n  "vector_count": 10\n}\n', encoding="utf-8"
     )
+    large_prefix = '"enum_table": "' + ("x" * 5000) + '"'
+    (root / "docs/golden_vectors/PKT-999.json").write_text(
+        '{\n  ' + large_prefix + ',\n  "source_sha256": {},\n  "vector_count": 777\n}\n',
+        encoding="utf-8",
+    )
     (root / "crates/zh_common/tests/golden_pkt001.rs").write_text(
-        "#[test]\nfn pass() {}\n", encoding="utf-8"
+        "//! When ready, remove the #[ignore] attribute below.\n#[test]\nfn pass() {}\n",
+        encoding="utf-8",
     )
     (root / "crates/zh_common/tests/golden_pkt002.rs").write_text(
         '#[test]\n#[ignore = "pending"]\nfn wip() {}\n', encoding="utf-8"
@@ -92,6 +98,8 @@ class PortMapTests(unittest.TestCase):
             self.assertIn("| Phase 2 | 0 | 0 | 1 | 1 |", first)
             self.assertIn("| `zh_common` | `crates/zh_common/src/extra.rs` | `implemented` |", first)
             self.assertIn("| `docs/golden_vectors/PKT-001.json` | 10 | yes |", first)
+            self.assertIn("| `docs/golden_vectors/PKT-999.json` | 777 | yes |", first)
+            self.assertIn("| `zh_common` | `crates/zh_common/tests/golden_pkt001.rs` | `active` |", first)
             self.assertIn("| `zh_common` | `crates/zh_common/tests/golden_pkt002.rs` | `seeded (ignored)` |", first)
 
             # Write and check pass

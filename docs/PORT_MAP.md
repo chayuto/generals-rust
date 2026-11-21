@@ -77,7 +77,7 @@
 | `docs/golden_vectors/PKT-064.json` | 1000 | no |
 | `docs/golden_vectors/PKT-077.json` | 1000 | no |
 | `docs/golden_vectors/PKT-087.json` | 1000 | no |
-| `docs/golden_vectors/PKT-444.json` | - | yes |
+| `docs/golden_vectors/PKT-444.json` | 1000 | yes |
 | `docs/golden_vectors/PKT-451.json` | 1000 | yes |
 | `docs/golden_vectors/WP2_1_Xfer.json` | 1000 | no |
 | `docs/golden_vectors/WP2_2a_GameMath.json` | 2000 | no |
@@ -93,21 +93,21 @@
 |---|---|---|
 | `zh_common` | `crates/zh_common/tests/golden_gamemath.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_pkt001_002.rs` | `active` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt004.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt016.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt017.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt022.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt023.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt038.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt064.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt077.rs` | `seeded (ignored)` |
-| `zh_common` | `crates/zh_common/tests/golden_pkt087.rs` | `seeded (ignored)` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt004.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt016.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt017.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt022.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt023.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt038.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt064.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt077.rs` | `active` |
+| `zh_common` | `crates/zh_common/tests/golden_pkt087.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_pkt451_datachunk.rs` | `active` |
-| `zh_common` | `crates/zh_common/tests/golden_wp7_2b_compression.rs` | `seeded (ignored)` |
+| `zh_common` | `crates/zh_common/tests/golden_wp7_2b_compression.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_xfer.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt003.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt444_messagestream.rs` | `seeded (ignored)` |
 | `zh_logic` | `crates/zh_logic/tests/golden_sleepy_heap.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_1_economy.rs` | `active` |
-| `zh_logic` | `crates/zh_logic/tests/golden_wp3_2a_rules.rs` | `seeded (ignored)` |
+| `zh_logic` | `crates/zh_logic/tests/golden_wp3_2a_rules.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_3a_combat.rs` | `active` |
