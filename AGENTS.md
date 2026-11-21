@@ -42,7 +42,7 @@ This verifies that:
    - When referring to agent tiers in Issues or Discussions, use the neutral project tier names: **`Tier 0 (AST Slicer)`**, **`Tier 1A (Lite Worker)`**, **`Tier 1B (Fast Worker)`**, **`Tier 2 (Engineer)`**, **`Tier 3 (Architect)`**.
 2. **No Proprietary Game Assets in Git:**
    - Never stage or commit `.big`, `.bik`, `.map`, `.wak`, `.tga`, `.dds`, `.w3d`, `.csf`, `.str`, `.mp3`, `.wav`, `.exe`, `.dll`, `.crc`, or retail archives.
-   - Read retail game data in place from `~/Games/generalszh` via `-assetPath ~/Games/generalszh` (`CNC_GENERALS_ZH_PATH`).
+   - Read retail game data in place from `~/Games/generalszh` via `-assetPath ~/Games/generalszh` (`CNC_GENERALS_ZH_PATH`). Download and layout: [docs/LOCAL_ASSETS.md](docs/LOCAL_ASSETS.md).
 3. **Complete Independence from Other User Repositories:**
    - Do not read, modify, import crates from, or link against any other repository on this machine (`cnc-gen-rig`, `cnc-gen-engine`, `rust-ra2-arena`, `ra2-arena-engine`, `civrig`, `rignarok`).
 4. **No Upstream Contact:**
@@ -142,6 +142,7 @@ Apply this routing rule strictly before creating remote Issues:
 - [docs/MULTI_AGENT_ROADMAP.md](docs/MULTI_AGENT_ROADMAP.md) — Complete task/subtask dependency DAG (`Issues #4..#33` & `PKT-001..PKT-463`), 6 master unblockers, and Milestones `M0`–`M7`.
 - [docs/RESEARCH.md](docs/RESEARCH.md) — Verified technical reference for `fbraz3/GeneralsX` at `84a7a20` (48-singleton init table, 16-step `GameLogic::update()` pipeline, `m_sleepyUpdates` heap rules, `Object` + 222 `BehaviorModule` layout, `XferCRC` / `GameLogic::getCRC()` specification).
 - [docs/AGENT_WORKFLOW_AND_CI.md](docs/AGENT_WORKFLOW_AND_CI.md) — Tier 0 AST Context Slicer design, 4-Tier Agent Routing matrix, 4-Gate V&V Funnel specification, and Free Public GitHub Actions CI Offload Pipeline.
+- [docs/LOCAL_ASSETS.md](docs/LOCAL_ASSETS.md) — Where the retail Zero Hour assets live locally, how to (re)download them via steamcmd, and usage rules.
 - [docs/RUST_CONVENTIONS.md](docs/RUST_CONVENTIONS.md) — Mandatory C++-to-Rust determinism translation rules, type mappings, and worker cheat sheet.
 - `scripts/bootstrap_repo.sh` — Idempotent environment, git hook, and self-test verifier.
 - `scripts/lint_determinism.py` & `scripts/test_lint_determinism.py` — Gate V1 static determinism linter and its automated V&V unit test suite.
