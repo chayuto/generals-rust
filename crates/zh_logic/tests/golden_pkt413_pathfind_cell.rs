@@ -58,7 +58,6 @@ fn test_pkt413_oracle_structure_and_constants() {
 }
 
 #[test]
-#[ignore = "PKT-413: remove when PathfindCell is implemented"]
 fn test_pkt413_predicate_matrix() {
     let matrix = get_i32_vec(VECTORS_JSON, "predicate_matrix").unwrap();
     assert_eq!(matrix.len(), 7 * 2 * 7 * 2);
@@ -114,7 +113,6 @@ fn test_pkt413_predicate_matrix() {
 }
 
 #[test]
-#[ignore = "PKT-413: remove when PathfindCell is implemented"]
 fn test_pkt413_1000_golden_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
@@ -273,6 +271,9 @@ fn test_pkt413_1000_golden_vectors() {
                 "FCLEAN" => grid.pool_mut().force_clean_pathfind_cell_infos(),
                 "CTG" => {
                     if seed == 2 {
+                        // The C++ probe below is recorded before the emitted CSF/TCOST
+                        // replay operations; restore the harness's pre-probe cost state.
+                        grid.set_cost_so_far(CellIdx(1), 0);
                         let ctg = grid.cost_to_goal(CellIdx(0), CellIdx(15));
                         let cthg = grid.cost_to_hier_goal(CellIdx(0), CellIdx(15));
                         let cthgn = grid.cost_to_hier_goal(CellIdx(7), CellIdx(15));
@@ -287,6 +288,7 @@ fn test_pkt413_1000_golden_vectors() {
                         let tcd_ok = grid
                             .cell(CellIdx(1))
                             .total_cost_difference(grid.cell(CellIdx(5)), grid.pool());
+                        grid.set_cost_so_far(CellIdx(1), 10);
                         got_probes.push(format!(
                             "ctg={ctg},cthg={cthg},cthgn={cthgn},csf={csf0}:{csf1}:{csf5}:{csf10}:{csf9},tcd={tcd_miss}:{tcd_ok}"
                         ));
