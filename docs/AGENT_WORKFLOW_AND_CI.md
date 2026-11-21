@@ -81,19 +81,20 @@ Agents working on `generals-rust` operate in one of two distinct physical enviro
 
 ---
 
-### 1.5 Local Execution vs. Remote `env:ephemeral-web` Delegation Thresholds (Empirical Policy)
+### 1.5 Local Execution vs. Remote `env:ephemeral-web` Tokenomics Constitution Rule
 
-Phase 2 Wave 1 (`5 / 5` remote PRs `#39`–`#43` merged in `5–10` min wall-clock time each) established the exact break-even boundary between doing a packet directly in the `env:local-full` session versus delegating it to a sandboxed `env:ephemeral-web` worker:
+**Hard Project Rule (`AGENTS.md` §4.4):** **Never create a remote `env:ephemeral-web` task if local creation/seeding + review cost exceeds finishing the job locally.** Because generating the C++ Golden Vector oracle is mandatory either way, remote delegation only achieves net positive tokenomics when a single stub surface and skeleton leverage a large, self-contained translation body:
 
-| Target Shape | Observed Example(s) | Decision | Rationale |
+| Target Shape | Observed / Concrete Examples | Decision | Tokenomics Rationale |
 | :--- | :--- | :--- | :--- |
-| **Tiny Leaf (`< ~200` Rust LOC)** | `PKT-023` (`+28 LOC`), `PKT-017` (`+60 LOC`), `PKT-064` (`+67 LOC`) | **Do Locally** (or bundle) | C++ vector generation + test authoring is mandatory either way; writing a `todo!()` skeleton, ticket, and PR review costs more than writing the module directly. |
-| **Break-Even (`~140–200` Rust LOC)** | `PKT-004` (`+137 LOC`), `PKT-015+016` (`+188 LOC`) | **Bundle if possible** | Only worthwhile remotely when multiple small files share one harness and ~5 min parallel wall-clock offload justifies the PR cycle. |
-| **High-ROI Sweet Spot (`~300–1,100` Rust LOC)** | `PKT-022` (`GeometryInfo`), `PKT-038` (`Dict`), `PKT-077` (`StateMachine`), `PKT-087` (`INI`), `WP-3.2a` (`12`-packet Enum/BitFlags bundle) | **Delegate Remotely (`env:ephemeral-web`)** | Substantial implementation complexity + zero C++ search needed; offloads heavy token/turn volume cleanly onto separate remote quota under 3-OS CI. |
-| **Core Spines & FFI (`C4` / `env:local-full`)** | `GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `Pathfinder`, `GameLogic::update()` | **Always Keep Local** | Requires deep local `vendor/GeneralsX` context, iterative CMake/FFI bring-up, retail `.big`/replay access, or desync triage. |
+| **Tiny Leaf (`< ~300` C++ / `< ~200` Rust LOC)** | `PKT-023` (`+28 LOC`), `PKT-017` (`+60 LOC`), `PKT-064` (`+67 LOC`) | **Do Locally** | Skeleton + Issue + PR review costs more than writing the module directly alongside its Golden Vectors. |
+| **Multi-Class Small-Store Bundle (hand-seeded)** | `WP-3.1a` (`Money`/`Energy`/`Handicap`/`MissionStats`), `WP-3.2b`, `WP-3.3a` | **Do Locally** | Hand-writing stubs, compiling `todo!()` skeletons, and writing `tests/golden_*.rs` for 4–5 small classes consumes ~60–75% of direct implementation cost locally. |
+| **Heavy Coupling / OS Glue (`before seam ready`)** | `BIGFileSystem` (OS path discovery), `TurretAI` / `Locomotor` / `Recorder` (prior to Phase 4/5 seams) | **Keep Local / Defer** | Heavy C++ stubbing of transitive engine globals costs more tokens than writing against clean Rust seams later. |
+| **Self-Contained Heavyweight (`>= ~800` C++ `.cpp` lines, tiny stub surface) or Single-Schema Bundle** | `PKT-087` (`INI`), `PKT-077` (`StateMachine`), `PKT-451` (`DataChunk`), `WP-7.2b` (EA `Compression` codecs), `WP-3.2a` (`12`-enum registry) | **Delegate Remotely (`env:ephemeral-web`)** | One minimal harness + one compact skeleton unlocks `~400–1,100+` Rust LOC of dense algorithmic work on separate remote quota under 3-OS CI. |
+| **Core Spines & FFI (`C4` / `env:local-full`)** | `GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `Pathfinder`, `GameLogic::update()` | **Always Keep Local** | Requires deep `vendor/GeneralsX` context, CMake/FFI bring-up, retail assets, or desync triage. |
 
 Operational rules enforced alongside this table:
-1. **Never hand-author skeletons for tiny standalone packets (`< ~200` LOC):** implement them directly alongside their C++ Golden Vectors, or group 3–12 related leaves into one `~400–1,100` LOC bundled ticket.
+1. **Tokenomics gate before seeding:** Verify the target needs minimal stubs and delivers high algorithmic implementation-to-skeleton leverage before creating an `env:ephemeral-web` Issue; otherwise implement directly in the local pass.
 2. **Use Squash & Merge on remote PRs** with a clean conventional commit message so `main` stays free of empty planning commits and remote branch prefixes.
 3. **Automate Phase 5–6 Fan-Out Once (`WP-5.0`):** Generate C++ Golden Vectors, packet docs, and GitHub Issues programmatically via the shared adapter before fanning out `WP-5.1`–`WP-5.4` (`221` modules) and `WP-6.4` (`29` script packets).
 
