@@ -8,4 +8,5 @@ pub mod object;
 pub mod pathfinder;
 pub mod rules;
 pub mod scheduler;
+pub mod scripts;
 pub mod spatial;
