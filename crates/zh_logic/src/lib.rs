@@ -5,5 +5,6 @@ pub mod combat;
 pub mod economy;
 pub mod gamelogic;
 pub mod object;
+pub mod pathfinder;
 pub mod rules;
 pub mod scheduler;
