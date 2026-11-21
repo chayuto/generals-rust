@@ -175,7 +175,6 @@ fn parse_root(
 }
 
 #[test]
-#[ignore = "PKT-451: remove when DataChunk is implemented"]
 fn test_pkt451_writer_and_reader_1000_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
@@ -199,7 +198,11 @@ fn test_pkt451_writer_and_reader_1000_vectors() {
         let tail_bytes = decode_hex_bytes(get_str(line, "tail_hex").unwrap()).unwrap();
 
         let dict_bool_k = get_str(line, "dict_bool_k").unwrap();
-        let dict_bool_v: Bool = if get_u32(line, "dict_bool_v").unwrap() != 0 { TRUE } else { FALSE };
+        let dict_bool_v: Bool = if get_u32(line, "dict_bool_v").unwrap() != 0 {
+            TRUE
+        } else {
+            FALSE
+        };
         let dict_int_k = get_str(line, "dict_int_k").unwrap();
         let dict_int_v = get_i32(line, "dict_int_v").unwrap();
         let dict_real_k = get_str(line, "dict_real_k").unwrap();
@@ -254,12 +257,21 @@ fn test_pkt451_writer_and_reader_1000_vectors() {
             out.close_data_chunk().unwrap();
             out.finish().unwrap();
         }
-        assert_eq!(written, expected_raw, "seed {seed}: DataChunkOutput wire mismatch");
+        assert_eq!(
+            written, expected_raw,
+            "seed {seed}: DataChunkOutput wire mismatch"
+        );
 
-        for (mode, blob) in [("raw", expected_raw.as_slice()), ("ear", ear_bytes.as_slice())] {
+        for (mode, blob) in [
+            ("raw", expected_raw.as_slice()),
+            ("ear", ear_bytes.as_slice()),
+        ] {
             let mut cfis = CachedFileInputStream::from_bytes(blob);
             let mut dci = DataChunkInput::<ParseState>::new(&mut cfis);
-            assert!(dci.is_valid_file_type(), "seed {seed} ({mode}): invalid CkMp");
+            assert!(
+                dci.is_valid_file_type(),
+                "seed {seed} ({mode}): invalid CkMp"
+            );
 
             let mut st = ParseState::default();
             st.expected_bytes_len = val_bytes.len();
@@ -270,15 +282,24 @@ fn test_pkt451_writer_and_reader_1000_vectors() {
             dci.register_parser(dup_label, root_label, parse_dup_loser);
             dci.register_parser(dup_label, root_label, parse_dup_winner);
 
-            assert!(dci.parse(&mut st).unwrap(), "seed {seed} ({mode}): parse returned false");
-            assert_eq!(st.tag, 2, "seed {seed} ({mode}): LIFO duplicate parser loser ran instead of winner");
-            assert_eq!(st.crc, expected_crc, "seed {seed} ({mode}): parsed CRC mismatch");
+            assert!(
+                dci.parse(&mut st)
+                    .unwrap_or_else(|error| panic!("seed {seed} ({mode}): parse error {error:?}")),
+                "seed {seed} ({mode}): parse returned false"
+            );
+            assert_eq!(
+                st.tag, 2,
+                "seed {seed} ({mode}): LIFO duplicate parser loser ran instead of winner"
+            );
+            assert_eq!(
+                st.crc, expected_crc,
+                "seed {seed} ({mode}): parsed CRC mismatch"
+            );
         }
     }
 }
 
 #[test]
-#[ignore = "PKT-451: remove when DataChunk is implemented"]
 fn test_pkt451_error_paths_and_bounded_corruption() {
     // 1. Non-CkMp buffer rejected cleanly
     let mut cfis = CachedFileInputStream::from_bytes(b"NOPE\x00\x00\x00\x00");
@@ -296,14 +317,8 @@ fn test_pkt451_error_paths_and_bounded_corruption() {
 
     // 3. Unknown Dict data type returns CorruptFormat error without panic
     let bad_dict: &[u8] = &[
-        b'C', b'k', b'M', b'p',
-        1, 0, 0, 0,
-        1, b'X', 1, 0, 0, 0,
-        1, 0, 0, 0,
-        1, 0,
-        6, 0, 0, 0,
-        1, 0,
-        99, 1, 0, 0,
+        b'C', b'k', b'M', b'p', 1, 0, 0, 0, 1, b'X', 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, 0, 0, 0, 1,
+        0, 99, 1, 0, 0,
     ];
     let mut nk = NameKeyGenerator::new();
     nk.init();
@@ -311,7 +326,10 @@ fn test_pkt451_error_paths_and_bounded_corruption() {
     let mut d_bad = DataChunkInput::<()>::new(&mut s_bad);
     assert!(d_bad.is_valid_file_type());
     let _ = d_bad.open_data_chunk().unwrap();
-    assert_eq!(d_bad.read_dict(&mut nk).unwrap_err(), DataChunkError::CorruptFormat);
+    assert_eq!(
+        d_bad.read_dict(&mut nk).unwrap_err(),
+        DataChunkError::CorruptFormat
+    );
 
     // 4. Truncated prefixes never panic
     let raw0 = decode_hex_bytes(get_str(first, "raw_hex").unwrap()).unwrap();
