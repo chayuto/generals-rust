@@ -214,7 +214,6 @@ fn test_wp7_2b_payload_generator_matches_cpp() {
 }
 
 #[test]
-#[ignore = "WP-7.2b: remove when the codecs are implemented"]
 fn test_wp7_2b_compression_1000_small_golden_vectors() {
     let lines = vector_lines();
     for line in &lines[..SMALL_COUNT] {
@@ -273,7 +272,6 @@ fn test_wp7_2b_compression_1000_small_golden_vectors() {
 }
 
 #[test]
-#[ignore = "WP-7.2b: remove when the codecs are implemented"]
 fn test_wp7_2b_compression_12_large_golden_vectors() {
     let lines = vector_lines();
     for line in &lines[SMALL_COUNT..] {
@@ -301,7 +299,6 @@ fn test_wp7_2b_compression_12_large_golden_vectors() {
 }
 
 #[test]
-#[ignore = "WP-7.2b: remove when the codecs are implemented"]
 fn test_wp7_2b_manager_header_rules() {
     // CompressionManager::getCompressionType / getUncompressedSize / compressData
     // (CompressionManager.cpp): magic table, the 8-byte minimum, and the unsupported types.
@@ -374,7 +371,6 @@ fn test_wp7_2b_manager_header_rules() {
 }
 
 #[test]
-#[ignore = "WP-7.2b: remove when the codecs are implemented"]
 fn test_wp7_2b_decoders_never_panic_on_truncated_or_corrupt_input() {
     // No C++ reference here: the C++ decoders read and write out of bounds on bad input.
     // The port must return (Ok or Err) for every truncation and single-byte corruption.
