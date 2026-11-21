@@ -49,6 +49,19 @@ pub enum DictValue {
     UnicodeString(Vec<u16>),
 }
 
+impl DictValue {
+    #[inline]
+    fn data_type(&self) -> DictDataType {
+        match self {
+            Self::Bool(_) => DictDataType::Bool,
+            Self::Int(_) => DictDataType::Int,
+            Self::Real(_) => DictDataType::Real,
+            Self::AsciiString(_) => DictDataType::AsciiString,
+            Self::UnicodeString(_) => DictDataType::UnicodeString,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Dict {
     pairs: Vec<(NameKeyType, DictValue)>,
@@ -61,7 +74,7 @@ impl Dict {
 
     pub fn with_capacity(num_pairs_to_preallocate: Int) -> Self {
         let cap = if num_pairs_to_preallocate > 0 {
-            num_pairs_to_preallocate as usize
+            (num_pairs_to_preallocate as usize).min(DICT_MAX_LEN)
         } else {
             0
         };
@@ -71,107 +84,272 @@ impl Dict {
     }
 
     pub fn clear(&mut self) {
-        todo!("PKT-038: implement Dict::clear")
+        self.pairs.clear();
     }
 
     pub fn get_pair_count(&self) -> Int {
-        todo!("PKT-038: implement Dict::getPairCount")
+        self.pairs.len().min(DICT_MAX_LEN) as Int
     }
 
     pub fn get_nth_key(&self, n: Int) -> NameKeyType {
-        todo!("PKT-038: implement Dict::getNthKey")
+        if n < 0 {
+            return NameKeyType::INVALID;
+        }
+        match self.pairs.get(n as usize) {
+            Some((key, _)) => *key,
+            None => NameKeyType::INVALID,
+        }
     }
 
     pub fn get_type(&self, key: NameKeyType) -> DictDataType {
-        todo!("PKT-038: implement Dict::getType")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => self.pairs[index].1.data_type(),
+            Err(_) => DictDataType::None,
+        }
     }
 
     pub fn known(&self, key: NameKeyType, d: DictDataType) -> Bool {
-        let _ = (key, d, FALSE, TRUE);
-        todo!("PKT-038: implement Dict::known")
+        if d == DictDataType::None {
+            return FALSE;
+        }
+        if self.get_type(key) == d {
+            TRUE
+        } else {
+            FALSE
+        }
     }
 
     pub fn get_nth_type(&self, n: Int) -> DictDataType {
-        todo!("PKT-038: implement Dict::getNthType")
+        if n < 0 {
+            return DictDataType::None;
+        }
+        match self.pairs.get(n as usize) {
+            Some((_, value)) => value.data_type(),
+            None => DictDataType::None,
+        }
     }
 
     pub fn get_bool(&self, key: NameKeyType, exists: Option<&mut Bool>) -> Bool {
-        let _ = (key, exists);
-        todo!("PKT-038: implement Dict::getBool")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => match &self.pairs[index].1 {
+                DictValue::Bool(value) => {
+                    if let Some(exists) = exists {
+                        *exists = TRUE;
+                    }
+                    *value
+                }
+                _ => {
+                    if let Some(exists) = exists {
+                        *exists = FALSE;
+                    }
+                    FALSE
+                }
+            },
+            Err(_) => {
+                if let Some(exists) = exists {
+                    *exists = FALSE;
+                }
+                FALSE
+            }
+        }
     }
 
     pub fn get_int(&self, key: NameKeyType, exists: Option<&mut Bool>) -> Int {
-        let _ = (key, exists);
-        todo!("PKT-038: implement Dict::getInt")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => match &self.pairs[index].1 {
+                DictValue::Int(value) => {
+                    if let Some(exists) = exists {
+                        *exists = TRUE;
+                    }
+                    *value
+                }
+                _ => {
+                    if let Some(exists) = exists {
+                        *exists = FALSE;
+                    }
+                    0
+                }
+            },
+            Err(_) => {
+                if let Some(exists) = exists {
+                    *exists = FALSE;
+                }
+                0
+            }
+        }
     }
 
     pub fn get_real(&self, key: NameKeyType, exists: Option<&mut Bool>) -> Real {
-        let _ = (key, exists);
-        todo!("PKT-038: implement Dict::getReal")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => match &self.pairs[index].1 {
+                DictValue::Real(value) => {
+                    if let Some(exists) = exists {
+                        *exists = TRUE;
+                    }
+                    *value
+                }
+                _ => {
+                    if let Some(exists) = exists {
+                        *exists = FALSE;
+                    }
+                    0.0
+                }
+            },
+            Err(_) => {
+                if let Some(exists) = exists {
+                    *exists = FALSE;
+                }
+                0.0
+            }
+        }
     }
 
     pub fn get_ascii_string(&self, key: NameKeyType, exists: Option<&mut Bool>) -> String {
-        let _ = (key, exists);
-        todo!("PKT-038: implement Dict::getAsciiString")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => match &self.pairs[index].1 {
+                DictValue::AsciiString(value) => {
+                    if let Some(exists) = exists {
+                        *exists = TRUE;
+                    }
+                    value.clone()
+                }
+                _ => {
+                    if let Some(exists) = exists {
+                        *exists = FALSE;
+                    }
+                    String::new()
+                }
+            },
+            Err(_) => {
+                if let Some(exists) = exists {
+                    *exists = FALSE;
+                }
+                String::new()
+            }
+        }
     }
 
     pub fn get_unicode_string(&self, key: NameKeyType, exists: Option<&mut Bool>) -> Vec<u16> {
-        let _ = (key, exists);
-        todo!("PKT-038: implement Dict::getUnicodeString")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => match &self.pairs[index].1 {
+                DictValue::UnicodeString(value) => {
+                    if let Some(exists) = exists {
+                        *exists = TRUE;
+                    }
+                    value.clone()
+                }
+                _ => {
+                    if let Some(exists) = exists {
+                        *exists = FALSE;
+                    }
+                    Vec::new()
+                }
+            },
+            Err(_) => {
+                if let Some(exists) = exists {
+                    *exists = FALSE;
+                }
+                Vec::new()
+            }
+        }
     }
 
     pub fn get_nth_bool(&self, n: Int) -> Bool {
-        todo!("PKT-038: implement Dict::getNthBool")
+        if n < 0 {
+            return FALSE;
+        }
+        match self.pairs.get(n as usize) {
+            Some((_, DictValue::Bool(value))) => *value,
+            _ => FALSE,
+        }
     }
 
     pub fn get_nth_int(&self, n: Int) -> Int {
-        todo!("PKT-038: implement Dict::getNthInt")
+        if n < 0 {
+            return 0;
+        }
+        match self.pairs.get(n as usize) {
+            Some((_, DictValue::Int(value))) => *value,
+            _ => 0,
+        }
     }
 
     pub fn get_nth_real(&self, n: Int) -> Real {
-        todo!("PKT-038: implement Dict::getNthReal")
+        if n < 0 {
+            return 0.0;
+        }
+        match self.pairs.get(n as usize) {
+            Some((_, DictValue::Real(value))) => *value,
+            _ => 0.0,
+        }
     }
 
     pub fn get_nth_ascii_string(&self, n: Int) -> String {
-        todo!("PKT-038: implement Dict::getNthAsciiString")
+        if n < 0 {
+            return String::new();
+        }
+        match self.pairs.get(n as usize) {
+            Some((_, DictValue::AsciiString(value))) => value.clone(),
+            _ => String::new(),
+        }
     }
 
     pub fn get_nth_unicode_string(&self, n: Int) -> Vec<u16> {
-        todo!("PKT-038: implement Dict::getNthUnicodeString")
+        if n < 0 {
+            return Vec::new();
+        }
+        match self.pairs.get(n as usize) {
+            Some((_, DictValue::UnicodeString(value))) => value.clone(),
+            _ => Vec::new(),
+        }
     }
 
     pub fn set_bool(&mut self, key: NameKeyType, value: Bool) {
-        let _ = (key, value);
-        todo!("PKT-038: implement Dict::setBool")
+        self.set_value(key, DictValue::Bool(value));
     }
 
     pub fn set_int(&mut self, key: NameKeyType, value: Int) {
-        let _ = (key, value);
-        todo!("PKT-038: implement Dict::setInt")
+        self.set_value(key, DictValue::Int(value));
     }
 
     pub fn set_real(&mut self, key: NameKeyType, value: Real) {
-        let _ = (key, value);
-        todo!("PKT-038: implement Dict::setReal")
+        self.set_value(key, DictValue::Real(value));
     }
 
     pub fn set_ascii_string(&mut self, key: NameKeyType, value: &str) {
-        let _ = (key, value);
-        todo!("PKT-038: implement Dict::setAsciiString")
+        self.set_value(key, DictValue::AsciiString(value.to_owned()));
     }
 
     pub fn set_unicode_string(&mut self, key: NameKeyType, value: &[u16]) {
-        let _ = (key, value);
-        todo!("PKT-038: implement Dict::setUnicodeString")
+        self.set_value(key, DictValue::UnicodeString(value.to_vec()));
     }
 
     pub fn remove(&mut self, key: NameKeyType) -> Bool {
-        let _ = key;
-        todo!("PKT-038: implement Dict::remove")
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => {
+                self.pairs.remove(index);
+                TRUE
+            }
+            Err(_) => FALSE,
+        }
     }
 
     pub fn copy_pair_from(&mut self, that: &Dict, key: NameKeyType) {
-        let _ = (that, key);
-        todo!("PKT-038: implement Dict::copyPairFrom")
+        match that.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => {
+                let value = that.pairs[index].1.clone();
+                self.set_value(key, value);
+            }
+            Err(_) => {
+                self.remove(key);
+            }
+        }
+    }
+
+    fn set_value(&mut self, key: NameKeyType, value: DictValue) {
+        match self.pairs.binary_search_by_key(&key.0, |(k, _)| k.0) {
+            Ok(index) => self.pairs[index].1 = value,
+            Err(index) => self.pairs.insert(index, (key, value)),
+        }
     }
 }

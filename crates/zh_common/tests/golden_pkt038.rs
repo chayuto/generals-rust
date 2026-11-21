@@ -22,7 +22,6 @@ fn rot_crc(crc: u32, word: u32) -> u32 {
 }
 
 #[test]
-#[ignore = "Un-ignore when implementing PKT-038 (crates/zh_common/src/core/dict.rs)"]
 fn test_pkt038_dict_1000_golden_vectors() {
     let lines = extract_vector_lines(PKT038_JSON);
     assert_eq!(lines.len(), 1000, "Expected 1,000 golden vectors in PKT-038.json");
