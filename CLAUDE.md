@@ -17,13 +17,14 @@ The GitHub issue board is the coordination point, not this tree. `env:ephemeral-
 ```bash
 ./scripts/bootstrap_repo.sh                    # session start; also runs everything CI's Linux gate runs
 python3 scripts/lint_determinism.py            # Gate V1 linter (defaults to crates/; pass paths to narrow)
+python3 scripts/port_map.py --check            # verify docs/PORT_MAP.md matches repo state (use --write to update)
 cargo check --workspace                        # Gate V1 typecheck
 cargo test --workspace                         # Gate V2-Golden: every golden-vector suite
 cargo test -p zh_common --test golden_pkt087   # one suite (suites are crates/*/tests/golden_*.rs)
 cargo test -p zh_logic --test golden_sleepy_heap <name_filter>
 ```
 
-Script self-tests (AGENTS.md §1.3 requires one per script in `scripts/`): `python3 scripts/test_lint_determinism.py`, `scripts/test_prep_packet.py`, `scripts/test_apply_ffi_seam.py`, `scripts/validate_manifest.py`.
+Script self-tests (AGENTS.md §1.3 requires one per script in `scripts/`): `python3 scripts/test_lint_determinism.py`, `scripts/test_prep_packet.py`, `scripts/test_apply_ffi_seam.py`, `scripts/test_port_map.py`, `scripts/validate_manifest.py`.
 
 These need `vendor/GeneralsX` (`env:local-full` only):
 - `python3 scripts/prep_packet.py PKT-077` (or a module name) runs the Tier 0 slicer. It writes `packets/phase<N>/<PKT>_<Module>.md` from `docs/MODULE_MANIFEST.json`, the vendor C++ and the worker cheat sheet in `docs/RUST_CONVENTIONS.md`.
@@ -72,4 +73,5 @@ Each module's doc comment names its packet ID, packet doc and golden test (see `
 - To exempt a single line from Gate V1, end it with `// determinism-ok: <reason>`. Use this sparingly.
 - Read `tests/cpp_harness/README.md` before writing or regenerating a C++ harness. It lists the reference-code quirks found so far and the rules that guard against them. The reference workstation is an Apple Silicon Mac, so the harness runs every `__APPLE__` branch, and some of those change data. For example, `gimex.h` writes byte-swapped EAC codec headers unless the EAC sources are built with `-include tests/cpp_harness/stubs_wave4_eac/eac_portable_byteorder.h`.
 - `.githooks/commit-msg` rejects any commit message that contains an assistant or tool brand name, case-insensitively (see its regex). That includes this file's own name, so a commit touching this file should say "agent guidance" instead.
+- **3-attempt stall escalation rule:** If 3 consecutive fix attempts on failing golden vectors fail to shrink the failure count, stop guessing — isolate the minimal failing seed, re-read the C++ source directly, and escalate (`tier:2-engineer` / `tier:3-architect`) with exact diff telemetry if the issue crosses module boundaries.
 - CI (`.github/workflows/ci-guardrails.yml`) runs on Linux for pushes to `main`, `packet/**` and `wp/**`: bootstrap plus `cargo test --workspace`. The macOS and Windows parity jobs run only for `main`, PRs and manual dispatch.

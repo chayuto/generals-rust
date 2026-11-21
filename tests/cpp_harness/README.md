@@ -10,6 +10,9 @@ Each `gen_*.cpp` here compiles unmodified `vendor/GeneralsX` sources, with minim
 4. **Run under sanitizers and at several optimisation levels.** Build once with `-fsanitize=address,undefined` and at `-O0` and `-O2`; all outputs must be byte-identical. A difference means the reference has undefined behaviour or uninitialised reads, which the vectors would otherwise bake in.
 5. **Grep for platform branches before you compile.** The reference workstation is an Apple Silicon Mac, so every `#if defined(__APPLE__)` branch in the code under test is the one the harness runs, while retail data and Windows/Linux builds take the other one. Run `grep -n __APPLE__` on every vendor file the harness compiles, and on the headers those files include, and decide for each hit which side the oracle must follow (usually the non-Apple side). See the watch list below.
 6. **Add a non-ignored Rust test of the oracle's structure** (counts, header bytes, payload regeneration), so a bad regeneration fails CI even before the port exists. `golden_wp7_2b_compression.rs` has two such tests.
+7. **Stamp vendor source SHA-256 fingerprints** (`"source_sha256"`) in every new oracle JSON header so pin drift or unrecorded local edits to vendor sources are detected immediately.
+8. **Include explicit error-path and semantic-trap seeds** (`seed 0..N`) alongside randomized fuzz vectors — e.g. `-0.0` IEEE 754 bit sign preservation, `0`/`-1`/`MIN`/`MAX` boundaries, unknown/malformed enum or INI tokens, and truncated inputs (with bounds checks tested on the Rust side when C++ lacks bounds guards).
+9. **Side-by-side C/C++ shadow compilation (`-Dfn=fn__original`)** for future Phase 4/5 in-process differential Gate V2-FFI / Gate V3 harnesses: compile the reference symbol renamed via `-Dfoo=foo__original` alongside the Rust `#[no_mangle] pub extern "C" fn foo` symbol so a single shadow binary can invoke both and assert bit-exact parity per call.
 
 ## Known reference-code quirks
 

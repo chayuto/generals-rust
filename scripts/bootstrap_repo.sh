@@ -50,7 +50,9 @@ python3 scripts/validate_manifest.py
 python3 scripts/test_prep_packet.py
 python3 scripts/test_apply_ffi_seam.py
 python3 scripts/test_lint_determinism.py
+python3 scripts/test_port_map.py
 python3 scripts/lint_determinism.py
+python3 scripts/port_map.py --check
 if command -v cargo >/dev/null 2>&1 && [[ -f Cargo.toml ]]; then
   cargo test --workspace --quiet
   echo "  ✓ Gate V2-Golden (3,000 C++ Golden Test Vectors) passed via cargo test"
