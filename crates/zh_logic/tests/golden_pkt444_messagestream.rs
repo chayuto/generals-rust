@@ -94,7 +94,6 @@ impl GameMessageTranslator for RecordingTranslator {
 }
 
 #[test]
-#[ignore = "PKT-444: remove when MessageStream is implemented"]
 fn test_pkt444_enum_strings_and_fallbacks() {
     for (ord, expected_name) in parse_enum_table(VECTORS_JSON) {
         assert_eq!(
@@ -112,7 +111,6 @@ fn test_pkt444_enum_strings_and_fallbacks() {
 }
 
 #[test]
-#[ignore = "PKT-444: remove when MessageStream is implemented"]
 fn test_pkt444_arguments_and_stream_1000_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
