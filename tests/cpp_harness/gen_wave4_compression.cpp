@@ -11,7 +11,12 @@
 // stream headers (fb 10 instead of 10 fb) which REF_decode, parsing bytes by hand, then
 // misreads. The canonical format used by Windows/Linux builds and retail .big/.map data is
 // big-endian, so the EAC sources are compiled with stubs_wave4_eac/eac_portable_byteorder.h
-// force-included, which undefines __APPLE__ after the system headers.
+// force-included, which undefines __APPLE__ after the system headers. check_byte_order()
+// refuses to run if the objects were built without it.
+//
+// The output is written to <out.json>.tmp and renamed only after every vector has passed, so
+// a crashing or failing run never truncates the committed JSON. tests/cpp_harness/README.md
+// records these reference-code quirks for future harnesses.
 //
 // Build & run (from repo root; add -fsanitize=address,undefined to every command to check
 // the reference codecs for memory errors):
@@ -32,6 +37,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "refcodex.h"
@@ -173,6 +179,38 @@ static std::vector<uint8_t> compress_like_manager(const char magic[4],
     return enc;
 }
 
+// Refuses to run if the EAC objects were compiled with gimex.h's __APPLE__ native-endian
+// branch (see the byte-order note at the top). Every codec stream must start with its
+// big-endian type word and 24-bit big-endian uncompressed length; on a little-endian Mac
+// without the prelude the encoders write "fb 10 05 00 00" instead of "10 fb 00 00 05".
+static void check_byte_order() {
+    static const uint8_t kProbe[5] = {1, 2, 3, 4, 5};
+    struct Probe {
+        const char* name;
+        EncodeFn encode_fn;
+        uint8_t type_hi;
+    };
+    static const Probe kProbes[] = {
+        {"REF", REF_encode, 0x10u},
+        {"BTREE", BTREE_encode, 0x46u},
+        {"HUFF", HUFF_encode, 0x30u},
+    };
+    for (const Probe& p : kProbes) {
+        std::vector<uint8_t> out(4096u, 0);
+        int ret = p.encode_fn(out.data(), kProbe, 5, nullptr);
+        const uint8_t expect[5] = {p.type_hi, 0xfbu, 0x00u, 0x00u, 0x05u};
+        if (ret < 5 || std::memcmp(out.data(), expect, 5) != 0) {
+            std::fprintf(stderr,
+                "FATAL: %s stream header is %02x %02x %02x %02x %02x, expected big-endian "
+                "%02x fb 00 00 05. Compile the EAC sources with -include "
+                "tests/cpp_harness/stubs_wave4_eac/eac_portable_byteorder.h "
+                "(see tests/cpp_harness/README.md).\n",
+                p.name, out[0], out[1], out[2], out[3], out[4], p.type_hi);
+            std::exit(3);
+        }
+    }
+}
+
 struct LargeCase {
     uint32_t len;
     uint32_t pattern;
@@ -203,8 +241,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    FILE* fp = std::fopen(argv[1], "wb");
-    if (!fp) { std::perror(argv[1]); return 1; }
+    check_byte_order();
+
+    // Written to a temporary file and renamed at the end, so a run that crashes or fails a
+    // round trip leaves the existing golden JSON untouched.
+    const std::string out_path(argv[1]);
+    const std::string tmp_path = out_path + ".tmp";
+    FILE* fp = std::fopen(tmp_path.c_str(), "wb");
+    if (!fp) { std::perror(tmp_path.c_str()); return 1; }
 
     std::fprintf(fp, "{\n"
                      "  \"work_package\": \"WP-7.2b\",\n"
@@ -268,8 +312,15 @@ int main(int argc, char** argv) {
     }
 
     std::fprintf(fp, "  ]\n}\n");
-    std::fclose(fp);
+    if (std::ferror(fp) != 0 || std::fclose(fp) != 0) {
+        std::fprintf(stderr, "FATAL: write to %s failed\n", tmp_path.c_str());
+        return 1;
+    }
+    if (std::rename(tmp_path.c_str(), out_path.c_str()) != 0) {
+        std::perror(out_path.c_str());
+        return 1;
+    }
     std::fprintf(stderr, "Generated %u small + %u large WP-7.2b compression vectors to %s\n",
-                 kSmallCount, kLargeCount, argv[1]);
+                 kSmallCount, kLargeCount, out_path.c_str());
     return 0;
 }
