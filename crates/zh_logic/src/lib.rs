@@ -3,6 +3,7 @@
 pub mod arena;
 pub mod combat;
 pub mod economy;
+pub mod gamelogic;
 pub mod object;
 pub mod rules;
 pub mod scheduler;
