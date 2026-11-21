@@ -213,7 +213,6 @@ fn test_pkt154_oracle_structure_and_constants() {
 }
 
 #[test]
-#[ignore = "PKT-154: remove when SidesList is implemented"]
 fn test_pkt154_build_list_and_xfer_vectors() {
     let mut name_keys = NameKeyGenerator::new();
     name_keys.init();
@@ -249,7 +248,6 @@ fn test_pkt154_build_list_and_xfer_vectors() {
 }
 
 #[test]
-#[ignore = "PKT-154: remove when SidesList is implemented"]
 fn test_pkt154_sides_list_1000_golden_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
