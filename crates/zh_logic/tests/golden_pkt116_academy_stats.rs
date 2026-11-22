@@ -68,7 +68,6 @@ fn test_pkt116_oracle_structure_and_constants() {
 }
 
 #[test]
-#[ignore = "PKT-116: remove when AcademyStats is implemented"]
 fn test_pkt116_academy_stats_boundaries_and_xfer_roundtrip() {
     let mut prng = PrngState::new();
     prng.init_random_with_seed(42);
@@ -124,7 +123,6 @@ fn test_pkt116_academy_stats_boundaries_and_xfer_roundtrip() {
 }
 
 #[test]
-#[ignore = "PKT-116: remove when AcademyStats is implemented"]
 fn test_pkt116_1000_golden_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
@@ -221,13 +219,13 @@ fn test_pkt116_1000_golden_vectors() {
                     let _ = KINDOF_MONEY_HACKER;
                 }
                 2 => {
-                    let cls =
-                        AcademyClassificationType::from_i32(a1).unwrap_or(AcademyClassificationType::None);
+                    let cls = AcademyClassificationType::from_i32(a1)
+                        .unwrap_or(AcademyClassificationType::None);
                     stats.record_upgrade(cls, if a2 != 0 { TRUE } else { FALSE });
                 }
                 3 => {
-                    let cls =
-                        AcademyClassificationType::from_i32(a1).unwrap_or(AcademyClassificationType::None);
+                    let cls = AcademyClassificationType::from_i32(a1)
+                        .unwrap_or(AcademyClassificationType::None);
                     stats.record_special_power_used(cls);
                 }
                 4 => stats.record_income(ctx.current_frame),
