@@ -440,7 +440,6 @@ fn test_pkt434_oracle_structure_and_constants() {
 }
 
 #[test]
-#[ignore = "PKT-434: remove when Scripts is implemented"]
 fn test_pkt434_legacy_parameter_and_action_healing_boundaries() {
     let mut nkg = NameKeyGenerator::new();
     nkg.init();
@@ -462,10 +461,27 @@ fn test_pkt434_legacy_parameter_and_action_healing_boundaries() {
     p_team_other.string_val = "TeamAlpha".to_string();
     p_team_other.qualify("_Q", "PlyrAmerica_Q", "Player2");
     assert_eq!(p_team_other.string_val, "TeamAlpha_Q");
+
+    // ParameterType::LeftOrRight (EVAC_INVALID=0, EVAC_TO_LEFT=1, EVAC_TO_RIGHT=2, EVAC_BURST_FROM_CENTER=3)
+    assert_eq!(
+        Parameter::new(ParameterType::LeftOrRight, 0).get_ui_text(),
+        "unspecified"
+    );
+    assert_eq!(
+        Parameter::new(ParameterType::LeftOrRight, 1).get_ui_text(),
+        "left"
+    );
+    assert_eq!(
+        Parameter::new(ParameterType::LeftOrRight, 2).get_ui_text(),
+        "right"
+    );
+    assert_eq!(
+        Parameter::new(ParameterType::LeftOrRight, 3).get_ui_text(),
+        "normal (burst from center)"
+    );
 }
 
 #[test]
-#[ignore = "PKT-434: remove when Scripts is implemented"]
 fn test_pkt434_1000_golden_vectors() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
