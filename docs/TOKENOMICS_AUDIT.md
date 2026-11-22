@@ -99,3 +99,47 @@ Under the **Three-Tier Resource Cost Hierarchy**, **every** isolated or semi-iso
 | **Lean-Seedable Large Targets (`#72` `TurretAI`, `#75` `ActionManager`, `#76` `BuildAssistant`, `#78` `ObjectCreationList`, `#79` `Weapon`/`WeaponSet`, `#80` `AIDock`/`AIGuard*`, `#81` `ScriptConditions`/`ScriptActions`)** | `prep_packet.py` (`0` tokens) + `build_oracle.py` (`libz_gameengine.a` + `oracle_common.h`) + `~50`-LOC guard test + Seed-0 diagnostics in JSON. **No Rust skeleton.** Patch minor PR edge cases locally if needed. | Worker writes full Rust module, wires `mod.rs`, implements 1,000-seed assertion loop, passes `V1` + Linux CI (`V2-Golden`). |
 | **Batch Leaf Bundles (Remaining Phase 2–3 C1/C2 modules)** | One shared `build_oracle.py` multi-unit oracle + scripted `prep_packet.py` (`0` tokens) batched into `10–30`-module waves so one cloud session clears many files. | Remote workers clear 10–30 files per session on `$0` LLM quota while conserving Actions minutes. |
 | **`C4` Architectural Spines, FFI Seams & Automation (`WP-5.0`, `Object`, `GameLogic::update()`, `Pathfinder`, `Gate 0` replays)** | Owned directly by `env:local-full` (`Tier 3` Architect) as the force multiplier that converts Phase 5–6 codegen into `0`-token local script execution. | `221` Phase 5 modules (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`) auto-generated once `WP-5.0` lands. |
+
+---
+
+## 6. Comparative Tokenomic Designs & Local Multi-Agent Orchestration (`2026-11-22`)
+
+With `env:ephemeral-web` cloud workers paused to protect our monthly GitHub Actions quota, empirical execution on `WP-5.5` (`f1c25a4`) showed that falling back to a single monolithic local conversation is also suboptimal. This section compares all five tokenomic architectures evaluated for `generals-rust` and locks in our active local orchestration and read-only chat-agent rules.
+
+### 6.1 Comparison of Tokenomic Approaches
+
+| Tokenomic Design | Local LLM Token Cost | CI / Cloud Quota Cost | Throughput & Parallelism | Best Fit | Current Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Legacy Heavy-Seed -> Remote Offload** | Very High (`~2.8–3.9:1` local seed LOC tax from `stubs_pktXXX/`, `todo!()` skeletons, mirrored fuzzers) | `~5–20` Actions min/session (`3,000` min/mo pool) | Parallel remote PRs, high pre-work | Superseded calibration baseline (`#71`, `#70`, `#74`) | **Obsolete** |
+| **2. Ultra-Lean Seed -> Remote Cloud Sandbox (`env:ephemeral-web`)** | Low (`~0.38–0.57:1` local LOC via `build_oracle.py` + Seed-0 diagnostics) | `~5–20` Actions min/session against `3,000` min/mo limit | High (parallel cloud sessions per batch) | Isolated `C1`–`C3` targets & `10–30`-leaf macro-batches | **Paused (`2026-11-22`)** |
+| **3. Monolithic Single-Thread Local Execution** | Highest ($O(T^2)$ context-replay growth per turn + drains tightest `Tier 3` pool on `C1`/`C2` leaves) | `0` if batched push | Serial `1x`; one long `WP-5.5` session (`10` packets + `1,296` C++ oracle + `1,143` test LOC) | Avoid for parallelizable leaf/module waves | **Anti-Pattern for Waves** |
+| **4. Local Coordinator + Parallel Worktree Swarm** | Controlled (`Tier 3` scarce coordinator thin; `Tier 1A/1B/2` higher-quota worker pools; fresh context per worker) | `0` local verification (`1` batched push per verified wave) | `2–4x` concurrent in isolated git worktrees (`share`) | Day-to-day local translation, multi-module waves, oracle + Rust pairing | **Active Default (`2026-11-22`)** |
+| **5. Read-Only Public-Repo Deep-Think Chat Agent (No VM)** | `$0` local quota | `0` CI minutes | Asynchronous single-shot deep design/audit | Compact `C4` contracts, determinism audits, desync root-cause triage | **Selective Supplement** |
+
+### 6.2 Local Multi-Agent Orchestration Rules
+
+1. **Quota-Pool Tiering (Protect the Scarce Coordinator Pool):**
+   - Keep the scarce `Tier 3` local coordinator strictly focused on thin planning turns, `C4` architecture and seam contracts, branch integration, and CRC desync triage.
+   - Route `C1` (`Tier 1A`), `C2` (`Tier 1B`), and `C3` (`Tier 2`) module translation, oracle wiring, and Golden Vector test verification to separate higher-remaining-quota local worker pools.
+   - When a worker's quota pool runs low or hits capacity, switch the existing worker in-place to an available higher-quota worker pool (preserving its worktree and context) rather than tearing down worktrees unnecessarily.
+2. **Eliminate $O(T^2)$ Context Growth via Isolated Git Worktrees:**
+   - Spawn 2–4 concurrent workers with **fresh contexts** and **disjoint file ownership** using shared git worktrees (`share`). Do not fork huge coordinator histories into workers.
+   - Workers edit only their scoped module/oracle/test files — never shared `mod.rs` files or `docs/PORT_MAP.md` — and verify locally with targeted runs (`python3 scripts/lint_determinism.py && cargo test -p <crate> --test golden_<pkt>`).
+   - Once workers report green, the `Tier 3` Coordinator integrates the verified slices, updates `mod.rs`, regenerates `docs/PORT_MAP.md`, runs `./scripts/bootstrap_repo.sh` once across the whole wave, and issues a single batched `git push` to conserve CI minutes.
+3. **Force-Multiplier Sequencing (Manifest Reality):**
+   - Out of `396 / 463` unported packets (`302,384` estimated C++ LOC), **`291` packets (`73%`) are Class `C1`/`C2`** (`193` `C1` / `66,309` LOC + `98` `C2` / `58,580` LOC), `66` are `C3` (`77,029` LOC), and `39` are `C4` (`100,466` LOC).
+   - Phase 5 `BehaviorModule` subclasses (`WP-5.1`–`WP-5.4`: **`225` packets**, `57%` of all remaining files, `136,639` est. LOC) and Phase 2 leaf clusters (`WP-2.3` + `WP-2.4`: `87` packets, `33,870` est. LOC) dominate the remaining file count.
+   - Prioritize **`WP-5.0`** (`SimContext` / `ObjectArena` / `ModuleArena` / `ModuleTrait` + a reusable `BehaviorModule` oracle harness) and `Tier 0` (`$0` CPU) generators in `scripts/` so `WP-5.1`–`WP-5.4` execute as uniform, small-context parallel worker batches rather than bespoke hand-crafted waves.
+
+### 6.3 Read-Only Public-Repo Chat Agent Protocol (Zero-Overhead Constraints)
+
+A read-only chat agent can inspect committed files in public `chayuto/generals-rust` and reason deeply in long single-shot outputs, **but has no VM, no compiler, no `~/Games/generalszh` access, and no `vendor/GeneralsX` access**. To remain net-positive on both tokens and engineering time, enforce strict zero-overhead boundaries:
+
+1. **Three Valid High-ROI Uses:**
+   - **`C4` Architecture & Contract Design (`WP-5.0`, `Object`, `GameLogic::update()`):** Have it read already-committed `PLAN.md`, `docs/ARCHITECTURE_SPEC.md`, `docs/RESEARCH.md`, and `crates/` and output a compact trait layout, borrow-splitting plan, and trap checklist before local workers write code.
+   - **Direct-to-Disk Single-File Drafts (Only When Source Is Already Accessible Without Extra Commits):** Save a generated file straight to disk and pass **only the 1-line file path** to a local compiler-equipped `Tier 1B/2` worker to run `lint_determinism.py` + `cargo test` and fix residual compile or Seed-0 mismatches.
+   - **Deep Determinism Audits & Stubborn Desync Root-Causing:** Supply a short Seed-0 / frame-CRC diff alongside existing repo paths to obtain a concise root-cause hypothesis.
+2. **Three Explicit Anti-Patterns (Hidden Double-Spend Traps):**
+   - **No Throwaway Commits for a Chat Agent:** Never commit extra repo-index dumps, unpacker glue, or speculative packets solely to feed a read-only chat agent.
+   - **No Pasting Large Outputs or Verbose Instructions Into Paid Local Coordinator Sessions:** Pasting hundreds or thousands of generated lines back into the local coordinator burns input and re-processing tokens twice; keep chat outputs compact or direct-to-disk.
+   - **No Compile-Fix Ping-Pong Without a VM:** Never shuttle `rustc` or borrow-checker diagnostics manually between a no-VM chat agent and the local repo; let local compiler-equipped workers iterate directly against `cargo check` / `cargo test`.

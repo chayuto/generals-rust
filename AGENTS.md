@@ -115,6 +115,12 @@ To prevent two agents from duplicating work on the same module:
 
 > **Dated Decision (`2026-11-22` — Active):** All **`env:ephemeral-web` remote agent assignments are PAUSED** until further notice (GitHub Actions monthly runner quota nearly exhausted). Until explicitly re-enabled by the owner, execute all work **locally (`env:local-full`)**, prioritize `$0` local deterministic compute before committing, batch pushes to `origin/main` cleanly to minimize CI runs, and do **not** open `status:ready-for-agent` remote-offload Issues or commit `#[ignore]` remote stubs.
 
+**Local Multi-Agent & Read-Only Chat Execution Rules (`2026-11-22` — [docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md) §6):**
+- Use a thin `Tier 3` Local Coordinator + 2–4 parallel `Tier 1A/1B/2` worktree workers (`share`) on separate higher-remaining-quota pools with fresh contexts and disjoint file ownership (avoid monolithic single-thread waves that suffer $O(T^2)$ context growth).
+- Prioritize `WP-5.0` force-multiplier contracts (unlocking the `225` `WP-5.1`–`WP-5.4` `BehaviorModule` packets) and targeted worker `cargo test` runs before a single coordinator integration, `./scripts/bootstrap_repo.sh`, and batched `git push`.
+- Restrict read-only public-repo deep-think chat agents (no VM) to compact `C4` architecture/contract specs, deep determinism audits/desync triage, or direct-to-disk drafts verified by local workers.
+- Never commit throwaway helper files for a read-only chat agent, and never paste long chat outputs or verbose instructions back into paid local coordinator sessions.
+
 **Empirical Cost Principle ([docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md)):**
 1. **Local Deterministic Compute = `$0` / Cheap (`0` LLM Tokens, `0` CI Minutes):**
    - Running local scripts, compilers, `scripts/build_oracle.py`, `scripts/prep_packet.py`, `scripts/port_map.py`, `./scripts/bootstrap_repo.sh`, `cargo check`/`cargo test`, `-O0`/`-O2`/UBSan builds, and one-shot Python filters/extractors costs **zero tokens**. Always replace repetitive LLM reading/writing with local deterministic scripts, pre-filter large files/JSONs with local Python before pulling snippets into context, and run full local V&V before pushing.
