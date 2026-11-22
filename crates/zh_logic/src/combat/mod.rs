@@ -2,3 +2,11 @@
 
 pub mod armor;
 pub mod damage;
+pub mod locomotor;
+pub mod locomotor_set;
+
+pub use locomotor::{
+    Locomotor, LocomotorAppearance, LocomotorBehaviorZ, LocomotorPriority, LocomotorStore,
+    LocomotorTemplate,
+};
+pub use locomotor_set::LocomotorSet;
