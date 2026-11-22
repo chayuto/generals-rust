@@ -212,7 +212,8 @@ int main(int argc, char** argv) {
         ThePlayerList->setLocalPlayer(ThePlayerList->getNthPlayer(local_p));
         ThePlayerList->getLocalPlayer()->*access_member(ColorTag()) = p_col;
 
-        TestRadar radar;
+        alignas(TestRadar) unsigned char radar_buf[sizeof(TestRadar)]{};
+        TestRadar& radar = *new (radar_buf) TestRadar();
         radar.configureExtent(ext);
         for (Int p = 0; p < MAX_PLAYER_COUNT; ++p) {
             radar.hide(p, ((hide_m >> p) & 1u) != 0);
@@ -345,6 +346,7 @@ int main(int argc, char** argv) {
             for (uint8_t b : xsave.bytes) std::fprintf(fp, "%02x", b);
             std::fprintf(fp, "\"");
         }
+        radar.~TestRadar();
         std::fprintf(fp, "}%s\n", (seed + 1u < 1000u) ? "," : "");
     }
     std::fprintf(fp, "  ]\n}\n");

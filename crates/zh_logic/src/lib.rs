@@ -6,6 +6,7 @@ pub mod economy;
 pub mod gamelogic;
 pub mod object;
 pub mod pathfinder;
+pub mod player;
 pub mod rules;
 pub mod scheduler;
 pub mod scripts;
