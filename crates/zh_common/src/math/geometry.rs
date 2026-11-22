@@ -94,6 +94,21 @@ impl GeometryInfo {
         self.calc_bounding_stuff();
     }
 
+    pub fn set_geom_type(&mut self, geom_type: GeometryType) {
+        self.geom_type = geom_type;
+        self.calc_bounding_stuff();
+    }
+
+    pub fn set_is_small(&mut self, is_small: Bool) {
+        self.is_small = is_small;
+        self.calc_bounding_stuff();
+    }
+
+    pub fn set_height(&mut self, height: Real) {
+        self.height = height;
+        self.calc_bounding_stuff();
+    }
+
     pub fn set_major_radius(&mut self, major_radius: Real) {
         self.major_radius = major_radius;
         self.calc_bounding_stuff();

@@ -98,6 +98,75 @@ impl WeaponTemplateSet {
     pub fn get_nth(&self, slot: WeaponSlotType) -> Option<&WeaponTemplate> { self.templates[slot.as_i32() as usize].as_ref() }
     pub fn get_nth_command_source_mask(&self, slot: WeaponSlotType) -> UnsignedInt { self.auto_choose_mask[slot.as_i32() as usize] }
 
+    pub fn has_any_weapons(&self) -> Bool {
+        if self.templates.iter().any(|t| t.is_some()) {
+            TRUE
+        } else {
+            FALSE
+        }
+    }
+
+    /// Parses a `WeaponSet ... End` INI block using `IniReader` and resolving weapon names against `weapon_store`.
+    pub fn parse_weapon_template_set_ini(
+        &mut self,
+        ini: &mut zh_common::ini::IniReader<'_>,
+        weapon_store: &super::weapon::WeaponStore,
+        thing_template_name: &str,
+    ) -> Result<(), zh_common::ini::IniError> {
+        const WEAPON_SLOT_NAMES: [&str; WEAPONSLOT_COUNT] = ["PRIMARY", "SECONDARY", "TERTIARY"];
+        const COMMAND_SOURCE_MASK_NAMES: [&str; 5] = [
+            "FROM_PLAYER",
+            "FROM_SCRIPT",
+            "FROM_AI",
+            "FROM_DOZER",
+            "DEFAULT_SWITCH_WEAPON",
+        ];
+
+        self.clear();
+        self.auto_choose_mask = [0xffff_ffff; WEAPONSLOT_COUNT];
+        self.thing_template_name = thing_template_name.to_owned();
+
+        ini.read_block_fields(|field, reader| {
+            if field.eq_ignore_ascii_case("Conditions") {
+                self.types.parse_from_ini(reader, &WEAPON_SET_NAMES)
+            } else if field.eq_ignore_ascii_case("Weapon") {
+                let slot_tok = reader.next_token(zh_common::ini::SEPS_DEFAULT)?;
+                let slot_idx =
+                    zh_common::ini::IniReader::scan_index_list(slot_tok, &WEAPON_SLOT_NAMES)?;
+                let wpn_tok = reader.next_token(zh_common::ini::SEPS_DEFAULT)?;
+                if wpn_tok.eq_ignore_ascii_case("None") {
+                    self.templates[slot_idx as usize] = None;
+                } else {
+                    self.templates[slot_idx as usize] =
+                        weapon_store.find_weapon_template(wpn_tok).cloned();
+                }
+                Ok(())
+            } else if field.eq_ignore_ascii_case("AutoChooseSources") {
+                let slot_tok = reader.next_token(zh_common::ini::SEPS_DEFAULT)?;
+                let slot_idx =
+                    zh_common::ini::IniReader::scan_index_list(slot_tok, &WEAPON_SLOT_NAMES)?;
+                reader.parse_bit_string32(
+                    &mut self.auto_choose_mask[slot_idx as usize],
+                    &COMMAND_SOURCE_MASK_NAMES,
+                )
+            } else if field.eq_ignore_ascii_case("PreferredAgainst") {
+                let slot_tok = reader.next_token(zh_common::ini::SEPS_DEFAULT)?;
+                let slot_idx =
+                    zh_common::ini::IniReader::scan_index_list(slot_tok, &WEAPON_SLOT_NAMES)?;
+                let mut mask = crate::rules::kind_of::KindOfMaskType::new();
+                mask.parse_from_ini(reader, &crate::rules::kind_of::KINDOF_NAMES)?;
+                self.preferred_against[slot_idx as usize] = mask.to_unsigned_int();
+                Ok(())
+            } else if field.eq_ignore_ascii_case("ShareWeaponReloadTime") {
+                reader.parse_bool(&mut self.is_reload_time_shared)
+            } else if field.eq_ignore_ascii_case("WeaponLockSharedAcrossSets") {
+                reader.parse_bool(&mut self.is_weapon_lock_shared_across_sets)
+            } else {
+                Err(zh_common::ini::IniError::UnknownToken)
+            }
+        })
+    }
+
     pub fn parse_weapon_template_set(&mut self, text: &str) {
         let mut active_slot: Option<WeaponSlotType> = None;
         for line in text.lines().skip(1) {
@@ -145,6 +214,18 @@ impl WeaponTemplateSet {
             }
         }
         let _ = active_slot;
+    }
+}
+
+impl crate::player::sparse_match_finder::SparseMatchable<WeaponSetFlags> for WeaponTemplateSet {
+    #[inline]
+    fn get_conditions_yes_count(&self) -> Int {
+        1
+    }
+
+    #[inline]
+    fn get_nth_conditions_yes(&self, _i: Int) -> &WeaponSetFlags {
+        &self.types
     }
 }
 

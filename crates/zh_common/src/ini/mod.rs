@@ -470,6 +470,30 @@ impl<'a> IniReader<'a> {
         target: &mut T,
         multi: &MultiIniFieldParse<T>,
     ) -> Result<(), IniError> {
+        self.read_block_fields(|field, ini| {
+            let mut found = false;
+            for table in &multi.tables {
+                if let Some(entry) = table.iter().find(|entry| {
+                    entry.token.is_some_and(|token| token.eq_ignore_ascii_case(field))
+                }) {
+                    (entry.parse)(ini, target, &entry.user_data)?;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return Err(IniError::UnknownToken);
+            }
+            Ok(())
+        })
+    }
+
+    /// Reads lines inside a block until a standalone `End` token, positioning `token_cursor`
+    /// right after each field name before invoking `on_field`.
+    pub fn read_block_fields<F>(&mut self, mut on_field: F) -> Result<(), IniError>
+    where
+        F: FnMut(&str, &mut IniReader<'a>) -> Result<(), IniError>,
+    {
         loop {
             self.read_line(None)?;
             let field = match std::str::from_utf8(self.current_line_bytes()) {
@@ -492,25 +516,18 @@ impl<'a> IniReader<'a> {
                     }
                     break;
                 }
-                let mut found = false;
-                for table in &multi.tables {
-                    if let Some(entry) = table.iter().find(|entry| {
-                        entry.token.is_some_and(|token| token.eq_ignore_ascii_case(&field))
-                    }) {
-                        (entry.parse)(self, target, &entry.user_data)?;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    return Err(IniError::UnknownToken);
-                }
+                on_field(&field, self)?;
             }
             if self.is_eof() {
                 return Err(IniError::MissingEndToken);
             }
         }
         Ok(())
+    }
+
+    /// Consumes lines inside an INI block until its closing `End` token.
+    pub fn skip_block(&mut self) -> Result<(), IniError> {
+        self.read_block_fields(|_field, _ini| Ok(()))
     }
 
     pub fn is_declaration_of_type(block_type: &str, block_name: &str, line: &[u8]) -> Bool {

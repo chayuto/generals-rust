@@ -316,6 +316,19 @@ impl Coord3D {
         }
     }
 
+    /// Normalizes via reciprocal multiplication `x * (1.0 / gm_sqrtf(len2))` matching
+    /// `WWMath::Vector3::Normalize` (`vector3.h:417`).
+    #[inline]
+    pub fn normalize_ww_vector3(&mut self) {
+        let len2 = (self.x * self.x + self.y * self.y) + self.z * self.z;
+        if len2 != 0.0 {
+            let oolen = 1.0_f32 / gm_sqrtf(len2);
+            self.x *= oolen;
+            self.y *= oolen;
+            self.z *= oolen;
+        }
+    }
+
     #[inline]
     pub fn cross_product(a: &Coord3D, b: &Coord3D, r: &mut Coord3D) {
         r.x = a.y * b.z - a.z * b.y;
@@ -1052,5 +1065,148 @@ impl Matrix3D {
                 [0.0, 0.0, 1.0, 0.0],
             ],
         }
+    }
+
+    #[inline]
+    pub fn make_identity(&mut self) {
+        *self = Self::identity();
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn set(
+        &mut self,
+        m11: Real,
+        m12: Real,
+        m13: Real,
+        m14: Real,
+        m21: Real,
+        m22: Real,
+        m23: Real,
+        m24: Real,
+        m31: Real,
+        m32: Real,
+        m33: Real,
+        m34: Real,
+    ) {
+        self.rows[0] = [m11, m12, m13, m14];
+        self.rows[1] = [m21, m22, m23, m24];
+        self.rows[2] = [m31, m32, m33, m34];
+    }
+
+    #[inline]
+    pub fn set_axes(&mut self, x: &Coord3D, y: &Coord3D, z: &Coord3D, pos: &Coord3D) {
+        self.rows[0] = [x.x, y.x, z.x, pos.x];
+        self.rows[1] = [x.y, y.y, z.y, pos.y];
+        self.rows[2] = [x.z, y.z, z.z, pos.z];
+    }
+
+    #[inline]
+    pub const fn get_x_translation(&self) -> Real {
+        self.rows[0][3]
+    }
+
+    #[inline]
+    pub const fn get_y_translation(&self) -> Real {
+        self.rows[1][3]
+    }
+
+    #[inline]
+    pub const fn get_z_translation(&self) -> Real {
+        self.rows[2][3]
+    }
+
+    #[inline]
+    pub const fn get_translation(&self) -> Coord3D {
+        Coord3D::new(self.rows[0][3], self.rows[1][3], self.rows[2][3])
+    }
+
+    #[inline]
+    pub fn set_x_translation(&mut self, x: Real) {
+        self.rows[0][3] = x;
+    }
+
+    #[inline]
+    pub fn set_y_translation(&mut self, y: Real) {
+        self.rows[1][3] = y;
+    }
+
+    #[inline]
+    pub fn set_z_translation(&mut self, z: Real) {
+        self.rows[2][3] = z;
+    }
+
+    #[inline]
+    pub fn set_translation(&mut self, t: &Coord3D) {
+        self.rows[0][3] = t.x;
+        self.rows[1][3] = t.y;
+        self.rows[2][3] = t.z;
+    }
+
+    #[inline]
+    pub const fn get_x_vector(&self) -> Coord3D {
+        Coord3D::new(self.rows[0][0], self.rows[1][0], self.rows[2][0])
+    }
+
+    #[inline]
+    pub const fn get_y_vector(&self) -> Coord3D {
+        Coord3D::new(self.rows[0][1], self.rows[1][1], self.rows[2][1])
+    }
+
+    #[inline]
+    pub const fn get_z_vector(&self) -> Coord3D {
+        Coord3D::new(self.rows[0][2], self.rows[1][2], self.rows[2][2])
+    }
+
+    #[inline]
+    pub fn get_z_rotation(&self) -> Real {
+        gm_atan2f(self.rows[1][0], self.rows[0][0])
+    }
+
+    #[inline]
+    pub fn rotate_z(&mut self, theta: Real) {
+        let c = gm_cosf(theta);
+        let s = gm_sinf(theta);
+        for row in &mut self.rows {
+            let t1 = row[0];
+            let t2 = row[1];
+            row[0] = c * t1 + s * t2;
+            row[1] = -s * t1 + c * t2;
+        }
+    }
+
+    #[inline]
+    pub fn translate(&mut self, x: Real, y: Real, z: Real) {
+        for row in &mut self.rows {
+            row[3] += row[0] * x + row[1] * y + row[2] * z;
+        }
+    }
+
+    #[inline]
+    pub fn translate_coord(&mut self, t: &Coord3D) {
+        self.translate(t.x, t.y, t.z);
+    }
+
+    #[inline]
+    pub fn transform_vector(tm: &Self, v: &Coord3D) -> Coord3D {
+        Coord3D::new(
+            tm.rows[0][0] * v.x + tm.rows[0][1] * v.y + tm.rows[0][2] * v.z + tm.rows[0][3],
+            tm.rows[1][0] * v.x + tm.rows[1][1] * v.y + tm.rows[1][2] * v.z + tm.rows[1][3],
+            tm.rows[2][0] * v.x + tm.rows[2][1] * v.y + tm.rows[2][2] * v.z + tm.rows[2][3],
+        )
+    }
+
+    #[inline]
+    pub fn mul(a: &Self, b: &Self) -> Self {
+        let mut out = Self::identity();
+        for r in 0..3 {
+            let ar = a.rows[r];
+            for c in 0..3 {
+                out.rows[r][c] = ar[0] * b.rows[0][c] + ar[1] * b.rows[1][c] + ar[2] * b.rows[2][c];
+            }
+            out.rows[r][3] =
+                ar[0] * b.rows[0][3] + ar[1] * b.rows[1][3] + ar[2] * b.rows[2][3] + ar[3];
+        }
+        out
     }
 }

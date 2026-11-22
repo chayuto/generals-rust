@@ -379,4 +379,70 @@ impl<const NUMBITS: usize> BitFlags<NUMBITS> {
         }
         -1
     }
+
+    /// Parses bitflags from an `IniReader` token stream matching C++ `BitFlags::parse` (`BitFlagsIO.h`).
+    pub fn parse_from_ini(
+        &mut self,
+        ini: &mut crate::ini::IniReader<'_>,
+        bit_names: &[&str],
+    ) -> Result<(), crate::ini::IniError> {
+        let mut found_normal = false;
+        let mut found_add_or_sub = false;
+        while let Some(token) = ini.next_token_or_null(crate::ini::SEPS_DEFAULT) {
+            if token.eq_ignore_ascii_case("NONE") {
+                if found_normal || found_add_or_sub {
+                    return Err(crate::ini::IniError::InvalidNameList);
+                }
+                self.clear();
+                break;
+            }
+            if let Some(name) = token.strip_prefix('+') {
+                if found_normal {
+                    return Err(crate::ini::IniError::InvalidNameList);
+                }
+                let bit_index = crate::ini::IniReader::scan_index_list(name, bit_names)?;
+                self.set(bit_index, 1);
+                found_add_or_sub = true;
+            } else if let Some(name) = token.strip_prefix('-') {
+                if found_normal {
+                    return Err(crate::ini::IniError::InvalidNameList);
+                }
+                let bit_index = crate::ini::IniReader::scan_index_list(name, bit_names)?;
+                self.set(bit_index, 0);
+                found_add_or_sub = true;
+            } else {
+                if found_add_or_sub {
+                    return Err(crate::ini::IniError::InvalidNameList);
+                }
+                if !found_normal {
+                    self.clear();
+                }
+                let bit_index = crate::ini::IniReader::scan_index_list(token, bit_names)?;
+                self.set(bit_index, 1);
+                found_normal = true;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<const NUMBITS: usize> PartialOrd for BitFlags<NUMBITS> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const NUMBITS: usize> Ord for BitFlags<NUMBITS> {
+    /// Deterministic bit-index lexicographic ordering matching C++ `SparseMatchFinder::MapHelper`.
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        for i in 0..NUMBITS {
+            let ord = self.bits[i].cmp(&other.bits[i]);
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
 }

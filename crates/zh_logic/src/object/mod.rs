@@ -1,3 +1,10 @@
 pub mod experience_tracker;
+pub mod object_script_status_bits;
+pub mod object_types;
+pub mod overridable;
+pub mod r#override;
+pub mod thing;
+pub mod thing_factory;
+pub mod thing_template;
 pub mod weapon;
 pub mod weapon_set;
