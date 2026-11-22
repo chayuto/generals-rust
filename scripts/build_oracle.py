@@ -72,7 +72,7 @@ def detect_stale_prefixes(tokens: Sequence[str]) -> List[str]:
 
 def rewrite_repo_path(token: str, stale_prefixes: Sequence[str], repo_root: Path) -> str:
     """Rewrites stale absolute repo-root prefixes in a compiler/linker argument."""
-    root_str = str(repo_root)
+    root_str = repo_root.as_posix()
     out = token
     for old in stale_prefixes:
         if old != root_str and old in out:
@@ -229,10 +229,10 @@ def parse_link_args(build_dir: Path, repo_root: Path) -> List[str]:
         p = Path(rewritten)
         if not p.is_absolute():
             p = build_dir / p
-        p_str = str(p)
+        p_str = p.as_posix()
         resolved.append(p_str)
-        if p_str.endswith(".dylib") or ".dylib." in os.path.basename(p_str):
-            add_rpath(str(p.parent))
+        if p_str.endswith(".dylib") or ".dylib." in p.name:
+            add_rpath(p.parent.as_posix())
 
     return rpaths + resolved
 

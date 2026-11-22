@@ -83,13 +83,15 @@ class TestBuildOracle(unittest.TestCase):
             self.assertIn("Precompiled/BasePrecomp.h", cmd)
 
             # Stale prefixes are replaced with active repo_root everywhere.
+            root_posix = repo_root.as_posix()
+            build_posix = build_dir.as_posix()
             joined = " ".join(cmd)
             self.assertNotIn("/Users/stale/old-checkout", joined)
-            self.assertIn(f"-I{repo_root}/vendor/GeneralsX/GeneralsMD/Code/GameEngine/Include", cmd)
-            self.assertIn(f"{repo_root}/target/release/libzh_ffi.a", cmd)
-            self.assertIn(f"{build_dir}/GeneralsMD/Code/GameEngine/libz_gameengine.a", cmd)
-            self.assertIn(f"-Wl,-rpath,{build_dir}/bin", cmd)
-            self.assertIn(f"-Wl,-rpath,{build_dir}/_deps/sdl3-build", cmd)
+            self.assertIn(f"-I{root_posix}/vendor/GeneralsX/GeneralsMD/Code/GameEngine/Include", cmd)
+            self.assertIn(f"{root_posix}/target/release/libzh_ffi.a", cmd)
+            self.assertIn(f"{build_posix}/GeneralsMD/Code/GameEngine/libz_gameengine.a", cmd)
+            self.assertIn(f"-Wl,-rpath,{build_posix}/bin", cmd)
+            self.assertIn(f"-Wl,-rpath,{build_posix}/_deps/sdl3-build", cmd)
 
             # PCH, Windows-only libs, original source/output, and gtest are stripped.
             self.assertNotIn("-include-pch", cmd)
