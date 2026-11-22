@@ -79,6 +79,8 @@ jobs:
           "$PY_BIN" scripts/test_prep_packet.py
           "$PY_BIN" scripts/test_apply_ffi_seam.py
           "$PY_BIN" scripts/test_lint_determinism.py
+          "$PY_BIN" scripts/test_port_map.py
+          "$PY_BIN" scripts/test_build_oracle.py
           "$PY_BIN" scripts/lint_determinism.py
           cargo test --workspace
 

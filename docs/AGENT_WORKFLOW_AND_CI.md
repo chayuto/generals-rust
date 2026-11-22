@@ -81,27 +81,24 @@ Agents working on `generals-rust` operate in one of two distinct physical enviro
 
 ---
 
-### 1.5 Local Execution vs. Remote `env:ephemeral-web` Tokenomics Constitution Rule
+### 1.5 Asymmetric Cost Model & Ultra-Lean Remote Offload (`Remote = $0 FREE`, `Local = EXPENSIVE`)
 
-**Hard Project Rule (`AGENTS.md` §4.4):** **Never create a remote `env:ephemeral-web` task if local creation/seeding + review cost exceeds finishing the job locally.** Because generating the C++ Golden Vector oracle is mandatory either way, remote delegation only achieves net positive tokenomics when a single stub surface and skeleton leverage a large, self-contained translation body:
+**Governing Economic Rule (`AGENTS.md` §4.4):** **Remote `env:ephemeral-web` worker tokens are `$0` FREE; local `env:local-full` tokens are EXPENSIVE.** Optimize **verified Rust lines landed per local token**, NOT total tokens. Never spend local tokens implementing medium/large Rust modules that can be lean-seeded in `< 300` local LOC and offloaded to free remote workers:
 
-| Target Shape | Observed / Concrete Examples | Decision | Tokenomics Rationale |
+| Target Shape | Examples | Decision | Rationale |
 | :--- | :--- | :--- | :--- |
-| **Tiny Leaf (`< ~300` C++ / `< ~200` Rust LOC)** | `PKT-023` (`+28 LOC`), `PKT-017` (`+60 LOC`), `PKT-064` (`+67 LOC`) | **Do Locally** | Skeleton + Issue + PR review costs more than writing the module directly alongside its Golden Vectors. |
-| **Multi-Class Small-Store Bundle (hand-seeded)** | `WP-3.1a` (`Money`/`Energy`/`Handicap`/`MissionStats`), `WP-3.2b`, `WP-3.3a` | **Do Locally** | Hand-writing stubs, compiling `todo!()` skeletons, and writing `tests/golden_*.rs` for 4–5 small classes consumes ~60–75% of direct implementation cost locally. |
-| **Heavy Coupling / OS Glue (`before seam ready`)** | `BIGFileSystem` (OS path discovery), `TurretAI` / `Locomotor` / `Recorder` (prior to Phase 4/5 seams) | **Keep Local / Defer** | Heavy C++ stubbing of transitive engine globals costs more tokens than writing against clean Rust seams later. |
-| **Self-Contained Heavyweight (`>= ~800` C++ `.cpp` lines, tiny stub surface) or Single-Schema Bundle** | `PKT-087` (`INI`), `PKT-077` (`StateMachine`), `PKT-451` (`DataChunk`), `WP-7.2b` (EA `Compression` codecs), `WP-3.2a` (`12`-enum registry) | **Delegate Remotely (`env:ephemeral-web`)** | One minimal harness + one compact skeleton unlocks `~400–1,100+` Rust LOC of dense algorithmic work on separate remote quota under 3-OS CI. |
-| **Core Spines & FFI (`C4` / `env:local-full`)** | `GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `Pathfinder`, `GameLogic::update()` | **Always Keep Local** | Requires deep `vendor/GeneralsX` context, CMake/FFI bring-up, retail assets, or desync triage. |
+| **Standalone & Domain Modules (`C1–C3`, any medium/large LOC)** | `PKT-406` (`Radar`), `PKT-145` (`TurretAI`), `PKT-143` (`Locomotor`), `PKT-401` (`ActionManager`), `PKT-403` (`BuildAssistant`), `PKT-391` (`ObjectCreationList`), `PKT-399` (`Weapon`), `PKT-431`/`PKT-432` (`Scripts`) | **Lean-Seed Locally (`< 300` LOC) -> Offload Remotely (`$0`)** | `scripts/build_oracle.py` (`libz_gameengine.a`) + `scripts/prep_packet.py` + `~50`-LOC guard test delivers `500–2,000+` free remote LOC without stubs or Rust skeletons. |
+| **Small Leaves (`C1`/`C2`, Phase 2–3)** | Remaining `WP-2.1`..`WP-2.4` & `WP-3.x` leaves | **Batch via Shared Oracle -> Offload Remotely (`$0`)** | One shared C++ driver covers a family; remote workers execute files concurrently at `$0` local implementation cost. |
+| **Phase 5–6 Waves (`WP-5.1`–`5.4`, `WP-6.4`)** | `221` `BehaviorModule` packets + `29` Script packets | **Auto-Generate via `WP-5.0` -> Offload Remotely (`$0`)** | One local generator pass produces all packets, oracles, and issues with `O(1)` marginal local spend. |
+| **Core Spines, Seams & Verification (`C4` / `env:local-full`)** | `scripts/build_oracle.py`, `Gate 0` replays, `SimContext`/`ObjectArena`/`ModuleArena`, `WP-5.0` adapter, `Pathfinder`, `GameLogic::update()`, desync triage | **Build Locally (`Force Multiplier`)** | Deep repo/CMake/replay work that unlocks parallel free remote execution across the remaining codebase. |
 
-Operational rules enforced alongside this table (calibrated by [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md)):
-1. **Tokenomics gate before seeding:** Verify the target needs minimal stubs and delivers high algorithmic implementation-to-skeleton leverage before creating an `env:ephemeral-web` Issue; otherwise implement directly in the local pass.
-2. **Use Squash & Merge on remote PRs** with a clean conventional commit message so `main` stays free of empty planning commits and remote branch prefixes.
-3. **Automate Phase 5–6 Fan-Out Once (`WP-5.0`):** Generate C++ Golden Vectors, packet docs, and GitHub Issues programmatically via the shared adapter before fanning out `WP-5.1`–`WP-5.4` (`221` modules) and `WP-6.4` (`29` script packets).
-4. **Shared CMake oracle linkage over new `stubs_pktXXX/` trees:** Empirical measurements across `#70`, `#71`, and `#74` (`3.1:1`–`5.4+:1` local-seed : remote-impl LOC, alongside `479` files / `11,312` LOC across `21` `stubs*` dirs) show manual per-packet stub trees do not scale; link new C++ drivers against `vendor/GeneralsX/build/macos-vulkan` instead.
-5. **Input-carrying oracle JSON over mirrored fuzzers:** Record compact test inputs alongside expected outputs in `docs/golden_vectors/*.json` so Rust `golden_*.rs` suites stay thin (`~80–150` LOC) instead of re-implementing C++ synthetic generators.
-6. **Minimal public API contracts over full `todo!()` skeletons:** When delegating a heavyweight to `env:ephemeral-web`, provide a compact public trait/type signature contract rather than writing ~1,000-LOC field-by-field skeletons locally.
+Mandatory **Ultra-Lean Seeding Rules** (calibrated by [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md)):
+1. **Zero new `stubs_pktXXX/` trees:** Compile C++ oracle drivers via `python3 scripts/build_oracle.py` directly against `vendor/GeneralsX/build/macos-vulkan` (`libz_gameengine.a`).
+2. **Zero local Rust skeletons:** Run `python3 scripts/prep_packet.py <PKT>` (`0` local LLM tokens). Do **not** write compiling `todo!()` skeletons locally; let free remote workers create `crates/.../<module>.rs` and wire `mod.rs`.
+3. **Input-carrying + Seed-0 self-diagnosing oracle JSON + thin `~40–60` LOC test guard:** Store explicit inputs + expected outputs + Seed-0 per-section/per-field checkpoints in `docs/golden_vectors/<PKT>.json` so remote agents self-diagnose field mismatches (avoiding opaque checksum stalls seen on PR `#84`). Commit only a thin structural integrity test + `#[ignore]` 1,000-seed contract stub.
+4. **Squash & Merge remote PRs:** Keep `main` clean with conventional commit messages linking closed packet issues.
 
-**Empirical Calibration (`#70`, `#71`, `#74`):** Measured local hand-authored seed volumes were `1,794` LOC (`PKT-116`) vs. `+455/-18` LOC remote impl (`~3.9:1`), `3,252` LOC (`PKT-434`) vs. `+1,042/-40` LOC remote impl plus rebase/bugfix work (`~3.1:1`), and `5,425` LOC (`PKT-442`) vs. `~800–1,000` LOC est. remote impl (`~5.4:1`–`6.8:1`). Full breakdown and routing guidance for `#72`–`#81` live in [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md).
+**Empirical Calibration (`#70`, `#71`, `#74`):** Legacy manual seeding burned `1,794` (`PKT-116`, `~3.9:1`), `3,252` (`PKT-434`, `~3.1:1`), and `5,425` (`PKT-442`, `+1,923/-103` PR `#84`, `~2.8:1`) local LOC because of per-packet stub trees (`479` files / `11,312` LOC across `21` `stubs*` dirs), duplicated C++/Rust fuzzers, and upfront skeletons. Adopting `scripts/build_oracle.py` + zero-skeleton seeding cuts local cost per ticket by **~20×** while keeping implementation on free `$0` remote quota. See [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md).
 
 ---
 

@@ -111,31 +111,31 @@ To prevent two agents from duplicating work on the same module:
    - If a `Tier 1A` or `Tier 1B` worker fails `Gate V1` (`cargo check`) after 1 retry, it commits its work to a `wip/packet-<id>` branch, relabels the issue `tier:2-engineer`, posts the compiler error output on the issue, and stops.
    - If any worker fails `Gate V2` (differential test) or `Gate V3/V4` (replay CRC mismatch), it labels the issue `status:crc-desync` + `tier:3-architect` and attaches the mismatch frame / seed diff for Tier 3 diagnosis.
 
-### 4.4 Remote Delegation ROI & Tokenomics Constitution Rule (Local vs. `env:ephemeral-web`)
+### 4.4 Asymmetric Cost Law & Remote Delegation Protocol (`Remote = $0 FREE`, `Local = EXPENSIVE`)
 
-Generating the C++ Golden Vector harness and Rust verification oracle is mandatory work performed locally by an `env:local-full` agent either way. Opening a remote `env:ephemeral-web` task adds extra local work: reading C++, stubbing transitive headers, writing compiling `todo!()` skeletons + `tests/golden_*.rs`, filing an Issue, and reviewing/merging the PR.
+**Empirical Cost Principle ([docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md)):**
+- **`env:ephemeral-web` remote tokens are FREE ($0); `env:local-full` local tokens are EXPENSIVE.**
+- Optimizing total tokens across both environments is wrong — optimize **verified Rust progress per local token**. Never spend local tokens implementing medium or large Rust modules that can be verified via a lean Golden Vector oracle and offloaded to free remote workers.
+- Invest expensive local tokens strictly in **force multipliers**: (1) `< 300`-LOC lean seeds that unlock `500–2,000+`-LOC free remote PRs, (2) zero-stub shared oracle tooling (`scripts/build_oracle.py`), (3) `C4` architectural spines (`SimContext`, `ObjectArena`, `ModuleArena`, `WP-5.0` batch generator unlocking `221` Phase 5 modules), and (4) `Gate 0` / `Gate V3–V4` replay verification & desync triage.
 
-**Hard Project Constitution Rule (Tokenomics Break-Even):**
-- **Never create a remote `env:ephemeral-web` task if local creation/seeding + review cost exceeds finishing the implementation locally in the same pass as its C++ Golden Vectors.**
+Apply this **Ultra-Lean Seeding Protocol** strictly before opening any `env:ephemeral-web` Issue:
 
-Apply this routing rule strictly before creating remote Issues (see empirical calibration in [docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md)):
-
-1. **Delegate Remotely (`env:ephemeral-web` High-ROI Targets):**
-   - **Self-contained single-class heavyweights** (`>= ~800` C++ `.cpp` lines of dense logic with **tiny stub surface**, such as `INI`, `StateMachine`, `DataChunk`, EA `Compression` codecs), OR
-   - **Single-schema bulk data bundles** (`WP-3.2a` enum/BitFlags tables), OR
-   - **Programmatically generated Phase 5–6 batches** (`WP-5.0` adapter automation).
-2. **Keep Local — Low-ROI for Manual Remote Delegation:**
-   - **Small standalone leaf modules (`< ~300–400` C++ / `< ~200` Rust LOC):** implement directly locally alongside their C++ Golden Vectors.
-   - **Hand-seeded multi-class small-store bundles:** stubbing, skeletonizing, and writing harnesses for 4–5 separate classes (`WP-3.1a`, `WP-3.2b`, `WP-3.3a`) consumes ~60–75% of direct implementation cost locally; keep them local rather than delegating manually.
-   - **OS/path glue & tightly-coupled modules (`BIGFileSystem`, `TurretAI`, `Locomotor`, `Recorder` prior to Phase 4/5 seams):** keep local or defer until their underlying seams/abstractions exist.
-   - **Core architectural spines & FFI seams (`GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `Pathfinder`, `GameLogic::update()`), retail `.big`/`.map`/`.rep` checks, and CRC desync triage:** always stay local (`env:local-full`).
-3. **Mandatory Seeding Anti-Sprawl Rule (Post-`#70`/`#71`/`#74` Audit):**
-   - Empirical measurement across `#71` (`PKT-116`), `#70` (`PKT-434`), and `#74` (`PKT-442`) showed `3.1:1`–`5.4+:1` local-seed LOC per remote-implementation LOC under manual stub+skeleton seeding.
-   - **Do NOT create** new per-packet `stubs_pktXXX/` trees + mirrored C++/Rust fuzzers + full compiling `todo!()` skeletons for single standalone `env:ephemeral-web` tickets. Future remote seeding requires: (a) shared CMake/minimal C++ oracle linkage instead of 30+ hand-written stub headers, (b) input-carrying oracle JSON fixtures (no duplicated input synthesis/hashing across C++ and Rust), and (c) compact public API contracts instead of ~1,000-LOC `todo!()` skeletons — or programmatic batch generation (`WP-5.0` / `WP-6.4`). Otherwise finish the module locally in the same pass as its Golden Vectors.
-4. **PR Merge Hygiene:**
-   - Prefer **Squash & Merge** with a clean conventional commit message on remote PRs so `main` stays free of empty planning commits and remote branch prefixes.
-5. **Phase 5–6 Fan-Out Automation:**
-   - Before fanning out the `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`), automate packet, golden-vector, and issue generation once via the shared adapter (`WP-5.0`) rather than hand-authoring per-module skeletons.
+1. **Zero-Stub C++ Oracle Compilation (`scripts/build_oracle.py`):**
+   - **NEVER create** new per-packet `stubs_pktXXX/` trees. Compile compact (`~150–250` LOC) C++ oracle drivers directly against `vendor/GeneralsX/build/macos-vulkan` (`libz_gameengine.a`) via `python3 scripts/build_oracle.py`.
+2. **Zero Local Rust Skeletons (`0` Local Production Rust LOC):**
+   - Generate `packets/<phase>/<PKT>_<Module>.md` deterministically with `python3 scripts/prep_packet.py <PKT>` (`0` local LLM tokens).
+   - **Do NOT write** compiling `todo!()` skeletons in `crates/*/src/`. Let the free `env:ephemeral-web` worker create `<module>.rs`, wire `mod.rs`, and update `docs/PORT_MAP.md`.
+3. **Input-Carrying + Self-Diagnosing Seed-0 Golden Vector JSON (`~40–60` LOC Guard Test):**
+   - Store **explicit compact inputs** alongside expected outputs in `docs/golden_vectors/<PKT>.json` — never duplicate complex C++ input synthesizers in Rust.
+   - Always include **Seed-0 per-section / per-field diagnostic checkpoints** inside the JSON oracle (post-PR `#84` rule: never emit only a single opaque checksum over dozens/hundreds of fields, so remote agents self-diagnose mismatches without local help).
+   - Commit only a compact `~40–60`-LOC `crates/*/tests/golden_<pkt>.rs` (active JSON structural check + `#[ignore]` 1,000-seed contract stub); let the remote worker write the full 1,000-seed assertion loop and remove `#[ignore]`.
+4. **Target Selection Across Phases 2–7:**
+   - **Lean-Seed & Offload (`env:ephemeral-web`, `$0`):** All standalone and C1–C3 modules (`#72`–`#81`, Phase 2–3 batches, and auto-generated Phase 5–6 `WP-5.0` / `WP-6.4` waves) once verified against `build_oracle.py` or a shared CMake oracle. Only skip remote offload when a tiny leaf takes fewer local tokens to write directly than writing a C++ oracle driver (`< ~100` LOC C++), though batching multiple tiny leaves into one multi-target seed still beats local porting.
+   - **Keep Local (`env:local-full` Force Multipliers):** Phase 0 (`Gate 0` replay corpus), `C4` architectural spines & FFI seams (`GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `WP-5.0` generator, `Pathfinder`, `GameLogic::update()`), retail `.big`/`.map`/`.rep` checks, and CRC desync triage.
+5. **PR Merge Hygiene & Escalation Triage:**
+   - Prefer **Squash & Merge** with clean conventional commit messages on remote PRs. When reviewing a failing remote PR, check Seed-0 diagnostics rather than rewriting locally unless an edge case requires a quick rebase/merge fix.
+6. **Phase 5–6 Fan-Out Automation:**
+   - Build `WP-5.0` (`SimContext`/`ModuleArena`/`ModuleTrait` + automated C++/Rust oracle & packet generator) once locally to unlock all `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`) on free remote quota with near-zero marginal local token cost.
 
 ---
 
