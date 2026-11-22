@@ -1,5 +1,7 @@
 # Tokenomics Audit: Three-Tier Resource Cost Hierarchy (`Local Compute = $0`, `Remote Tokens = $0 / Bounded Runner Quota`, `Local Tokens = EXPENSIVE`)
 
+> **Dated Operational Decision (`2026-11-22` — Active):** All **`env:ephemeral-web` remote agent assignments are PAUSED** until further notice by owner instruction so GitHub Actions runner minutes are conserved. Execute translations, C++ oracle verification, and V&V locally (`env:local-full`), maximizing `$0` local compute (`python3`, `build_oracle.py`, `prep_packet.py`, `port_map.py`, `./scripts/bootstrap_repo.sh`) and batching pushes into clean verified stages.
+
 This document records the empirical tokenomics and code-volume audit of both our legacy `env:ephemeral-web` delegation workflow (`#71` `PKT-116`, `#70` `PKT-434`, and `#74` `PKT-442`) and our post-refactor ultra-lean workflow (`#77` `PKT-406`, `#73` `PKT-143`, and `#79` `PKT-399`), analyzes seeding leverage and GitHub Actions runner-minute usage, and defines the **Three-Tier Resource Cost Hierarchy** governing the remaining engine packets.
 
 ---

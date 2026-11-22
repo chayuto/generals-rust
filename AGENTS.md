@@ -111,7 +111,9 @@ To prevent two agents from duplicating work on the same module:
    - If a `Tier 1A` or `Tier 1B` worker fails `Gate V1` (`cargo check`) after 1 retry, it commits its work to a `wip/packet-<id>` branch, relabels the issue `tier:2-engineer`, posts the compiler error output on the issue, and stops.
    - If any worker fails `Gate V2` (differential test) or `Gate V3/V4` (replay CRC mismatch), it labels the issue `status:crc-desync` + `tier:3-architect` and attaches the mismatch frame / seed diff for Tier 3 diagnosis.
 
-### 4.4 Three-Tier Resource Cost Hierarchy & Remote Delegation Protocol
+### 4.4 Three-Tier Resource Cost Hierarchy & Operational Mode
+
+> **Dated Decision (`2026-11-22` — Active):** All **`env:ephemeral-web` remote agent assignments are PAUSED** until further notice (GitHub Actions monthly runner quota nearly exhausted). Until explicitly re-enabled by the owner, execute all work **locally (`env:local-full`)**, prioritize `$0` local deterministic compute before committing, batch pushes to `origin/main` cleanly to minimize CI runs, and do **not** open `status:ready-for-agent` remote-offload Issues or commit `#[ignore]` remote stubs.
 
 **Empirical Cost Principle ([docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md)):**
 1. **Local Deterministic Compute = `$0` / Cheap (`0` LLM Tokens, `0` CI Minutes):**
