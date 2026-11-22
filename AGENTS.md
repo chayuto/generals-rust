@@ -111,17 +111,21 @@ To prevent two agents from duplicating work on the same module:
    - If a `Tier 1A` or `Tier 1B` worker fails `Gate V1` (`cargo check`) after 1 retry, it commits its work to a `wip/packet-<id>` branch, relabels the issue `tier:2-engineer`, posts the compiler error output on the issue, and stops.
    - If any worker fails `Gate V2` (differential test) or `Gate V3/V4` (replay CRC mismatch), it labels the issue `status:crc-desync` + `tier:3-architect` and attaches the mismatch frame / seed diff for Tier 3 diagnosis.
 
-### 4.4 Asymmetric Cost Law & Remote Delegation Protocol (`Remote = $0 FREE`, `Local = EXPENSIVE`)
+### 4.4 Three-Tier Resource Cost Hierarchy & Remote Delegation Protocol
 
 **Empirical Cost Principle ([docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md)):**
-- **`env:ephemeral-web` remote tokens are FREE ($0); `env:local-full` local tokens are EXPENSIVE.**
-- Optimizing total tokens across both environments is wrong — optimize **verified Rust progress per local token**. Never spend local tokens implementing medium or large Rust modules that can be verified via a lean Golden Vector oracle and offloaded to free remote workers.
-- Invest expensive local tokens strictly in **force multipliers**: (1) `< 300`-LOC lean seeds that unlock `500–2,000+`-LOC free remote PRs, (2) zero-stub shared oracle tooling (`scripts/build_oracle.py`), (3) `C4` architectural spines (`SimContext`, `ObjectArena`, `ModuleArena`, `WP-5.0` batch generator unlocking `221` Phase 5 modules), and (4) `Gate 0` / `Gate V3–V4` replay verification & desync triage.
+1. **Local Deterministic Compute = `$0` / Cheap (`0` LLM Tokens, `0` CI Minutes):**
+   - Running local scripts, compilers, `scripts/build_oracle.py`, `scripts/prep_packet.py`, `scripts/port_map.py`, `./scripts/bootstrap_repo.sh`, `cargo check`/`cargo test`, `-O0`/`-O2`/UBSan builds, and one-shot Python filters/extractors costs **zero tokens**. Always replace repetitive LLM reading/writing with local deterministic scripts, pre-filter large files/JSONs with local Python before pulling snippets into context, and run full local V&V before pushing.
+2. **`env:ephemeral-web` Remote LLM Tokens = `$0` FREE, *Bounded by GitHub Actions Runner Minutes* (`3,000` min/month):**
+   - Each remote cloud sandbox session costs `$0` local LLM tokens, but its managed cloud worker runner bills ~5–20 Actions minutes against the monthly account quota even on a public repository. Maximize verified LOC per session by targeting large packets (`2,000–7,000+` C++ LOC) or macro-batched leaf waves (`10–30` modules per issue), and never spin up a second remote retry session to fix minor 1–2 seed edge cases that can be diagnosed and patched locally with cheap compute.
+3. **`env:local-full` Local LLM Tokens = EXPENSIVE:**
+   - Optimizing total tokens across both environments is wrong — optimize **verified Rust progress per local token** (while respecting the monthly cloud runner budget). Never spend local tokens implementing medium or large Rust modules that can be verified via a lean Golden Vector oracle and offloaded to free remote workers.
+   - Invest expensive local tokens strictly in **force multipliers**: (1) deterministic local scripts/code generators that convert future token work into `0`-token local compute (`scripts/build_oracle.py`, `tests/cpp_harness/oracle_common.h`, `WP-5.0` batch generator), (2) `< 300–600`-LOC lean seeds that unlock `2,000–10,000+`-LOC free remote PRs, (3) `C4` architectural spines (`SimContext`, `ObjectArena`, `ModuleArena`, `SleepyUpdateHeap`, `Pathfinder`, `GameLogic::update()`), and (4) `Gate 0` / `Gate V3–V4` replay verification & desync triage.
 
-Apply this **Ultra-Lean Seeding Protocol** strictly before opening any `env:ephemeral-web` Issue:
+Apply this **Ultra-Lean Seeding & Local-Compute-First Protocol** strictly before opening any `env:ephemeral-web` Issue:
 
 1. **Zero-Stub C++ Oracle Compilation (`scripts/build_oracle.py`):**
-   - **NEVER create** new per-packet `stubs_pktXXX/` trees. Compile compact (`~150–250` LOC) C++ oracle drivers directly against `vendor/GeneralsX/build/macos-vulkan` (`libz_gameengine.a`) via `python3 scripts/build_oracle.py`.
+   - **NEVER create** new per-packet `stubs_pktXXX/` trees. Compile compact (`~150–550` LOC) C++ oracle drivers directly against `vendor/GeneralsX/build/macos-vulkan` (`libz_gameengine.a`) via `python3 scripts/build_oracle.py`.
 2. **Zero Local Rust Skeletons (`0` Local Production Rust LOC):**
    - Generate `packets/<phase>/<PKT>_<Module>.md` deterministically with `python3 scripts/prep_packet.py <PKT>` (`0` local LLM tokens).
    - **Do NOT write** compiling `todo!()` skeletons in `crates/*/src/`. Let the free `env:ephemeral-web` worker create `<module>.rs`, wire `mod.rs`, and update `docs/PORT_MAP.md`.
@@ -130,12 +134,14 @@ Apply this **Ultra-Lean Seeding Protocol** strictly before opening any `env:ephe
    - Always include **Seed-0 per-section / per-field diagnostic checkpoints** inside the JSON oracle (post-PR `#84` rule: never emit only a single opaque checksum over dozens/hundreds of fields, so remote agents self-diagnose mismatches without local help).
    - Commit only a compact `~40–60`-LOC `crates/*/tests/golden_<pkt>.rs` (active JSON structural check + `#[ignore]` 1,000-seed contract stub); let the remote worker write the full 1,000-seed assertion loop and remove `#[ignore]`.
 4. **Target Selection Across Phases 2–7:**
-   - **Lean-Seed & Offload (`env:ephemeral-web`, `$0`):** All standalone and C1–C3 modules (`#72`–`#81`, Phase 2–3 batches, and auto-generated Phase 5–6 `WP-5.0` / `WP-6.4` waves) once verified against `build_oracle.py` or a shared CMake oracle. Only skip remote offload when a tiny leaf takes fewer local tokens to write directly than writing a C++ oracle driver (`< ~100` LOC C++), though batching multiple tiny leaves into one multi-target seed still beats local porting.
+   - **Lean-Seed & Offload (`env:ephemeral-web`, `$0` Tokens, High-ROI Cloud Sessions):** All large/medium C1–C3 modules (`#72`–`#81`, macro-batched Phase 2–3 leaf waves of `10–30` modules, and auto-generated Phase 5–6 `WP-5.0` / `WP-6.4` waves) once verified against `build_oracle.py` or a shared CMake oracle. Do **not** spend an individual cloud runner session on a tiny standalone leaf unless batched with sibling leaves.
    - **Keep Local (`env:local-full` Force Multipliers):** Phase 0 (`Gate 0` replay corpus), `C4` architectural spines & FFI seams (`GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `WP-5.0` generator, `Pathfinder`, `GameLogic::update()`), retail `.big`/`.map`/`.rep` checks, and CRC desync triage.
 5. **PR Merge Hygiene & Escalation Triage:**
-   - Prefer **Squash & Merge** with clean conventional commit messages on remote PRs. When reviewing a failing remote PR, check Seed-0 diagnostics rather than rewriting locally unless an edge case requires a quick rebase/merge fix.
+   - Prefer **Squash & Merge** with clean conventional commit messages on remote PRs. When reviewing a failing remote PR, check Seed-0 diagnostics and patch minor edge cases locally with zero-token local compute rather than burning another remote cloud runner session.
 6. **Phase 5–6 Fan-Out Automation:**
-   - Build `WP-5.0` (`SimContext`/`ModuleArena`/`ModuleTrait` + automated C++/Rust oracle & packet generator) once locally to unlock all `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`) on free remote quota with near-zero marginal local token cost.
+   - Build `WP-5.0` (`SimContext`/`ModuleArena`/`ModuleTrait` + automated C++/Rust oracle & packet generator) once locally (`0`-token local script generation once written) to unlock all `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`) on free remote quota with near-zero marginal local token cost.
+7. **Local-Compute-First & CI Budget Discipline:**
+   - Run `./scripts/bootstrap_repo.sh` and `cargo test` locally (`0` tokens, `0` CI minutes) before pushing; keep `macos-15` (10×) and `windows-latest` (2×) `workflow_dispatch`-only in `.github/workflows/ci-guardrails.yml`; fix minor near-passing remote PRs locally rather than consuming another cloud runner session.
 
 ---
 
