@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`52` implemented, `0` seeded skeletons, `411` unported)
-- **Golden Vector Oracles:** `32` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `31` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `33` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `32` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -106,6 +106,7 @@
 | `docs/golden_vectors/PKT-077.json` | 1000 | no |
 | `docs/golden_vectors/PKT-087.json` | 1000 | no |
 | `docs/golden_vectors/PKT-116.json` | 1000 | yes |
+| `docs/golden_vectors/PKT-143.json` | 1000 | yes |
 | `docs/golden_vectors/PKT-154.json` | 1000 | yes |
 | `docs/golden_vectors/PKT-406.json` | 1000 | yes |
 | `docs/golden_vectors/PKT-413.json` | 1000 | yes |
@@ -147,6 +148,7 @@
 | `zh_common` | `crates/zh_common/tests/golden_xfer.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt003.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt116_academy_stats.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_pkt143_locomotor.rs` | `seeded (ignored)` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt154_sides_list.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt406_radar.rs` | `seeded (ignored)` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt413_pathfind_cell.rs` | `active` |
