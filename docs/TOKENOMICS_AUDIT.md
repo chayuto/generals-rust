@@ -143,3 +143,29 @@ A read-only chat agent can inspect committed files in public `chayuto/generals-r
    - **No Throwaway Commits for a Chat Agent:** Never commit extra repo-index dumps, unpacker glue, or speculative packets solely to feed a read-only chat agent.
    - **No Pasting Large Outputs or Verbose Instructions Into Paid Local Coordinator Sessions:** Pasting hundreds or thousands of generated lines back into the local coordinator burns input and re-processing tokens twice; keep chat outputs compact or direct-to-disk.
    - **No Compile-Fix Ping-Pong Without a VM:** Never shuttle `rustc` or borrow-checker diagnostics manually between a no-VM chat agent and the local repo; let local compiler-equipped workers iterate directly against `cargo check` / `cargo test`.
+
+### 6.4 Empirical Local Swarm Pilot & Read-Only Chat Calibration (`2026-11-22`)
+
+| Execution Mode | Scope | Effort & Duration | Resource Deltas | Verified Output | Outcome / Lesson |
+|---|---|---|---|---|---|
+| **Phase-3 Parallel Swarm Pilot** (`3` concurrent `share` worktrees) | `13` packets (`5,293` est. C++ LOC): `economy-stats`, `combat-leaves`, `turret-ai` | `7 min` (`21:19:54`–`21:26:59`); `88` planner turns (`27 + 32 + 29`), `222` tool calls (`59 + 80 + 83`, `17` path errors on `C3`) | `Tier 1B/2 Worker Pool`: `28% -> 14%` reported before `429 RESOURCE_EXHAUSTED` on all `3`; `Tier 3 Coordinator Pool`: `8% -> 6%`; `0` CI min | `0` `.rs` / `0` `.cpp` / `0` commits landed (reproducible packet MDs only) | **Aborted at read phase**; 3-way concurrency starved tight headroom before writes began |
+| **Read-Only Public-Repo Chat Agent** | `WP-5.0` dispatch, re-entrancy, `ModuleData`, `Object`, `SimContext` contract + repo audit | `1` single-shot pass over existing public repo files | `$0` local quota; `0` CI min | Verified locally against `vendor/GeneralsX`: caught **2 critical CRC-desync bugs**, **4 integration traps**, **2 spec drift bugs**, and locked `WP-5.0` trait design | **High-ROI force multiplier** when paired with `$0` local verification |
+
+#### 4 Proven Root Causes of the Swarm Pilot Failure
+1. **Unbounded Read-First Exploration (`88` turns / `222` tool calls, `0` writes):** Workers read large C++ sources (`Object.cpp`, `Thing.cpp`, `ThingTemplate.cpp`) and guessed header paths (`17` file-not-found errors) without transitioning to writing oracle or Rust code.
+2. **3× Concurrent Starvation on Tight Headroom (`28%`):** Splitting a constrained `Tier 1B/2 Worker Pool` across `3` heavy concurrent streams exhausted capacity during all `3` workers' read phases (`0 / 13` packets landed), whereas `1` focused worker could have completed and committed.
+3. **Medium/High Reasoning Effort on Exploratory Reads:** Running elevated reasoning effort across `27–32` file-reading turns multiplied token consumption dramatically before any code was emitted.
+4. **Missing Worker-Brief & `Tier 0` Pre-Slicing Guardrails:** Workers had no hard read-turn cap, one worker ran full `./scripts/bootstrap_repo.sh` inside a worktree on Turn 1, and `scripts/prep_packet.py` did not inline resolved `vendor/GeneralsX` include paths or a compact Rust dependency cheat sheet.
+
+#### 4 Mandatory Local Swarm Guardrails (Effective Immediately)
+1. **Hard Read-Turn Budget:** Cap worker exploratory reading at `2–3` batched turns; require the C++ oracle to be written by Turn 4 and Rust implementation started by Turn 6.
+2. **Never Run `./scripts/bootstrap_repo.sh` Inside a Worktree:** Workers run only targeted checks (`python3 scripts/lint_determinism.py && cargo test -p <crate> --test golden_<pkt>`); the `Tier 3` coordinator runs `./scripts/bootstrap_repo.sh` once at integration.
+3. **Upgrade `scripts/prep_packet.py` Before Fan-Out:** Pre-resolve exact `vendor/GeneralsX` header paths and inline a compact Rust symbol summary (`$0` CPU) so workers never hunt across `vendor/` and `crates/`.
+4. **Quota-Aware Concurrency & Effort Sizing:** When `Tier 1B/2 Worker Pool` headroom is `< 30%`, run **1 focused worker serially to commit** instead of parallel fan-out; use `low` reasoning effort for leaf/boilerplate packets and reserve `medium`/`high` strictly for `C3`/`C4` architecture or desync triage.
+
+### 6.5 Next-Session Execution Plan (Ordered After Quota Reset)
+
+1. **Step 1 — Upgrade `scripts/prep_packet.py` (`$0` CPU force multiplier):** Add resolved `vendor/GeneralsX` header paths and a compact local Rust symbol index so future packet workers complete in `< 10` turns.
+2. **Step 2 — Land `WP-5.0` Core Spine & Fix All 6 Code Traps (`docs/ARCHITECTURE_SPEC.md` §1.2–§1.5):** Fix `ObjectArena::link_into_world` head-prepend + `generation`, `SleepyUpdateHeap::finish_due_update` (`cur_update_module` + two-pass `erase_for_owner` + Gate V2 heap golden test), canonical 64-bit `FacetMask`, `ThingFactory` ASCII-lowercase lookup, `ThingTemplate` `Locomotor` + `ModuleDataStore`/`ModuleRegistry`, and implement `BehaviorModule` + facet sub-traits + `ModuleSidecar`/`DeferredSelfOp` + `SimView`/`SimApi`.
+3. **Step 3 — Close Phase 3 (`13` Remaining Packets → `34 / 34`, 100%):** Execute `economy-stats` (`PKT-117,122,123,124`), `combat-leaves` (`PKT-135,136,141,142,146,147,148,149`), and `turret-ai` (`PKT-145`) under the hard read-turn cap and upgraded `prep_packet.py` (serially if pool `< 30%`, or 2–3 parallel after quota reset), regenerate `docs/PORT_MAP.md`, run `./scripts/bootstrap_repo.sh`, and push 1 clean batch.
+4. **Step 4 — Fan Out Phase 5 (`225` `BehaviorModule` packets, `WP-5.1`–`WP-5.4`):** Run uniform small-context batches once `WP-5.0` and the reusable module oracle harness are green.
