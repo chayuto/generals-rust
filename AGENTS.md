@@ -118,7 +118,7 @@ Generating the C++ Golden Vector harness and Rust verification oracle is mandato
 **Hard Project Constitution Rule (Tokenomics Break-Even):**
 - **Never create a remote `env:ephemeral-web` task if local creation/seeding + review cost exceeds finishing the implementation locally in the same pass as its C++ Golden Vectors.**
 
-Apply this routing rule strictly before creating remote Issues:
+Apply this routing rule strictly before creating remote Issues (see empirical calibration in [docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md)):
 
 1. **Delegate Remotely (`env:ephemeral-web` High-ROI Targets):**
    - **Self-contained single-class heavyweights** (`>= ~800` C++ `.cpp` lines of dense logic with **tiny stub surface**, such as `INI`, `StateMachine`, `DataChunk`, EA `Compression` codecs), OR
@@ -129,9 +129,12 @@ Apply this routing rule strictly before creating remote Issues:
    - **Hand-seeded multi-class small-store bundles:** stubbing, skeletonizing, and writing harnesses for 4–5 separate classes (`WP-3.1a`, `WP-3.2b`, `WP-3.3a`) consumes ~60–75% of direct implementation cost locally; keep them local rather than delegating manually.
    - **OS/path glue & tightly-coupled modules (`BIGFileSystem`, `TurretAI`, `Locomotor`, `Recorder` prior to Phase 4/5 seams):** keep local or defer until their underlying seams/abstractions exist.
    - **Core architectural spines & FFI seams (`GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `Pathfinder`, `GameLogic::update()`), retail `.big`/`.map`/`.rep` checks, and CRC desync triage:** always stay local (`env:local-full`).
-3. **PR Merge Hygiene:**
+3. **Mandatory Seeding Anti-Sprawl Rule (Post-`#70`/`#71`/`#74` Audit):**
+   - Empirical measurement across `#71` (`PKT-116`), `#70` (`PKT-434`), and `#74` (`PKT-442`) showed `3.1:1`–`5.4+:1` local-seed LOC per remote-implementation LOC under manual stub+skeleton seeding.
+   - **Do NOT create** new per-packet `stubs_pktXXX/` trees + mirrored C++/Rust fuzzers + full compiling `todo!()` skeletons for single standalone `env:ephemeral-web` tickets. Future remote seeding requires: (a) shared CMake/minimal C++ oracle linkage instead of 30+ hand-written stub headers, (b) input-carrying oracle JSON fixtures (no duplicated input synthesis/hashing across C++ and Rust), and (c) compact public API contracts instead of ~1,000-LOC `todo!()` skeletons — or programmatic batch generation (`WP-5.0` / `WP-6.4`). Otherwise finish the module locally in the same pass as its Golden Vectors.
+4. **PR Merge Hygiene:**
    - Prefer **Squash & Merge** with a clean conventional commit message on remote PRs so `main` stays free of empty planning commits and remote branch prefixes.
-4. **Phase 5–6 Fan-Out Automation:**
+5. **Phase 5–6 Fan-Out Automation:**
    - Before fanning out the `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`), automate packet, golden-vector, and issue generation once via the shared adapter (`WP-5.0`) rather than hand-authoring per-module skeletons.
 
 ---
@@ -142,6 +145,7 @@ Apply this routing rule strictly before creating remote Issues:
 - [docs/MULTI_AGENT_ROADMAP.md](docs/MULTI_AGENT_ROADMAP.md) — Complete task/subtask dependency DAG (`Issues #4..#33` & `PKT-001..PKT-463`), 6 master unblockers, and Milestones `M0`–`M7`.
 - [docs/RESEARCH.md](docs/RESEARCH.md) — Verified technical reference for `fbraz3/GeneralsX` at `84a7a20` (48-singleton init table, 16-step `GameLogic::update()` pipeline, `m_sleepyUpdates` heap rules, `Object` + 222 `BehaviorModule` layout, `XferCRC` / `GameLogic::getCRC()` specification).
 - [docs/AGENT_WORKFLOW_AND_CI.md](docs/AGENT_WORKFLOW_AND_CI.md) — Tier 0 AST Context Slicer design, 4-Tier Agent Routing matrix, 4-Gate V&V Funnel specification, and Free Public GitHub Actions CI Offload Pipeline.
+- [docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md) — Empirical tokenomics audit of manual `env:ephemeral-web` seeding (`#70`, `#71`, `#74`), stub sprawl analysis, and updated seeding/CMake oracle rules.
 - [docs/LOCAL_ASSETS.md](docs/LOCAL_ASSETS.md) — Where the retail Zero Hour assets live locally, how to (re)download them via steamcmd, and usage rules.
 - [docs/RUST_CONVENTIONS.md](docs/RUST_CONVENTIONS.md) — Mandatory C++-to-Rust determinism translation rules, type mappings, and worker cheat sheet.
 - `scripts/bootstrap_repo.sh` — Idempotent environment, git hook, and self-test verifier.

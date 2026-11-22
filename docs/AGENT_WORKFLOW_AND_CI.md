@@ -93,10 +93,15 @@ Agents working on `generals-rust` operate in one of two distinct physical enviro
 | **Self-Contained Heavyweight (`>= ~800` C++ `.cpp` lines, tiny stub surface) or Single-Schema Bundle** | `PKT-087` (`INI`), `PKT-077` (`StateMachine`), `PKT-451` (`DataChunk`), `WP-7.2b` (EA `Compression` codecs), `WP-3.2a` (`12`-enum registry) | **Delegate Remotely (`env:ephemeral-web`)** | One minimal harness + one compact skeleton unlocks `~400–1,100+` Rust LOC of dense algorithmic work on separate remote quota under 3-OS CI. |
 | **Core Spines & FFI (`C4` / `env:local-full`)** | `GameMath`, `Xfer`, `ModuleArena`, `ObjectArena`, `SleepyUpdateHeap`, `Pathfinder`, `GameLogic::update()` | **Always Keep Local** | Requires deep `vendor/GeneralsX` context, CMake/FFI bring-up, retail assets, or desync triage. |
 
-Operational rules enforced alongside this table:
+Operational rules enforced alongside this table (calibrated by [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md)):
 1. **Tokenomics gate before seeding:** Verify the target needs minimal stubs and delivers high algorithmic implementation-to-skeleton leverage before creating an `env:ephemeral-web` Issue; otherwise implement directly in the local pass.
 2. **Use Squash & Merge on remote PRs** with a clean conventional commit message so `main` stays free of empty planning commits and remote branch prefixes.
 3. **Automate Phase 5–6 Fan-Out Once (`WP-5.0`):** Generate C++ Golden Vectors, packet docs, and GitHub Issues programmatically via the shared adapter before fanning out `WP-5.1`–`WP-5.4` (`221` modules) and `WP-6.4` (`29` script packets).
+4. **Shared CMake oracle linkage over new `stubs_pktXXX/` trees:** Empirical measurements across `#70`, `#71`, and `#74` (`3.1:1`–`5.4+:1` local-seed : remote-impl LOC, alongside `479` files / `11,312` LOC across `21` `stubs*` dirs) show manual per-packet stub trees do not scale; link new C++ drivers against `vendor/GeneralsX/build/macos-vulkan` instead.
+5. **Input-carrying oracle JSON over mirrored fuzzers:** Record compact test inputs alongside expected outputs in `docs/golden_vectors/*.json` so Rust `golden_*.rs` suites stay thin (`~80–150` LOC) instead of re-implementing C++ synthetic generators.
+6. **Minimal public API contracts over full `todo!()` skeletons:** When delegating a heavyweight to `env:ephemeral-web`, provide a compact public trait/type signature contract rather than writing ~1,000-LOC field-by-field skeletons locally.
+
+**Empirical Calibration (`#70`, `#71`, `#74`):** Measured local hand-authored seed volumes were `1,794` LOC (`PKT-116`) vs. `+455/-18` LOC remote impl (`~3.9:1`), `3,252` LOC (`PKT-434`) vs. `+1,042/-40` LOC remote impl plus rebase/bugfix work (`~3.1:1`), and `5,425` LOC (`PKT-442`) vs. `~800–1,000` LOC est. remote impl (`~5.4:1`–`6.8:1`). Full breakdown and routing guidance for `#72`–`#81` live in [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md).
 
 ---
 
