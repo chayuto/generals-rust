@@ -5,20 +5,17 @@
 //! Remove the two `#[ignore]` attributes once `PKT-442` is implemented.
 
 use zh_common::crc::Crc;
-use zh_common::golden_json::{
-    extract_vector_lines, get_i32_array, get_u32,
-};
+use zh_common::golden_json::{extract_vector_lines, get_i32_array, get_u32};
 use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::{Coord2D, Coord3D, RGBColor};
 use zh_common::types::{Bool, Int, Real, Short, UnsignedInt, UnsignedShort, FALSE, TRUE};
 use zh_logic::gamelogic::global_data::{
     BodyDamageType, GlobalData, GlobalDataStore, OptionPreferencesOverrides, TerrainLod, TimeOfDay,
-    Weather, WeaponBonus, WeaponBonusField, BODY_DAMAGE_TYPE_COUNT, MAX_GLOBAL_LIGHTS,
-    MAX_WATER_GRID_SETTINGS, THE_BODY_DAMAGE_TYPE_NAMES, THE_WEAPON_BONUS_FIELD_NAMES,
-    THE_WEAPON_BONUS_NAMES, TERRAIN_LOD_COUNT, TERRAIN_LOD_NAMES, TIME_OF_DAY_COUNT,
-    TIME_OF_DAY_FIRST, TIME_OF_DAY_NAMES, WEATHER_COUNT, WEATHER_NAMES,
-    WEAPON_BONUS_CONDITION_COUNT, WEAPON_BONUS_FIELD_COUNT, DIFFICULTY_COUNT, LEVEL_COUNT,
-    PLAYERTYPE_COUNT,
+    WeaponBonus, WeaponBonusField, Weather, BODY_DAMAGE_TYPE_COUNT, DIFFICULTY_COUNT, LEVEL_COUNT,
+    MAX_GLOBAL_LIGHTS, MAX_WATER_GRID_SETTINGS, PLAYERTYPE_COUNT, TERRAIN_LOD_COUNT,
+    TERRAIN_LOD_NAMES, THE_BODY_DAMAGE_TYPE_NAMES, THE_WEAPON_BONUS_FIELD_NAMES,
+    THE_WEAPON_BONUS_NAMES, TIME_OF_DAY_COUNT, TIME_OF_DAY_FIRST, TIME_OF_DAY_NAMES,
+    WEAPON_BONUS_CONDITION_COUNT, WEAPON_BONUS_FIELD_COUNT, WEATHER_COUNT, WEATHER_NAMES,
 };
 
 const VECTORS_JSON: &str = include_str!("../../../docs/golden_vectors/PKT-442.json");
@@ -453,20 +450,48 @@ fn hash_global_data(g: &GlobalData) -> UnsignedInt {
 
 fn compute_getters_mask(g: &GlobalData) -> u32 {
     let mut m = 0u32;
-    if g.is_use_shadow_volumes_for_skins() != FALSE { m |= 1 << 0; }
-    if g.is_shadows_for_projectiles() != FALSE { m |= 1 << 1; }
-    if g.is_shadows_for_props() != FALSE { m |= 1 << 2; }
-    if g.is_extended_shadow_frustum_culling() != FALSE { m |= 1 << 3; }
-    if g.is_natural_sun_elevation() != FALSE { m |= 1 << 4; }
-    if g.is_bridge_shadows() != FALSE { m |= 1 << 5; }
-    if g.is_water_reflections() != FALSE { m |= 1 << 6; }
-    if g.is_explosion_dynamic_lights() != FALSE { m |= 1 << 7; }
-    if g.is_vehicle_headlights() != FALSE { m |= 1 << 8; }
-    if g.is_enable_post_processing() != FALSE { m |= 1 << 9; }
-    if g.is_post_process_bloom() != FALSE { m |= 1 << 10; }
-    if g.is_post_process_hdr() != FALSE { m |= 1 << 11; }
-    if g.is_post_process_fxaa() != FALSE { m |= 1 << 12; }
-    if g.is_air_unit_ground_indicator() != FALSE { m |= 1 << 13; }
+    if g.is_use_shadow_volumes_for_skins() != FALSE {
+        m |= 1 << 0;
+    }
+    if g.is_shadows_for_projectiles() != FALSE {
+        m |= 1 << 1;
+    }
+    if g.is_shadows_for_props() != FALSE {
+        m |= 1 << 2;
+    }
+    if g.is_extended_shadow_frustum_culling() != FALSE {
+        m |= 1 << 3;
+    }
+    if g.is_natural_sun_elevation() != FALSE {
+        m |= 1 << 4;
+    }
+    if g.is_bridge_shadows() != FALSE {
+        m |= 1 << 5;
+    }
+    if g.is_water_reflections() != FALSE {
+        m |= 1 << 6;
+    }
+    if g.is_explosion_dynamic_lights() != FALSE {
+        m |= 1 << 7;
+    }
+    if g.is_vehicle_headlights() != FALSE {
+        m |= 1 << 8;
+    }
+    if g.is_enable_post_processing() != FALSE {
+        m |= 1 << 9;
+    }
+    if g.is_post_process_bloom() != FALSE {
+        m |= 1 << 10;
+    }
+    if g.is_post_process_hdr() != FALSE {
+        m |= 1 << 11;
+    }
+    if g.is_post_process_fxaa() != FALSE {
+        m |= 1 << 12;
+    }
+    if g.is_air_unit_ground_indicator() != FALSE {
+        m |= 1 << 13;
+    }
     m
 }
 
@@ -666,7 +691,10 @@ const RELEASE_FIELDS: [(&str, FieldKind); 360] = [
     ("TerrainObjectsLightingMorningLightPos", FieldKind::Coord3D),
     ("TerrainObjectsLightingAfternoonAmbient", FieldKind::Rgb),
     ("TerrainObjectsLightingAfternoonDiffuse", FieldKind::Rgb),
-    ("TerrainObjectsLightingAfternoonLightPos", FieldKind::Coord3D),
+    (
+        "TerrainObjectsLightingAfternoonLightPos",
+        FieldKind::Coord3D,
+    ),
     ("TerrainObjectsLightingEveningAmbient", FieldKind::Rgb),
     ("TerrainObjectsLightingEveningDiffuse", FieldKind::Rgb),
     ("TerrainObjectsLightingEveningLightPos", FieldKind::Coord3D),
@@ -690,7 +718,10 @@ const RELEASE_FIELDS: [(&str, FieldKind); 360] = [
     ("TerrainObjectsLightingMorningLightPos2", FieldKind::Coord3D),
     ("TerrainObjectsLightingAfternoonAmbient2", FieldKind::Rgb),
     ("TerrainObjectsLightingAfternoonDiffuse2", FieldKind::Rgb),
-    ("TerrainObjectsLightingAfternoonLightPos2", FieldKind::Coord3D),
+    (
+        "TerrainObjectsLightingAfternoonLightPos2",
+        FieldKind::Coord3D,
+    ),
     ("TerrainObjectsLightingEveningAmbient2", FieldKind::Rgb),
     ("TerrainObjectsLightingEveningDiffuse2", FieldKind::Rgb),
     ("TerrainObjectsLightingEveningLightPos2", FieldKind::Coord3D),
@@ -714,7 +745,10 @@ const RELEASE_FIELDS: [(&str, FieldKind); 360] = [
     ("TerrainObjectsLightingMorningLightPos3", FieldKind::Coord3D),
     ("TerrainObjectsLightingAfternoonAmbient3", FieldKind::Rgb),
     ("TerrainObjectsLightingAfternoonDiffuse3", FieldKind::Rgb),
-    ("TerrainObjectsLightingAfternoonLightPos3", FieldKind::Coord3D),
+    (
+        "TerrainObjectsLightingAfternoonLightPos3",
+        FieldKind::Coord3D,
+    ),
     ("TerrainObjectsLightingEveningAmbient3", FieldKind::Rgb),
     ("TerrainObjectsLightingEveningDiffuse3", FieldKind::Rgb),
     ("TerrainObjectsLightingEveningLightPos3", FieldKind::Coord3D),
@@ -999,7 +1033,11 @@ fn build_seed_inputs(seed: u32) -> SeedInputs {
             base_ini.push_str(&format_field_line(name, kind, &mut rng));
         }
         for _ in 0..6 {
-            base_ini.push_str(&format_field_line("WeaponBonus", FieldKind::WeaponBonus, &mut rng));
+            base_ini.push_str(&format_field_line(
+                "WeaponBonus",
+                FieldKind::WeaponBonus,
+                &mut rng,
+            ));
         }
         base_ini.push_str(&format_field_line(
             "StandardPublicBone",
@@ -1015,7 +1053,11 @@ fn build_seed_inputs(seed: u32) -> SeedInputs {
         }
         let wb_n = 1 + (splitmix32(&mut rng) % 4);
         for _ in 0..wb_n {
-            base_ini.push_str(&format_field_line("WeaponBonus", FieldKind::WeaponBonus, &mut rng));
+            base_ini.push_str(&format_field_line(
+                "WeaponBonus",
+                FieldKind::WeaponBonus,
+                &mut rng,
+            ));
         }
         if (seed & 3) == 0 {
             base_ini.push_str(&format_field_line("DrawSkyBox", FieldKind::Bool, &mut rng));
@@ -1026,7 +1068,11 @@ fn build_seed_inputs(seed: u32) -> SeedInputs {
                 &mut rng,
             ));
         }
-        let tick_key = if (seed & 1) == 0 { "SkirmishTickRate" } else { "TickRate" };
+        let tick_key = if (seed & 1) == 0 {
+            "SkirmishTickRate"
+        } else {
+            "TickRate"
+        };
         base_ini.push_str(&format_field_line(tick_key, FieldKind::Int, &mut rng));
     }
     base_ini.push_str("End\n");
@@ -1063,30 +1109,67 @@ fn build_seed_inputs(seed: u32) -> SeedInputs {
     multi_ini.push_str("End\n");
 
     let mut prefs = OptionPreferencesOverrides::default();
-    prefs.use_alternate_mouse = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.use_right_mouse_scroll_with_alternate_mouse =
-        if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.client_retaliation_mode_enabled =
-        if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.double_click_attack_move =
-        if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
+    prefs.use_alternate_mouse = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.use_right_mouse_scroll_with_alternate_mouse = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.client_retaliation_mode_enabled = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.double_click_attack_move = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
     prefs.jpeg_quality = (50 + (splitmix32(&mut rng) % 46)) as Int;
     prefs.keyboard_scroll_factor = (1 + (splitmix32(&mut rng) % 200)) as Real * 0.01;
-    prefs.draw_scroll_anchor = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.move_scroll_anchor = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
+    prefs.draw_scroll_anchor = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.move_scroll_anchor = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
     prefs.default_ip = splitmix32(&mut rng);
     prefs.firewall_behavior = (splitmix32(&mut rng) % 10) as Int;
     prefs.firewall_port_allocation_delta = ((splitmix32(&mut rng) % 20001) as Int - 10000) as Short;
     prefs.firewall_port_override = (splitmix32(&mut rng) % 65536) as UnsignedShort;
-    prefs.save_camera_in_replay = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.use_camera_in_replay = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.enable_player_observer = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
+    prefs.save_camera_in_replay = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.use_camera_in_replay = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.enable_player_observer = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
     prefs.network_latency_font_size = (splitmix32(&mut rng) % 24) as Int;
     prefs.render_fps_font_size = (splitmix32(&mut rng) % 24) as Int;
     prefs.system_time_font_size = (splitmix32(&mut rng) % 24) as Int;
     prefs.game_time_font_size = (splitmix32(&mut rng) % 24) as Int;
     prefs.player_info_list_font_size = (splitmix32(&mut rng) % 24) as Int;
-    prefs.show_money_per_minute = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
+    prefs.show_money_per_minute = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
     prefs.game_window_transition_speed_multiplier =
         (1 + (splitmix32(&mut rng) % 50)) as Real * 0.25;
 
@@ -1118,28 +1201,93 @@ fn build_seed_inputs(seed: u32) -> SeedInputs {
     ];
     let has_draw_dist = (splitmix32(&mut rng) % 5) != 0;
     let draw_dist_val = f32::from_bits(draw_dist_bits[(splitmix32(&mut rng) as usize) % 9]);
-    prefs.terrain_draw_distance_scale = if has_draw_dist { Some(draw_dist_val) } else { None };
+    prefs.terrain_draw_distance_scale = if has_draw_dist {
+        Some(draw_dist_val)
+    } else {
+        None
+    };
 
     prefs.skirmish_tick_rate = (5 + (splitmix32(&mut rng) % 116)) as Int;
-    prefs.advanced_shadows = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.advanced_lighting = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.use_shadow_volumes_for_skins =
-        if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.extended_shadow_frustum_culling =
-        if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.natural_sun_elevation = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.shadows_for_projectiles = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.shadows_for_props = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.bridge_shadows = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.water_reflections = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.explosion_dynamic_lights = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.vehicle_headlights = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.enable_post_processing = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.post_process_bloom = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.post_process_hdr = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.post_process_fxaa = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
-    prefs.air_unit_ground_indicator =
-        if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
+    prefs.advanced_shadows = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.advanced_lighting = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.use_shadow_volumes_for_skins = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.extended_shadow_frustum_culling = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.natural_sun_elevation = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.shadows_for_projectiles = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.shadows_for_props = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.bridge_shadows = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.water_reflections = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.explosion_dynamic_lights = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.vehicle_headlights = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.enable_post_processing = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.post_process_bloom = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.post_process_hdr = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.post_process_fxaa = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
+    prefs.air_unit_ground_indicator = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
 
     const MSAA_MODES: [UnsignedInt; 4] = [0, 2, 4, 8];
     const ANISO_MODES: [UnsignedInt; 4] = [2, 4, 8, 16];
@@ -1147,12 +1295,17 @@ fn build_seed_inputs(seed: u32) -> SeedInputs {
     prefs.texture_filter_mode = splitmix32(&mut rng) % 5;
     prefs.texture_anisotropy_level = ANISO_MODES[(splitmix32(&mut rng) as usize) % 4];
 
-    const GAMMA_VALS: [Real; 12] =
-        [-5.0, 0.0, 0.75, 1.0, 25.0, 49.5, 50.0, 50.9, 51.0, 75.0, 100.0, 120.0];
+    const GAMMA_VALS: [Real; 12] = [
+        -5.0, 0.0, 0.75, 1.0, 25.0, 49.5, 50.0, 50.9, 51.0, 75.0, 100.0, 120.0,
+    ];
     prefs.gamma_value = GAMMA_VALS[(seed as usize + (splitmix32(&mut rng) as usize % 4)) % 12];
     prefs.x_resolution = (800 + (splitmix32(&mut rng) % 4) * 320) as Int;
     prefs.y_resolution = (600 + (splitmix32(&mut rng) % 4) * 240) as Int;
-    let has_fullviewport_dat = if (splitmix32(&mut rng) & 1) != 0 { TRUE } else { FALSE };
+    let has_fullviewport_dat = if (splitmix32(&mut rng) & 1) != 0 {
+        TRUE
+    } else {
+        FALSE
+    };
 
     let has_exe: bool;
     let mut use_pattern_exe = false;
@@ -1286,7 +1439,6 @@ fn test_pkt442_oracle_structure_and_constants() {
 }
 
 #[test]
-#[ignore = "PKT-442 GlobalData skeleton — remove #[ignore] once implemented"]
 fn test_pkt442_defaults_and_unit_edge_cases() {
     let lines = extract_vector_lines(VECTORS_JSON);
     let expected_defaults = get_u32(lines[0], "defaults_crc").unwrap();
@@ -1350,7 +1502,6 @@ fn test_pkt442_defaults_and_unit_edge_cases() {
 }
 
 #[test]
-#[ignore = "PKT-442 GlobalData skeleton — remove #[ignore] once implemented"]
 fn test_pkt442_1000_seed_cpp_parity() {
     let lines = extract_vector_lines(VECTORS_JSON);
     assert_eq!(lines.len(), 1000);
