@@ -54,6 +54,8 @@ pub mod production_prerequisite;
 pub mod rank_info;
 pub mod science;
 pub mod special_power;
+pub mod special_power_mask_type;
+pub mod special_power_type;
 pub mod special_power_types;
 pub mod upgrade;
 

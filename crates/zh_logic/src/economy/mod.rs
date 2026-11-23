@@ -2,10 +2,14 @@
 //! (`AcademyStats`, `Money`, `Energy`, `Handicap`, and `MissionStats`).
 
 pub mod academy_stats;
+pub mod battle_honors;
 pub mod energy;
 pub mod handicap;
 pub mod mission_stats;
 pub mod money;
+pub mod score_keeper;
+pub mod skirmish_battle_honors;
+pub mod stats_collector;
 
 pub const MAX_PLAYER_COUNT: usize = 16;
 
