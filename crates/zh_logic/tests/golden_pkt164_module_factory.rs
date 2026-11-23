@@ -590,6 +590,9 @@ End
             locomotor_store: Some(&loco_store),
             module_registry: Some(&reg),
             module_data_store: Some(&mut data_store),
+            upgrade_center: None,
+            ocl_names: None,
+            particle_system_names: None,
         };
         factory.load_from_ini(&mut reader, &mut ctx).expect("parse TestTank");
     }
@@ -651,6 +654,9 @@ End
             locomotor_store: Some(&loco_store),
             module_registry: Some(&reg),
             module_data_store: Some(&mut data_store),
+            upgrade_center: None,
+            ocl_names: None,
+            particle_system_names: None,
         };
         assert_eq!(factory.load_from_ini(&mut reader, &mut ctx), Err(IniError::InvalidData));
     }
@@ -676,6 +682,9 @@ End
             locomotor_store: Some(&loco_store),
             module_registry: Some(&reg),
             module_data_store: Some(&mut data_store),
+            upgrade_center: None,
+            ocl_names: None,
+            particle_system_names: None,
         };
         assert_eq!(factory.load_from_ini(&mut reader, &mut ctx), Err(IniError::InvalidData));
     }
@@ -706,6 +715,9 @@ End
             locomotor_store: Some(&loco_store),
             module_registry: Some(&reg),
             module_data_store: Some(&mut data_store),
+            upgrade_center: None,
+            ocl_names: None,
+            particle_system_names: None,
         };
         assert_eq!(factory.load_from_ini(&mut reader, &mut ctx), Err(IniError::InvalidData));
     }
@@ -738,6 +750,9 @@ End
             locomotor_store: Some(&loco_store),
             module_registry: Some(&reg),
             module_data_store: Some(&mut data_store),
+            upgrade_center: None,
+            ocl_names: None,
+            particle_system_names: None,
         };
         factory
             .load_from_ini(&mut reader, &mut ctx)
@@ -773,13 +788,22 @@ impl BehaviorModule for TestBodyModule {
     }
 
     fn apply_deferred_op(&mut self, op: DeferredSelfOp, _sim: &mut dyn SimApi, _ctx: ModuleContext) {
-        if let DeferredSelfOp::ChangeHealth { delta, .. } = op {
-            self.prev_health = self.health;
-            self.health += delta;
-            if self.health < 0.0 {
-                self.health = 0.0;
+        match op {
+            DeferredSelfOp::ChangeHealth { delta, .. } => {
+                self.prev_health = self.health;
+                self.health += delta;
+                if self.health < 0.0 {
+                    self.health = 0.0;
+                }
+                self.deferred_applied.fetch_add(1, Ordering::Relaxed);
             }
-            self.deferred_applied.fetch_add(1, Ordering::Relaxed);
+            DeferredSelfOp::ApplyAdjustedDamage { amount, kill, .. } => {
+                let d = if kill != FALSE { self.health } else { amount };
+                self.prev_health = self.health;
+                self.health = (self.health - d).max(0.0);
+                self.deferred_applied.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
         }
     }
 
@@ -788,6 +812,7 @@ impl BehaviorModule for TestBodyModule {
             health: self.health,
             max_health: self.max_health,
             prev_health: self.prev_health,
+            initial_health: self.max_health,
             damage_scalar: 1.0,
             damage_state: if self.health <= 0.0 {
                 BodyDamageType::Rubble.as_i32() as u8
@@ -797,6 +822,11 @@ impl BehaviorModule for TestBodyModule {
             front_crushed: FALSE,
             back_crushed: FALSE,
             indestructible: FALSE,
+            current_subdual_damage: 0.0,
+            subdued: FALSE,
+            last_damage_ts: u32::MAX,
+            last_healing_ts: u32::MAX,
+            armor_set_bits: 0,
         }
     }
 

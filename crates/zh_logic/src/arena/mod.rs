@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::scheduler::{ScheduleStore, SleepyUpdatePhase, UpdateModuleScheduleState};
 use zh_common::math::Coord3D;
-use zh_common::types::{Bool, Int, NameKeyType, ObjectId, Real};
+use zh_common::types::{Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UnsignedShort};
 
 /// Typed slot handle into [`ObjectArena`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -150,11 +150,17 @@ pub enum ModuleSidecar {
         health: Real,
         max_health: Real,
         prev_health: Real,
+        initial_health: Real,
         damage_scalar: Real,
         damage_state: u8,
         front_crushed: Bool,
         back_crushed: Bool,
         indestructible: Bool,
+        current_subdual_damage: Real,
+        subdued: Bool,
+        last_damage_ts: UnsignedInt,
+        last_healing_ts: UnsignedInt,
+        armor_set_bits: u8,
     },
     Contain {
         count: u32,
@@ -179,7 +185,31 @@ pub enum ModuleSidecar {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DeferredSelfOp {
     ApplyForce(Coord3D),
-    ChangeHealth { delta: Real, change_type: u8 },
+    ChangeHealth {
+        delta: Real,
+        change_type: u8,
+    },
+    ApplyAdjustedDamage {
+        amount: Real,
+        damage_type: u8,
+        death_type: u8,
+        damage_fx_override: u8,
+        damage_status_type: u8,
+        kill: Bool,
+        source_id: ObjectId,
+        source_player_mask: UnsignedShort,
+    },
+    AddSubdualDamage(Real),
+    SetMaxHealth {
+        new_max: Real,
+        change_type: u8,
+    },
+    SetIndestructible(Bool),
+    ApplyDamageScalar(Real),
+    SetCrushed {
+        front: Option<Bool>,
+        back: Option<Bool>,
+    },
     AiSetIdle,
     ContainRemove(ObjectSlot),
 }

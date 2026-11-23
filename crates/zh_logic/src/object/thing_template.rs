@@ -8,7 +8,7 @@ use crate::combat::armor_set::ArmorTemplateSet;
 use crate::combat::locomotor::LocomotorStore;
 use crate::combat::locomotor_set::{LocomotorSetType, LOCOMOTORSET_COUNT, LOCOMOTOR_SET_NAMES};
 use crate::economy::handicap::HandicapType;
-use crate::modules::{ModuleDataStore, ModuleRegistry};
+use crate::modules::{ModuleDataStore, ModuleParseContext, ModuleRegistry};
 use crate::object::weapon::WeaponStore;
 use crate::object::weapon_set::WeaponTemplateSet;
 use crate::player::radar::RadarPriorityType;
@@ -19,6 +19,7 @@ use crate::rules::production_prerequisite::{
     PrereqPlayerView, ProductionPrerequisite, ThingTemplateRef, ThingTemplateRegistry,
 };
 use crate::rules::science::{ScienceStore, SCIENCE_INVALID};
+use crate::rules::upgrade::UpgradeCenter;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{
     Color, IniError, IniLoadType, IniReader, LOGICFRAMES_PER_SECONDS_REAL, SEPS_DEFAULT,
@@ -203,6 +204,11 @@ impl ModuleInfo {
     #[inline]
     pub fn get_nugget_with_tag(&self, tag: &str) -> Option<&ModuleNugget> {
         self.info.iter().find(|n| n.module_tag == tag)
+    }
+
+    #[inline]
+    pub fn nuggets(&self) -> &[ModuleNugget] {
+        &self.info
     }
 
     #[inline]
@@ -415,6 +421,9 @@ pub struct ThingTemplateParseContext<'a> {
     pub locomotor_store: Option<&'a LocomotorStore>,
     pub module_registry: Option<&'a ModuleRegistry>,
     pub module_data_store: Option<&'a mut ModuleDataStore>,
+    pub upgrade_center: Option<&'a UpgradeCenter>,
+    pub ocl_names: Option<&'a BTreeSet<String>>,
+    pub particle_system_names: Option<&'a BTreeSet<String>>,
 }
 
 /// Cost/time/facility parameters provided by a `Player` to `ThingTemplate::calc_cost_to_build`
@@ -1537,15 +1546,31 @@ impl ThingTemplate {
         let tag_key = ctx.name_keys.name_to_key(&module_tag);
         let mod_name_key = ctx.name_keys.name_to_key(&mod_name);
         let data_id = match (ctx.module_registry, ctx.module_data_store.as_deref_mut()) {
-            (Some(reg), Some(store)) => reg.parse_module_data(
-                ini,
-                &mod_name,
-                mod_type,
-                tag_key,
-                mod_name_key,
-                store,
-                ThingTemplateId(self.template_id as u32),
-            )?,
+            (Some(reg), Some(store)) => {
+                let empty_upgrades = UpgradeCenter::new();
+                let empty_names = BTreeSet::new();
+                let mut parse_ctx = ModuleParseContext {
+                    name_keys: ctx.name_keys,
+                    science_store: ctx.science_store,
+                    upgrade_center: ctx.upgrade_center.unwrap_or(&empty_upgrades),
+                    armor_store: ctx.armor_store,
+                    weapon_store: ctx.weapon_store,
+                    fx_list_names: ctx.fx_list_names,
+                    damage_fx_names: ctx.damage_fx_names,
+                    ocl_names: ctx.ocl_names.unwrap_or(&empty_names),
+                    particle_system_names: ctx.particle_system_names.unwrap_or(&empty_names),
+                };
+                reg.parse_module_data(
+                    ini,
+                    &mod_name,
+                    mod_type,
+                    tag_key,
+                    mod_name_key,
+                    store,
+                    ThingTemplateId(self.template_id as u32),
+                    &mut parse_ctx,
+                )?
+            }
             _ => {
                 ini.skip_block()?;
                 ModuleDataId::INVALID

@@ -3,20 +3,41 @@
 //! Reference C++ packet: `packets/phase5/PKT-164_ModuleFactory.md`
 //! Golden Vector test: `crates/zh_logic/tests/golden_pkt164_module_factory.rs`
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::arena::{FacetMask, ModuleContext, ModuleDataId, ThingTemplateId};
+use crate::combat::armor::ArmorStore;
 use crate::modules::module::{BehaviorModule, ModuleData, ModuleType, StubModuleData};
 use crate::object::thing_template::ModuleMaskLookup;
+use crate::object::weapon::WeaponStore;
+use crate::rules::science::ScienceStore;
+use crate::rules::upgrade::UpgradeCenter;
 use crate::scheduler::SleepyUpdatePhase;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::types::{Int, NameKeyType, XferVersion};
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
+/// Read/interning context passed into [`ModuleDataParseFn`] while parsing `Module ... End` blocks.
+pub struct ModuleParseContext<'a> {
+    pub name_keys: &'a mut NameKeyGenerator,
+    pub science_store: &'a ScienceStore,
+    pub upgrade_center: &'a UpgradeCenter,
+    pub armor_store: &'a ArmorStore,
+    pub weapon_store: &'a WeaponStore,
+    pub fx_list_names: &'a BTreeSet<String>,
+    pub damage_fx_names: &'a BTreeSet<String>,
+    pub ocl_names: &'a BTreeSet<String>,
+    pub particle_system_names: &'a BTreeSet<String>,
+}
+
 /// Parser callback converting an INI module block (`Module ... End`) into typed [`ModuleData`].
-pub type ModuleDataParseFn =
-    fn(&mut IniReader<'_>, NameKeyType, NameKeyType) -> Result<Box<dyn ModuleData>, IniError>;
+pub type ModuleDataParseFn = fn(
+    &mut IniReader<'_>,
+    NameKeyType,
+    NameKeyType,
+    &mut ModuleParseContext<'_>,
+) -> Result<Box<dyn ModuleData>, IniError>;
 
 /// Factory callback instantiating a runtime [`BehaviorModule`] from parsed [`ModuleData`].
 pub type ModuleCreateFn = fn(&dyn ModuleData, ModuleContext) -> Box<dyn BehaviorModule>;
@@ -541,10 +562,11 @@ impl ModuleRegistry {
         mod_name_key: NameKeyType,
         store: &mut ModuleDataStore,
         template_id: ThingTemplateId,
+        parse_ctx: &mut ModuleParseContext<'_>,
     ) -> Result<ModuleDataId, IniError> {
         if let Some(desc) = self.find_descriptor(name, mod_type) {
             if let Some(parse_fn) = desc.parse_data {
-                let data = parse_fn(ini, tag_key, mod_name_key)?;
+                let data = parse_fn(ini, tag_key, mod_name_key, parse_ctx)?;
                 return Ok(store.insert_for_template(template_id, tag_key, data));
             }
             ini.skip_block()?;

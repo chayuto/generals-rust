@@ -646,11 +646,17 @@ fn test_module_arena_reentered_error_and_deferred_ops() {
             health: 100.0,
             max_health: 100.0,
             prev_health: 100.0,
+            initial_health: 100.0,
             damage_scalar: 1.0,
             damage_state: 0,
             front_crushed: 0,
             back_crushed: 0,
             indestructible: 0,
+            current_subdual_damage: 0.0,
+            subdued: 0,
+            last_damage_ts: u32::MAX,
+            last_healing_ts: u32::MAX,
+            armor_set_bits: 0,
         },
     );
 

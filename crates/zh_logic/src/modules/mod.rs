@@ -1,15 +1,22 @@
 //! `WP-5.0`: Phase 5 `BehaviorModule` registry, traits, facet interfaces, and `ModuleFactory`
-//! (`PKT-163`, `PKT-164`).
+//! (`PKT-163`, `PKT-164`) plus `WP-5.1` module category submodules.
 
+pub mod body;
+pub mod create;
+pub mod damage;
+pub mod destroy;
+pub mod helper;
 pub mod module;
 pub mod module_factory;
 
 pub use module::{
     AiUpdateFacet, BehaviorModule, BodyFacet, CollideFacet, ContainFacet, CreateFacet,
-    DamageFacet, DestroyFacet, DieFacet, ModuleData, ModuleSnapshotHeader, ModuleType,
-    PhysicsFacet, SpecialPowerFacet, StealthFacet, StubModuleData, UpdateFacet, UpgradeFacet,
+    DamageFacet, DestroyFacet, DieFacet, HelperFacet, MaxHealthChangeType, ModuleData,
+    ModuleSnapshotHeader, ModuleType, PhysicsFacet, SlowDeathFacet, SpecialPowerFacet,
+    StealthFacet, StubModuleData, UpdateFacet, UpgradeFacet, INVALID_BODY_TIMESTAMP,
+    MAX_HEALTH_CHANGE_NAMES,
 };
 pub use module_factory::{
-    ModuleCreateFn, ModuleDataParseFn, ModuleDataStore, ModuleDescriptor, ModuleRegistry,
-    BUILTIN_ZH_MODULES, W3D_DRAW_STUB_NAMES,
+    ModuleCreateFn, ModuleDataParseFn, ModuleDataStore, ModuleDescriptor, ModuleParseContext,
+    ModuleRegistry, BUILTIN_ZH_MODULES, W3D_DRAW_STUB_NAMES,
 };

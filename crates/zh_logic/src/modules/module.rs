@@ -10,18 +10,60 @@ use std::any::Any;
 
 use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ObjectSlot};
 use crate::combat::damage::DamageInfo;
-use crate::gamelogic::global_data::BodyDamageType;
+use crate::gamelogic::global_data::{BodyDamageType, WeaponBonusConditionType};
 pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
 use crate::rules::disabled_types::DisabledMaskType;
+use crate::rules::object_status_types::ObjectStatusType;
 use crate::rules::upgrade::UpgradeMaskType;
 use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
 use crate::sim::{SimApi, SimView};
 use zh_common::math::Coord3D;
 use zh_common::types::{
-    Bool, Int, NameKeyType, Real, UnsignedInt, UpdateSleepTime, XferVersion, FALSE, TRUE,
+    Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UpdateSleepTime, VeterancyLevel,
+    XferVersion, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
+
+/// Sentinel timestamp matching `InvalidBodyTimestamp = ~0u` in `ActiveBody.cpp`.
+pub const INVALID_BODY_TIMESTAMP: UnsignedInt = u32::MAX;
+
+/// Strategy applied to current health when `BodyModule::set_max_health` changes `max_health`
+/// (`BodyModule.h`: `MaxHealthChangeType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MaxHealthChangeType {
+    #[default]
+    SameCurrentHealth = 0,
+    PreserveRatio = 1,
+    AddCurrentHealthToo = 2,
+    FullyHeal = 3,
+}
+
+impl MaxHealthChangeType {
+    #[inline]
+    pub const fn from_i32(v: Int) -> Option<Self> {
+        match v {
+            0 => Some(Self::SameCurrentHealth),
+            1 => Some(Self::PreserveRatio),
+            2 => Some(Self::AddCurrentHealthToo),
+            3 => Some(Self::FullyHeal),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_i32(self) -> Int {
+        self as Int
+    }
+}
+
+pub const MAX_HEALTH_CHANGE_NAMES: [&str; 4] = [
+    "SAME_CURRENTHEALTH",
+    "PRESERVE_RATIO",
+    "ADD_CURRENT_HEALTH_TOO",
+    "FULLY_HEAL",
+];
 
 /// Immutable per-template module configuration loaded from INI (`ModuleData`).
 pub trait ModuleData: Any + Send + Sync {
@@ -203,6 +245,18 @@ pub trait BehaviorModule: Send {
     fn as_stealth_mut(&mut self) -> Option<&mut dyn StealthFacet> {
         None
     }
+    fn as_helper(&self) -> Option<&dyn HelperFacet> {
+        None
+    }
+    fn as_helper_mut(&mut self) -> Option<&mut dyn HelperFacet> {
+        None
+    }
+    fn as_slow_death(&self) -> Option<&dyn SlowDeathFacet> {
+        None
+    }
+    fn as_slow_death_mut(&mut self) -> Option<&mut dyn SlowDeathFacet> {
+        None
+    }
 }
 
 /// Sleepy-update facet (`UpdateModuleInterface`).
@@ -215,6 +269,16 @@ pub trait UpdateFacet {
 
     fn get_update_phase(&self) -> SleepyUpdatePhase {
         SleepyUpdatePhase::Normal
+    }
+
+    /// Notifies `BoneFXUpdate` (via `BoneFXDamage`) when body damage state transitions.
+    fn change_body_damage_state(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _old_state: BodyDamageType,
+        _new_state: BodyDamageType,
+    ) {
     }
 }
 
@@ -241,6 +305,21 @@ pub trait BodyFacet {
     fn get_initial_health(&self) -> Real {
         0.0
     }
+    fn set_initial_health(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _initial_percent: Int,
+    ) {
+    }
+    fn set_max_health(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _new_max: Real,
+        _change_type: MaxHealthChangeType,
+    ) {
+    }
     fn get_damage_state(&self) -> BodyDamageType {
         BodyDamageType::Pristine
     }
@@ -251,6 +330,7 @@ pub trait BodyFacet {
         _new_state: BodyDamageType,
     ) {
     }
+    fn set_aflame(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _setting: Bool) {}
     fn get_damage_scalar(&self) -> Real {
         1.0
     }
@@ -258,7 +338,13 @@ pub trait BodyFacet {
     fn is_indestructible(&self) -> Bool {
         TRUE
     }
-    fn set_indestructible(&mut self, _indestructible: Bool) {}
+    fn set_indestructible(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _indestructible: Bool,
+    ) {
+    }
     fn internal_change_health(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _delta: Real) {}
     fn get_front_crushed(&self) -> Bool {
         FALSE
@@ -266,9 +352,77 @@ pub trait BodyFacet {
     fn get_back_crushed(&self) -> Bool {
         FALSE
     }
+    fn set_front_crushed(&mut self, _crushed: Bool) {}
+    fn set_back_crushed(&mut self, _crushed: Bool) {}
     fn set_armor_set_flag(&mut self, _ast: ArmorSetType) {}
     fn clear_armor_set_flag(&mut self, _ast: ArmorSetType) {}
     fn test_armor_set_flag(&self, _ast: ArmorSetType) -> Bool {
+        FALSE
+    }
+    fn get_last_damage_info(&self) -> Option<&DamageInfo> {
+        None
+    }
+    fn get_last_damage_timestamp(&self) -> Option<UnsignedInt> {
+        #[cfg(feature = "retail-crc")]
+        {
+            Some(0)
+        }
+        #[cfg(not(feature = "retail-crc"))]
+        {
+            None
+        }
+    }
+    fn get_last_healing_timestamp(&self) -> Option<UnsignedInt> {
+        #[cfg(feature = "retail-crc")]
+        {
+            Some(0)
+        }
+        #[cfg(not(feature = "retail-crc"))]
+        {
+            None
+        }
+    }
+    fn get_clearable_last_attacker(&self) -> ObjectId {
+        ObjectId::INVALID
+    }
+    fn clear_last_attacker(&mut self) {}
+    fn clear_last_damage_info(&mut self) {
+        self.clear_last_attacker();
+    }
+    fn get_current_subdual_damage(&self) -> Real {
+        0.0
+    }
+    fn get_subdual_damage_cap(&self) -> Real {
+        0.0
+    }
+    fn get_subdual_damage_heal_rate(&self) -> UnsignedInt {
+        0
+    }
+    fn get_subdual_damage_heal_amount(&self) -> Real {
+        0.0
+    }
+    fn has_any_subdual_damage(&self) -> Bool {
+        FALSE
+    }
+    fn is_subdued(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+        FALSE
+    }
+    fn can_be_subdued(&self) -> Bool {
+        FALSE
+    }
+    fn internal_add_subdual_damage(&mut self, _delta: Real) {}
+    fn on_veterancy_level_changed(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _old_level: VeterancyLevel,
+        _new_level: VeterancyLevel,
+        _provide_feedback: Bool,
+    ) {
+    }
+    fn evaluate_visual_condition(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn update_body_particle_systems(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn is_inactive_body(&self) -> Bool {
         FALSE
     }
 }
@@ -367,6 +521,7 @@ pub trait SpecialPowerFacet {
     fn is_ready(&self, sim: &dyn SimView) -> Bool;
     fn get_ready_frame(&self) -> UnsignedInt;
     fn set_ready_frame(&mut self, frame: UnsignedInt);
+    fn on_special_power_creation(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn do_special_power(
         &mut self,
         _sim: &mut dyn SimApi,
@@ -374,6 +529,49 @@ pub trait SpecialPowerFacet {
         _command_options: UnsignedInt,
     ) {
     }
+}
+
+/// Polymorphic trigger facet implemented by internal `ObjectHelper` subclasses (`WP-5.1-A`).
+pub trait HelperFacet {
+    fn start_defection_timer(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _num_frames: UnsignedInt,
+        _with_fx: Bool,
+    ) {
+    }
+    fn do_status_damage(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _status: ObjectStatusType,
+        _duration: Real,
+    ) {
+    }
+    fn notify_subdual_damage(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _amount: Real,
+    ) {
+    }
+    fn do_temp_weapon_bonus(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _bonus_type: WeaponBonusConditionType,
+        _duration: UnsignedInt,
+    ) {
+    }
+    fn sleep_until(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _when: UnsignedInt) {}
+}
+
+/// Slow-death facet (`SlowDeathBehaviorInterface`) used by `UndeadBody::start_second_life`.
+pub trait SlowDeathFacet {
+    fn is_die_applicable(&self, dmg: &DamageInfo) -> Bool;
+    fn get_probability_modifier(&self, dmg: &DamageInfo) -> Int;
+    fn begin_slow_death(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &DamageInfo);
 }
 
 /// Destruction cleanup facet (`DestroyModuleInterface`).
