@@ -4,7 +4,8 @@
 use std::collections::BTreeMap;
 
 use crate::scheduler::{ScheduleStore, SleepyUpdatePhase, UpdateModuleScheduleState};
-use zh_common::types::{NameKeyType, ObjectId};
+use zh_common::math::Coord3D;
+use zh_common::types::{Bool, Int, NameKeyType, ObjectId, Real};
 
 /// Typed slot handle into [`ObjectArena`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -80,6 +81,26 @@ impl FacetMask {
     pub const SLOW_DEATH: Self = Self(1 << 20);
     pub const POWER_PLANT_UPDATE: Self = Self(1 << 21);
     pub const HORDE_UPDATE: Self = Self(1 << 22);
+    pub const SPAWN_BEHAVIOR: Self = Self(1 << 23);
+    pub const COUNTERMEASURES: Self = Self(1 << 24);
+    pub const SPECIAL_POWER_UPDATE: Self = Self(1 << 25);
+    pub const PARKING_PLACE: Self = Self(1 << 26);
+    pub const CAVE_INTERFACE: Self = Self(1 << 27);
+    pub const LAND_MINE: Self = Self(1 << 28);
+    pub const RAILED_TRANSPORT_DOCK: Self = Self(1 << 29);
+    pub const TRANSPORT_PASSENGER: Self = Self(1 << 30);
+
+    pub const PRIMARY_CPP_MASK: u64 = 0x0fff;
+
+    #[inline]
+    pub const fn from_cpp_interface_mask(mask: Int) -> Self {
+        Self((mask as u32 as u64) & Self::PRIMARY_CPP_MASK)
+    }
+
+    #[inline]
+    pub const fn to_cpp_interface_mask(self) -> Int {
+        (self.0 & Self::PRIMARY_CPP_MASK) as Int
+    }
 
     #[inline]
     pub const fn union(self, other: Self) -> Self {
@@ -112,6 +133,57 @@ pub struct ModuleContext {
     pub template_data_id: ModuleDataId,
 }
 
+/// Error returned when [`ModuleArena::take_payload`] cannot take ownership of a slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeError {
+    Dead,
+    Reentered,
+}
+
+/// Hot read-only state mirror stored inside [`ModuleMeta`] so synchronous re-entrant
+/// readers (and `Object::crc`) observe up-to-date fields while a payload is taken out.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ModuleSidecar {
+    #[default]
+    None,
+    Body {
+        health: Real,
+        max_health: Real,
+        prev_health: Real,
+        damage_scalar: Real,
+        damage_state: u8,
+        front_crushed: Bool,
+        back_crushed: Bool,
+        indestructible: Bool,
+    },
+    Contain {
+        count: u32,
+        max: i32,
+        enclosing: Bool,
+    },
+    Physics {
+        velocity: Coord3D,
+        mass: Real,
+        airborne: Bool,
+    },
+    Ai {
+        moving: Bool,
+        attacking: Bool,
+        idle: Bool,
+        cur_locomotor_set: u8,
+    },
+}
+
+/// Deferred self-mutation queued when a synchronous re-entrant callback targets an
+/// already-executing [`ModuleSlot`], drained immediately on [`with_module_dispatch_and_drain`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeferredSelfOp {
+    ApplyForce(Coord3D),
+    ChangeHealth { delta: Real, change_type: u8 },
+    AiSetIdle,
+    ContainRemove(ObjectSlot),
+}
+
 /// Disjoint module header record stored separately from the `ModuleArena` payload array so
 /// `SleepyUpdateHeap` can always inspect/mutate schedules while any payload is taken out.
 #[derive(Debug, Clone)]
@@ -122,6 +194,8 @@ pub struct ModuleMeta {
     pub template_data_id: ModuleDataId,
     pub facet_mask: FacetMask,
     pub schedule: UpdateModuleScheduleState,
+    pub sidecar: ModuleSidecar,
+    pub deferred_ops: Vec<DeferredSelfOp>,
     pub alive: bool,
     pub executing: bool,
     pub generation: u32,
@@ -143,6 +217,8 @@ impl ModuleMeta {
             template_data_id,
             facet_mask,
             schedule: UpdateModuleScheduleState::new(phase),
+            sidecar: ModuleSidecar::None,
+            deferred_ops: Vec::new(),
             alive: true,
             executing: false,
             generation: 0,
@@ -226,6 +302,8 @@ impl<K> ModuleArena<K> {
         self.metas[idx].executing = false;
         self.metas[idx].generation = self.metas[idx].generation.wrapping_add(1);
         self.metas[idx].schedule.set_index_in_logic(-1);
+        self.metas[idx].sidecar = ModuleSidecar::None;
+        self.metas[idx].deferred_ops.clear();
         self.free_list.push(slot.0);
         self.active_count -= 1;
         self.payloads[idx].take()
@@ -235,6 +313,51 @@ impl<K> ModuleArena<K> {
     pub fn is_alive(&self, slot: ModuleSlot) -> bool {
         let idx = slot.0 as usize;
         idx < self.metas.len() && self.metas[idx].alive
+    }
+
+    #[inline]
+    pub fn is_executing(&self, slot: ModuleSlot) -> bool {
+        let idx = slot.0 as usize;
+        idx < self.metas.len() && self.metas[idx].alive && self.metas[idx].executing
+    }
+
+    #[inline]
+    pub fn sidecar(&self, slot: ModuleSlot) -> ModuleSidecar {
+        let idx = slot.0 as usize;
+        if idx < self.metas.len() && self.metas[idx].alive {
+            self.metas[idx].sidecar
+        } else {
+            ModuleSidecar::None
+        }
+    }
+
+    #[inline]
+    pub fn set_sidecar(&mut self, slot: ModuleSlot, sidecar: ModuleSidecar) {
+        let idx = slot.0 as usize;
+        if idx < self.metas.len() && self.metas[idx].alive {
+            self.metas[idx].sidecar = sidecar;
+        }
+    }
+
+    #[inline]
+    pub fn push_deferred_op(&mut self, slot: ModuleSlot, op: DeferredSelfOp) -> bool {
+        let idx = slot.0 as usize;
+        if idx < self.metas.len() && self.metas[idx].alive && self.metas[idx].executing {
+            self.metas[idx].deferred_ops.push(op);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn drain_deferred_ops(&mut self, slot: ModuleSlot) -> Vec<DeferredSelfOp> {
+        let idx = slot.0 as usize;
+        if idx < self.metas.len() && !self.metas[idx].deferred_ops.is_empty() {
+            std::mem::take(&mut self.metas[idx].deferred_ops)
+        } else {
+            Vec::new()
+        }
     }
 
     #[inline]
@@ -268,18 +391,18 @@ impl<K> ModuleArena<K> {
     }
 
     /// Takes the payload out for Take-and-Restore dispatch; returns `(payload, ctx, generation)`.
-    pub fn take_payload(&mut self, slot: ModuleSlot) -> Option<(K, ModuleContext, u32)> {
+    pub fn take_payload(&mut self, slot: ModuleSlot) -> Result<(K, ModuleContext, u32), TakeError> {
         let idx = slot.0 as usize;
-        if idx >= self.metas.len() {
-            return None;
+        if idx >= self.metas.len() || !self.metas[idx].alive {
+            return Err(TakeError::Dead);
         }
         let meta = &mut self.metas[idx];
-        if !meta.alive || meta.executing {
-            return None;
+        if meta.executing {
+            return Err(TakeError::Reentered);
         }
-        let payload = self.payloads[idx].take()?;
+        let payload = self.payloads[idx].take().ok_or(TakeError::Reentered)?;
         meta.executing = true;
-        Some((payload, meta.context(slot), meta.generation))
+        Ok((payload, meta.context(slot), meta.generation))
     }
 
     /// Restores a taken payload if the slot was not freed/reallocated during execution.
@@ -315,17 +438,54 @@ pub fn with_module_dispatch<W, K, R>(
     mod_slot: ModuleSlot,
     arena_mut: fn(&mut W) -> &mut ModuleArena<K>,
     f: impl FnOnce(&mut K, &mut W, ModuleContext) -> R,
-) -> Option<R> {
+) -> Result<R, TakeError> {
     let (mut payload, ctx, gen_id) = arena_mut(world).take_payload(mod_slot)?;
     let out = f(&mut payload, world, ctx);
     arena_mut(world).restore_payload(mod_slot, gen_id, payload);
-    Some(out)
+    Ok(out)
+}
+
+/// Executes `f(&mut payload, world, ctx)` using Take-and-Restore and drains any deferred self-ops
+/// queued on `mod_slot` before restoring ownership to the arena.
+pub fn with_module_dispatch_and_drain<W, K, R>(
+    world: &mut W,
+    mod_slot: ModuleSlot,
+    arena_mut: fn(&mut W) -> &mut ModuleArena<K>,
+    f: impl FnOnce(&mut K, &mut W, ModuleContext) -> R,
+    mut apply_op: impl FnMut(&mut K, &mut W, ModuleContext, DeferredSelfOp),
+) -> Result<R, TakeError> {
+    let (mut payload, ctx, gen_id) = arena_mut(world).take_payload(mod_slot)?;
+    let out = f(&mut payload, world, ctx);
+    loop {
+        let ops = {
+            let arena = arena_mut(world);
+            let idx = mod_slot.0 as usize;
+            if idx >= arena.metas.len()
+                || !arena.metas[idx].alive
+                || !arena.metas[idx].executing
+                || arena.metas[idx].generation != gen_id
+            {
+                Vec::new()
+            } else {
+                arena.drain_deferred_ops(mod_slot)
+            }
+        };
+        if ops.is_empty() {
+            break;
+        }
+        for op in ops {
+            apply_op(&mut payload, world, ctx, op);
+        }
+    }
+    arena_mut(world).restore_payload(mod_slot, gen_id, payload);
+    Ok(out)
 }
 
 #[derive(Debug, Clone)]
 struct ObjectNode<T> {
     id: ObjectId,
     alive: bool,
+    generation: u32,
     in_world_list: bool,
     prev_in_world: Option<ObjectSlot>,
     next_in_world: Option<ObjectSlot>,
@@ -383,6 +543,24 @@ impl<T> ObjectArena<T> {
     }
 
     #[inline]
+    pub fn generation(&self, slot: ObjectSlot) -> Option<u32> {
+        let idx = slot.0 as usize;
+        if idx < self.nodes.len() && self.nodes[idx].alive {
+            Some(self.nodes[idx].generation)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn is_slot_current(&self, slot: ObjectSlot, generation: u32) -> bool {
+        let idx = slot.0 as usize;
+        idx < self.nodes.len()
+            && self.nodes[idx].alive
+            && self.nodes[idx].generation == generation
+    }
+
+    #[inline]
     pub fn is_in_world_list(&self, slot: ObjectSlot) -> bool {
         let idx = slot.0 as usize;
         idx < self.nodes.len() && self.nodes[idx].alive && self.nodes[idx].in_world_list
@@ -409,6 +587,19 @@ impl<T> ObjectArena<T> {
     }
 
     #[inline]
+    pub fn get_checked(&self, slot: ObjectSlot, generation: u32) -> Option<&T> {
+        let idx = slot.0 as usize;
+        if idx < self.nodes.len()
+            && self.nodes[idx].alive
+            && self.nodes[idx].generation == generation
+        {
+            self.nodes[idx].data.as_ref()
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     pub fn get_mut(&mut self, slot: ObjectSlot) -> Option<&mut T> {
         let idx = slot.0 as usize;
         if idx < self.nodes.len() && self.nodes[idx].alive {
@@ -418,22 +609,46 @@ impl<T> ObjectArena<T> {
         }
     }
 
+    #[inline]
+    pub fn get_mut_checked(&mut self, slot: ObjectSlot, generation: u32) -> Option<&mut T> {
+        let idx = slot.0 as usize;
+        if idx < self.nodes.len()
+            && self.nodes[idx].alive
+            && self.nodes[idx].generation == generation
+        {
+            self.nodes[idx].data.as_mut()
+        } else {
+            None
+        }
+    }
+
     pub fn spawn(&mut self, id: ObjectId, data: T, link_world: bool) -> ObjectSlot {
         debug_assert!(!self.id_to_slot.contains_key(&id), "duplicate ObjectId {:?}", id);
-        let node = ObjectNode {
-            id,
-            alive: true,
-            in_world_list: false,
-            prev_in_world: None,
-            next_in_world: None,
-            data: Some(data),
-        };
         let slot = if let Some(reuse_idx) = self.free_list.pop() {
-            self.nodes[reuse_idx as usize] = node;
+            let idx = reuse_idx as usize;
+            let raw_next = self.nodes[idx].generation.wrapping_add(1);
+            let next_gen = if raw_next == 0 { 1 } else { raw_next };
+            self.nodes[idx] = ObjectNode {
+                id,
+                alive: true,
+                generation: next_gen,
+                in_world_list: false,
+                prev_in_world: None,
+                next_in_world: None,
+                data: Some(data),
+            };
             ObjectSlot(reuse_idx)
         } else {
             let s = ObjectSlot(self.nodes.len() as u32);
-            self.nodes.push(node);
+            self.nodes.push(ObjectNode {
+                id,
+                alive: true,
+                generation: 1,
+                in_world_list: false,
+                prev_in_world: None,
+                next_in_world: None,
+                data: Some(data),
+            });
             s
         };
         self.id_to_slot.insert(id, slot);
@@ -444,21 +659,22 @@ impl<T> ObjectArena<T> {
         slot
     }
 
+    /// Links `slot` at the head of `world_head` (`GameLogic::registerObject` -> `obj->prependToList(&m_objList)`).
     pub fn link_into_world(&mut self, slot: ObjectSlot) {
         let idx = slot.0 as usize;
         if idx >= self.nodes.len() || !self.nodes[idx].alive || self.nodes[idx].in_world_list {
             return;
         }
-        let prev_tail = self.world_tail;
-        self.nodes[idx].prev_in_world = prev_tail;
-        self.nodes[idx].next_in_world = None;
+        let prev_head = self.world_head;
+        self.nodes[idx].prev_in_world = None;
+        self.nodes[idx].next_in_world = prev_head;
         self.nodes[idx].in_world_list = true;
-        if let Some(tail) = prev_tail {
-            self.nodes[tail.0 as usize].next_in_world = Some(slot);
+        if let Some(head) = prev_head {
+            self.nodes[head.0 as usize].prev_in_world = Some(slot);
         } else {
-            self.world_head = Some(slot);
+            self.world_tail = Some(slot);
         }
-        self.world_tail = Some(slot);
+        self.world_head = Some(slot);
     }
 
     pub fn unlink_from_world(&mut self, slot: ObjectSlot) {
@@ -492,6 +708,7 @@ impl<T> ObjectArena<T> {
         let id = self.nodes[idx].id;
         self.id_to_slot.remove(&id);
         self.nodes[idx].alive = false;
+        self.nodes[idx].generation = self.nodes[idx].generation.wrapping_add(1);
         self.free_list.push(slot.0);
         self.active_count -= 1;
         self.nodes[idx].data.take()

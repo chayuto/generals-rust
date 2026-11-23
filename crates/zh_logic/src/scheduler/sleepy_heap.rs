@@ -9,6 +9,7 @@ pub const UPDATE_SLEEP_INVALID: UnsignedInt = 0;
 pub const UPDATE_SLEEP_NONE: UnsignedInt = 1;
 pub const UPDATE_SLEEP_FOREVER: UnsignedInt = 0x3fff_ffff;
 pub const INVALID_LOGIC_INDEX: Int = -1;
+pub const MAX_SLEEPY_UPDATES_PER_OBJECT: usize = 256;
 
 /// Execution phase within a frame packed into the bottom 2 bits of `next_call_frame_and_phase`.
 #[repr(u32)]
@@ -443,24 +444,68 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
         }
     }
 
-    /// Finalizes the root update at index `0` after `update()` completes or is skipped due to disabled state.
-    pub fn finish_due_update_at_root<S: ScheduleStore<Handle>>(
+    /// Finalizes a dispatched update module (`handle`) at its live heap index after `update()` completes.
+    pub fn finish_due_update<S: ScheduleStore<Handle>>(
         &mut self,
         store: &mut S,
+        handle: Handle,
         now: UnsignedInt,
         mut sleep_len: UpdateSleepTime,
     ) {
         self.cur_update_module = None;
-        let Some(root) = self.peek() else {
-            return;
-        };
         if sleep_len.0 < 1 {
             sleep_len = UpdateSleepTime::NONE;
         }
         store
-            .schedule_mut(root)
+            .schedule_mut(handle)
             .set_next_call_frame(now.saturating_add(sleep_len.0));
-        self.rebalance(store, 0);
+        let idx = store.schedule(handle).index_in_logic();
+        if idx >= 0 {
+            let usize_idx = idx as usize;
+            if usize_idx < self.entries.len() && self.entries[usize_idx] == handle {
+                self.rebalance(store, usize_idx);
+            }
+        }
+    }
+
+    /// Finalizes the executing update (`cur_update_module`) or the root entry if disabled-skipped.
+    pub fn finish_due_update_at_root<S: ScheduleStore<Handle>>(
+        &mut self,
+        store: &mut S,
+        now: UnsignedInt,
+        sleep_len: UpdateSleepTime,
+    ) {
+        let Some(handle) = self.cur_update_module.take().or_else(|| self.peek()) else {
+            return;
+        };
+        self.finish_due_update(store, handle, now, sleep_len);
+    }
+
+    /// Two-pass reverse-heap-index removal for all modules owned by a destroyed object
+    /// (`GameLogic::processDestroyList`, `GameLogic.cpp:2704-2723`).
+    pub fn erase_for_owner<S: ScheduleStore<Handle>>(
+        &mut self,
+        store: &mut S,
+        mut belongs_to_owner: impl FnMut(&S, Handle) -> bool,
+    ) -> usize {
+        let mut matched: Vec<Handle> = Vec::new();
+        for &h in &self.entries {
+            if belongs_to_owner(store, h) && matched.len() < MAX_SLEEPY_UPDATES_PER_OBJECT {
+                matched.push(h);
+            }
+        }
+        let erased = matched.len();
+        for h in matched.into_iter().rev() {
+            let idx = store.schedule(h).index_in_logic();
+            let usize_idx = usize::try_from(idx).unwrap_or(usize::MAX);
+            assert!(
+                usize_idx < self.entries.len() && self.entries[usize_idx] == h,
+                "sleepy update erase_for_owner mismatch: idx={idx}"
+            );
+            self.erase(store, usize_idx);
+            debug_assert_eq!(store.schedule(h).index_in_logic(), INVALID_LOGIC_INDEX);
+        }
+        erased
     }
 
     /// Verifies index-tracking and min-heap invariants across all entries (`GameLogic::validateSleepyUpdate`).

@@ -592,6 +592,9 @@ fn test_pkt398_1000_golden_vectors() {
                 game_text: &mut game_text,
                 module_masks: &module_masks,
                 default_occlusion_delay: occ,
+                locomotor_store: None,
+                module_registry: None,
+                module_data_store: None,
             };
             let mut ini_reader =
                 IniReader::new("unit_init.ini", init_ini.as_bytes(), IniLoadType::Overwrite);
@@ -666,6 +669,9 @@ fn test_pkt398_1000_golden_vectors() {
                 game_text: &mut game_text,
                 module_masks: &module_masks,
                 default_occlusion_delay: occ,
+                locomotor_store: None,
+                module_registry: None,
+                module_data_store: None,
             };
             let mut ovr_reader = IniReader::new(
                 "map_ovr.ini",

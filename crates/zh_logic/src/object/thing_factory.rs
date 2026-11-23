@@ -35,6 +35,7 @@ impl ThingTemplateRegistry for RegistrySnapshot {
 pub struct ThingFactory {
     /// Stored in creation order; `entries.last()` corresponds to C++ `m_firstTemplate` (head-prepend).
     entries: Vec<OverridableEntry<ThingTemplate>>,
+    /// Exact case-sensitive lookup matching C++ `ThingTemplateHashMap` (`ThingFactory.h:44`, `STLTypedefs.h:224`, `ThingFactory.cpp:303`).
     by_name: BTreeMap<String, usize>,
     by_id: BTreeMap<UnsignedShort, usize>,
     display_cache: BTreeMap<UnsignedShort, Vec<u16>>,

@@ -2,9 +2,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::arena::{ModuleDataId, ThingTemplateId};
 use crate::combat::armor::ArmorStore;
 use crate::combat::armor_set::ArmorTemplateSet;
+use crate::combat::locomotor::LocomotorStore;
+use crate::combat::locomotor_set::{LocomotorSetType, LOCOMOTORSET_COUNT, LOCOMOTOR_SET_NAMES};
 use crate::economy::handicap::HandicapType;
+use crate::modules::{ModuleDataStore, ModuleRegistry};
 use crate::object::weapon::WeaponStore;
 use crate::object::weapon_set::WeaponTemplateSet;
 use crate::player::radar::RadarPriorityType;
@@ -157,6 +161,8 @@ pub const THE_SHADOW_NAMES: [&str; 7] = [
 pub struct ModuleNugget {
     pub name: String,
     pub module_tag: String,
+    pub tag_key: NameKeyType,
+    pub data_id: ModuleDataId,
     pub interface_mask: Int,
     pub is_ai_module_data: bool,
     pub copied_from_default: bool,
@@ -215,9 +221,35 @@ impl ModuleInfo {
         inheritable: bool,
         overrideable_by_like_kind: bool,
     ) {
+        self.add_module_info_with_data(
+            name,
+            module_tag,
+            NameKeyType::INVALID,
+            ModuleDataId::INVALID,
+            interface_mask,
+            is_ai_module_data,
+            inheritable,
+            overrideable_by_like_kind,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_module_info_with_data(
+        &mut self,
+        name: String,
+        module_tag: String,
+        tag_key: NameKeyType,
+        data_id: ModuleDataId,
+        interface_mask: Int,
+        is_ai_module_data: bool,
+        inheritable: bool,
+        overrideable_by_like_kind: bool,
+    ) {
         self.info.push(ModuleNugget {
             name,
             module_tag,
+            tag_key,
+            data_id,
             interface_mask,
             is_ai_module_data,
             copied_from_default: false,
@@ -380,6 +412,9 @@ pub struct ThingTemplateParseContext<'a> {
     pub game_text: &'a mut dyn GameTextLookup,
     pub module_masks: &'a dyn ModuleMaskLookup,
     pub default_occlusion_delay: UnsignedInt,
+    pub locomotor_store: Option<&'a LocomotorStore>,
+    pub module_registry: Option<&'a ModuleRegistry>,
+    pub module_data_store: Option<&'a mut ModuleDataStore>,
 }
 
 /// Cost/time/facility parameters provided by a `Player` to `ThingTemplate::calc_cost_to_build`
@@ -434,6 +469,7 @@ pub struct ThingTemplate {
     pub weapon_template_set_finder: SparseMatchFinder<WeaponTemplateSet, WeaponSetFlags, true>,
     pub armor_template_sets: Vec<ArmorTemplateSet>,
     pub armor_template_set_finder: SparseMatchFinder<ArmorTemplateSet, ArmorSetFlags, true>,
+    pub locomotor_sets: [Vec<String>; LOCOMOTORSET_COUNT],
     pub per_unit_sounds: BTreeMap<String, String>,
     pub per_unit_fx: BTreeMap<String, Option<String>>,
 
@@ -528,6 +564,7 @@ impl ThingTemplate {
             weapon_template_set_finder: SparseMatchFinder::new(),
             armor_template_sets: Vec::new(),
             armor_template_set_finder: SparseMatchFinder::new(),
+            locomotor_sets: std::array::from_fn(|_| Vec::new()),
             per_unit_sounds: BTreeMap::new(),
             per_unit_fx: BTreeMap::new(),
 
@@ -967,6 +1004,14 @@ impl ThingTemplate {
             .find_best_info_mut(&self.weapon_template_sets, t)
     }
 
+    #[inline]
+    pub fn get_locomotor_set(&self, set: LocomotorSetType) -> &[String] {
+        self.locomotor_sets
+            .get(set as usize)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     pub fn set_copied_from_default(&mut self) {
         self.armor_copied_from_default = TRUE;
         self.weapons_copied_from_default = TRUE;
@@ -1267,7 +1312,7 @@ impl ThingTemplate {
             "ReplaceModule" => self.parse_replace_module(ini, ctx),
             "InheritableModule" => self.parse_inheritable_module(ini, ctx),
             "OverrideableByLikeKind" => self.parse_overrideable_by_like_kind(ini, ctx),
-            "Locomotor" => Ok(()),
+            "Locomotor" => self.parse_locomotor_set(ini, ctx),
             "InstanceScaleFuzziness" => ini.parse_real(&mut self.instance_scale_fuzziness),
             "StructureRubbleHeight" => ini.parse_unsigned_byte(&mut self.structure_rubble_height),
             "ThreatValue" => ini.parse_unsigned_short(&mut self.threat_value),
@@ -1391,16 +1436,58 @@ impl ThingTemplate {
         })
     }
 
+    fn parse_locomotor_set(
+        &mut self,
+        ini: &mut IniReader<'_>,
+        ctx: &ThingTemplateParseContext<'_>,
+    ) -> Result<(), IniError> {
+        let set_tok = ini.next_token(SEPS_DEFAULT)?;
+        let set_idx = IniReader::scan_index_list(set_tok, &LOCOMOTOR_SET_NAMES)? as usize;
+        if !self.locomotor_sets[set_idx].is_empty()
+            && ini.get_load_type() != IniLoadType::CreateOverrides
+        {
+            return Err(IniError::InvalidData);
+        }
+        self.locomotor_sets[set_idx].clear();
+
+        let first = ini.next_token(SEPS_DEFAULT)?;
+        if !first.is_empty() && !first.eq_ignore_ascii_case("None") {
+            if let Some(loco_store) = ctx.locomotor_store {
+                if loco_store.find_by_name(first).is_none() {
+                    return Err(IniError::InvalidData);
+                }
+            }
+            self.locomotor_sets[set_idx].push(first.to_owned());
+        }
+        while let Some(tok) = ini.next_token_or_null(SEPS_DEFAULT) {
+            if tok.is_empty() || tok.eq_ignore_ascii_case("None") {
+                continue;
+            }
+            if let Some(loco_store) = ctx.locomotor_store {
+                if loco_store.find_by_name(tok).is_none() {
+                    return Err(IniError::InvalidData);
+                }
+            }
+            self.locomotor_sets[set_idx].push(tok.to_owned());
+        }
+        Ok(())
+    }
+
     fn parse_module_name(
         &mut self,
         ini: &mut IniReader<'_>,
         mod_type: ModuleType,
         is_body: bool,
-        ctx: &ThingTemplateParseContext<'_>,
+        ctx: &mut ThingTemplateParseContext<'_>,
     ) -> Result<(), IniError> {
         let mod_name = ini.next_token(SEPS_DEFAULT)?.to_owned();
         let module_tag = ini.next_token(SEPS_DEFAULT)?.to_owned();
-        let interface_mask = ctx.module_masks.find_module_interface_mask(&mod_name, mod_type);
+        let interface_mask = if let Some(reg) = ctx.module_registry {
+            reg.find_module_interface_mask(&mod_name, mod_type)
+        } else {
+            ctx.module_masks
+                .find_module_interface_mask(&mod_name, mod_type)
+        };
         if is_body && (interface_mask & MODULEINTERFACE_BODY) == 0 {
             return Err(IniError::InvalidData);
         }
@@ -1447,10 +1534,29 @@ impl ThingTemplate {
             }
         }
 
-        // Consume module body block up to matching `End`.
-        ini.skip_block()?;
+        let tag_key = ctx.name_keys.name_to_key(&module_tag);
+        let mod_name_key = ctx.name_keys.name_to_key(&mod_name);
+        let data_id = match (ctx.module_registry, ctx.module_data_store.as_deref_mut()) {
+            (Some(reg), Some(store)) => reg.parse_module_data(
+                ini,
+                &mod_name,
+                mod_type,
+                tag_key,
+                mod_name_key,
+                store,
+                ThingTemplateId(self.template_id as u32),
+            )?,
+            _ => {
+                ini.skip_block()?;
+                ModuleDataId::INVALID
+            }
+        };
 
-        let is_ai = ctx.module_masks.is_ai_module_name(&mod_name);
+        let is_ai = if let Some(reg) = ctx.module_registry {
+            reg.is_ai_module_name(&mod_name)
+        } else {
+            ctx.module_masks.is_ai_module_name(&mod_name)
+        };
         let target = match mod_type {
             ModuleType::Behavior => &mut self.behavior_module_info,
             ModuleType::Draw => &mut self.draw_module_info,
@@ -1461,7 +1567,16 @@ impl ThingTemplate {
         }
         let inheritable = self.module_parsing_mode == ModuleParseMode::Inheritable;
         let oblk = self.module_parsing_mode == ModuleParseMode::OverrideableByLikeKind;
-        target.add_module_info(mod_name, module_tag, interface_mask, is_ai, inheritable, oblk);
+        target.add_module_info_with_data(
+            mod_name,
+            module_tag,
+            tag_key,
+            data_id,
+            interface_mask,
+            is_ai,
+            inheritable,
+            oblk,
+        );
         Ok(())
     }
 

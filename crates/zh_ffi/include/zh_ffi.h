@@ -86,8 +86,47 @@ uint8_t  zh_exp_tracker_xfer_load(ZhExpTrackerState* state, const uint8_t* in_bu
 typedef uint32_t ZhModuleSlot;
 typedef uint64_t ZhFacetMask;
 
+#define ZH_FACET_NONE                 UINT64_C(0)
+#define ZH_FACET_UPDATE               (UINT64_C(1) << 0)
+#define ZH_FACET_DIE                  (UINT64_C(1) << 1)
+#define ZH_FACET_DAMAGE               (UINT64_C(1) << 2)
+#define ZH_FACET_CREATE               (UINT64_C(1) << 3)
+#define ZH_FACET_COLLIDE              (UINT64_C(1) << 4)
+#define ZH_FACET_BODY                 (UINT64_C(1) << 5)
+#define ZH_FACET_CONTAIN              (UINT64_C(1) << 6)
+#define ZH_FACET_UPGRADE              (UINT64_C(1) << 7)
+#define ZH_FACET_SPECIAL_POWER        (UINT64_C(1) << 8)
+#define ZH_FACET_DESTROY              (UINT64_C(1) << 9)
+#define ZH_FACET_DRAW                 (UINT64_C(1) << 10)
+#define ZH_FACET_CLIENT_UPDATE        (UINT64_C(1) << 11)
+#define ZH_FACET_AI_UPDATE            (UINT64_C(1) << 12)
+#define ZH_FACET_PHYSICS_UPDATE       (UINT64_C(1) << 13)
+#define ZH_FACET_STEALTH_UPDATE       (UINT64_C(1) << 14)
+#define ZH_FACET_DOCK_UPDATE          (UINT64_C(1) << 15)
+#define ZH_FACET_EXIT_INTERFACE       (UINT64_C(1) << 16)
+#define ZH_FACET_SLAVED_UPDATE        (UINT64_C(1) << 17)
+#define ZH_FACET_PROJECTILE_UPDATE    (UINT64_C(1) << 18)
+#define ZH_FACET_PRODUCTION_UPDATE    (UINT64_C(1) << 19)
+#define ZH_FACET_SLOW_DEATH           (UINT64_C(1) << 20)
+#define ZH_FACET_POWER_PLANT_UPDATE   (UINT64_C(1) << 21)
+#define ZH_FACET_HORDE_UPDATE         (UINT64_C(1) << 22)
+#define ZH_FACET_SPAWN_BEHAVIOR       (UINT64_C(1) << 23)
+#define ZH_FACET_COUNTERMEASURES      (UINT64_C(1) << 24)
+#define ZH_FACET_SPECIAL_POWER_UPDATE (UINT64_C(1) << 25)
+#define ZH_FACET_PARKING_PLACE        (UINT64_C(1) << 26)
+#define ZH_FACET_CAVE_INTERFACE       (UINT64_C(1) << 27)
+#define ZH_FACET_LAND_MINE            (UINT64_C(1) << 28)
+#define ZH_FACET_RAILED_TRANSPORT_DOCK (UINT64_C(1) << 29)
+#define ZH_FACET_TRANSPORT_PASSENGER  (UINT64_C(1) << 30)
+
 uint8_t      zh_module_is_ported(int32_t module_name_key);
-ZhModuleSlot zh_module_create(int32_t module_name_key, void* cxx_object_ptr, const void* cxx_module_data_ptr, ZhFacetMask* out_facet_mask, uint32_t* out_initial_priority);
+ZhModuleSlot zh_module_create(
+    int32_t module_name_key,
+    uint32_t owner_obj_id,
+    uint16_t template_id,
+    int32_t tag_key,
+    ZhFacetMask* out_facet_mask,
+    uint32_t* out_initial_priority);
 void         zh_module_on_object_created(ZhModuleSlot slot);
 void         zh_module_on_delete(ZhModuleSlot slot);
 void         zh_module_destroy(ZhModuleSlot slot);
@@ -98,9 +137,9 @@ void         zh_module_on_die(ZhModuleSlot slot, const void* damage_info_ptr);
 void         zh_module_on_damage(ZhModuleSlot slot, void* damage_info_ptr);
 void         zh_module_on_create(ZhModuleSlot slot);
 void         zh_module_on_build_complete(ZhModuleSlot slot);
-void         zh_module_on_collide(ZhModuleSlot slot, void* other_obj_ptr, const void* loc_ptr, const void* normal_ptr);
+void         zh_module_on_collide(ZhModuleSlot slot, uint32_t other_obj_id, const void* loc_ptr, const void* normal_ptr);
 void         zh_module_on_destroy(ZhModuleSlot slot);
-void         zh_module_on_capture(ZhModuleSlot slot, void* old_owner_ptr, void* new_owner_ptr);
+void         zh_module_on_capture(ZhModuleSlot slot, int32_t old_player_idx, int32_t new_player_idx);
 void         zh_module_on_disabled_edge(ZhModuleSlot slot, uint8_t now_disabled);
 
 void         zh_module_crc(ZhModuleSlot slot, void* cxx_xfer_ptr);

@@ -2,8 +2,61 @@
 
 use super::locomotor::{Locomotor, LocomotorStore};
 use crate::rules::combat_types::LocomotorSurfaceTypeMask;
-use zh_common::types::{Bool, XferVersion, FALSE, TRUE};
+use zh_common::types::{Bool, Int, XferVersion, FALSE, TRUE};
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
+
+pub const LOCOMOTORSET_COUNT: usize = 8;
+
+/// Locomotor set slot matching C++ `LocomotorSetType` (`AIUpdate.h:72-86`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum LocomotorSetType {
+    Invalid = -1,
+    #[default]
+    Normal = 0,
+    NormalUpgraded = 1,
+    Freefall = 2,
+    Wander = 3,
+    Panic = 4,
+    Taxiing = 5,
+    Supersonic = 6,
+    Sluggish = 7,
+}
+
+impl LocomotorSetType {
+    #[inline]
+    pub const fn from_i32(v: Int) -> Option<Self> {
+        match v {
+            -1 => Some(Self::Invalid),
+            0 => Some(Self::Normal),
+            1 => Some(Self::NormalUpgraded),
+            2 => Some(Self::Freefall),
+            3 => Some(Self::Wander),
+            4 => Some(Self::Panic),
+            5 => Some(Self::Taxiing),
+            6 => Some(Self::Supersonic),
+            7 => Some(Self::Sluggish),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_i32(self) -> Int {
+        self as Int
+    }
+}
+
+/// INI string names matching `TheLocomotorSetNames[]` (`AIUpdate.h:99-111`).
+pub const LOCOMOTOR_SET_NAMES: [&str; LOCOMOTORSET_COUNT] = [
+    "SET_NORMAL",
+    "SET_NORMAL_UPGRADED",
+    "SET_FREEFALL",
+    "SET_WANDER",
+    "SET_PANIC",
+    "SET_TAXIING",
+    "SET_SUPERSONIC",
+    "SET_SLUGGISH",
+];
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LocomotorSet {

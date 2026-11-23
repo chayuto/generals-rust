@@ -8,8 +8,8 @@ use zh_common::golden_json::{extract_vector_lines, get_i32, get_i32_vec, get_u32
 use zh_common::types::{ObjectId, UnsignedInt, UpdateSleepTime};
 use zh_common::xfer::{XferLoad, XferSave};
 use zh_logic::arena::{
-    with_module_dispatch, FacetMask, ModuleArena, ModuleDataId, ModuleMeta, ModuleSlot,
-    ObjectArena,
+    with_module_dispatch, with_module_dispatch_and_drain, DeferredSelfOp, FacetMask, ModuleArena,
+    ModuleDataId, ModuleMeta, ModuleSidecar, ModuleSlot, ObjectArena, TakeError,
 };
 use zh_logic::scheduler::{
     should_process_disabled_update, ScheduleStore, SleepyUpdateHeap, SleepyUpdatePhase,
@@ -288,7 +288,7 @@ fn apply_damage(world: &mut SimWorld, target: zh_logic::arena::ObjectSlot, dmg: 
         Some(o) => o.body_slot,
         None => return,
     };
-    with_module_dispatch(
+    let _ = with_module_dispatch(
         world,
         body_slot,
         |w| &mut w.modules,
@@ -303,7 +303,8 @@ fn apply_damage(world: &mut SimWorld, target: zh_logic::arena::ObjectSlot, dmg: 
                 }
             }
         },
-    );
+    )
+    .expect("dispatched");
 }
 
 #[test]
@@ -473,7 +474,7 @@ fn test_take_and_restore_self_destroy_and_slot_reuse_safety() {
     world.heap.register_update_module(&mut world.modules, mod_a, world.frame);
 
     // Case 1: Self-free without immediate reuse -> slot stays dead, payload is not restored.
-    with_module_dispatch(
+    let _ = with_module_dispatch(
         &mut world,
         mod_a,
         |w| &mut w.modules,
@@ -482,7 +483,8 @@ fn test_take_and_restore_self_destroy_and_slot_reuse_safety() {
             w.heap.erase(&mut w.modules, idx);
             w.modules.free(ctx.mod_slot);
         },
-    );
+    )
+    .expect("dispatched");
     assert!(!world.modules.is_alive(mod_a));
     assert!(world.modules.payload(mod_a).is_none());
 
@@ -497,7 +499,7 @@ fn test_take_and_restore_self_destroy_and_slot_reuse_safety() {
         },
     );
     let mut reused_slot = ModuleSlot::INVALID;
-    with_module_dispatch(
+    let _ = with_module_dispatch(
         &mut world,
         mod_b,
         |w| &mut w.modules,
@@ -505,7 +507,8 @@ fn test_take_and_restore_self_destroy_and_slot_reuse_safety() {
             w.modules.free(ctx.mod_slot);
             reused_slot = w.modules.allocate(meta_a.clone(), SimModuleKind::ReplacedDummy { tag: "fresh" });
         },
-    );
+    )
+    .expect("dispatched");
     assert_eq!(reused_slot, mod_b);
     assert!(matches!(
         world.modules.payload(reused_slot),
@@ -517,18 +520,30 @@ fn test_take_and_restore_self_destroy_and_slot_reuse_safety() {
 fn test_object_arena_world_list_and_schedule_xfer_normalization() {
     let mut arena: ObjectArena<u32> = ObjectArena::new();
     let s1 = arena.spawn(ObjectId(10), 100, true);
+    let gen1 = arena.generation(s1).expect("gen1");
     let s2 = arena.spawn(ObjectId(20), 200, false);
     let s3 = arena.spawn(ObjectId(30), 300, true);
     arena.link_into_world(s2);
 
     assert_eq!(arena.slot_by_id(ObjectId(20)), Some(s2));
-    assert_eq!(arena.world_iter().collect::<Vec<_>>(), vec![s1, s3, s2]);
+    // link_into_world prepends to world_head (`GameLogic::registerObject`).
+    assert_eq!(arena.world_iter().collect::<Vec<_>>(), vec![s2, s3, s1]);
 
     arena.unlink_from_world(s3);
-    assert_eq!(arena.world_iter().collect::<Vec<_>>(), vec![s1, s2]);
+    assert_eq!(arena.world_iter().collect::<Vec<_>>(), vec![s2, s1]);
     assert_eq!(arena.despawn(s1), Some(100));
     assert_eq!(arena.world_iter().collect::<Vec<_>>(), vec![s2]);
     assert!(arena.slot_by_id(ObjectId(10)).is_none());
+    assert!(!arena.is_slot_current(s1, gen1));
+    assert!(arena.get_checked(s1, gen1).is_none());
+
+    // Reusing s1 increments generation to prevent ABA bugs.
+    let s4 = arena.spawn(ObjectId(40), 400, true);
+    assert_eq!(s4, s1);
+    assert!(!arena.is_slot_current(s4, gen1));
+    assert_ne!(arena.generation(s4), Some(gen1));
+    assert!(arena.get_checked(s4, gen1).is_none());
+    assert_eq!(arena.get_checked(s4, arena.generation(s4).unwrap()), Some(&400));
 
     let mut sched_save = UpdateModuleScheduleState::new(SleepyUpdatePhase::Physics);
     sched_save.set_next_call_frame(123);
@@ -543,4 +558,130 @@ fn test_object_arena_world_list_and_schedule_xfer_normalization() {
     assert_eq!(sched_load.next_call_frame(), 123);
     assert_eq!(sched_load.next_call_phase(), SleepyUpdatePhase::Final);
     assert_eq!(sched_load.index_in_logic(), -1);
+}
+
+#[test]
+fn test_sleepy_heap_root_displacement_and_erase_for_owner() {
+    let mut nk = NameKeyGenerator::new();
+    nk.init();
+    let tag_key = nk.name_to_key("TestMod");
+
+    let mut objects: ObjectArena<()> = ObjectArena::new();
+    let obj1 = objects.spawn(ObjectId(1), (), true);
+    let obj2 = objects.spawn(ObjectId(2), (), true);
+
+    let mut modules: ModuleArena<u32> = ModuleArena::new();
+    let m_norm = modules.allocate(
+        ModuleMeta::new(obj1, ObjectId(1), tag_key, ModuleDataId(1), FacetMask::UPDATE, SleepyUpdatePhase::Normal),
+        10,
+    );
+    let m_init = modules.allocate(
+        ModuleMeta::new(obj2, ObjectId(2), tag_key, ModuleDataId(2), FacetMask::UPDATE, SleepyUpdatePhase::Initial),
+        20,
+    );
+    let m_other = modules.allocate(
+        ModuleMeta::new(obj1, ObjectId(1), tag_key, ModuleDataId(3), FacetMask::UPDATE, SleepyUpdatePhase::Final),
+        30,
+    );
+
+    let mut heap: SleepyUpdateHeap<ModuleSlot> = SleepyUpdateHeap::new();
+    let now = 5;
+    modules.schedule_mut(m_norm).set_next_call_frame(now);
+    modules.schedule_mut(m_init).set_next_call_frame(now + 20);
+    modules.schedule_mut(m_other).set_next_call_frame(now + 2);
+    heap.register_update_module(&mut modules, m_norm, now);
+    heap.register_update_module(&mut modules, m_init, now);
+    heap.register_update_module(&mut modules, m_other, now);
+
+    // m_norm (frame 5, Normal) is at root; during its update, m_init (Initial) is awakened to frame 5,
+    // displacing m_norm from index 0. finish_due_update_at_root must reschedule m_norm, not m_init!
+    assert_eq!(heap.peek_due(&modules, now), Some(m_norm));
+    heap.set_cur_update_module(Some(m_norm));
+    assert!(heap.awaken_module(&mut modules, m_init, true, now, now));
+    assert_eq!(heap.peek(), Some(m_init));
+    heap.finish_due_update_at_root(&mut modules, now, UpdateSleepTime(10));
+
+    assert_eq!(modules.schedule(m_init).next_call_frame(), now);
+    assert_eq!(modules.schedule(m_norm).next_call_frame(), now + 10);
+    assert_eq!(heap.peek_due(&modules, now), Some(m_init));
+    heap.validate_invariants(&modules).expect("valid after displacement");
+
+    // Disabled-skip path: cur_update_module is None, so root (m_init) is rescheduled to now + 1.
+    assert!(heap.cur_update_module().is_none());
+    heap.finish_due_update_at_root(&mut modules, now, UpdateSleepTime::NONE);
+    assert_eq!(modules.schedule(m_init).next_call_frame(), now + 1);
+    heap.validate_invariants(&modules).expect("valid after disabled skip");
+
+    // Two-pass erase_for_owner removes all modules belonging to obj1 while preserving obj2's module.
+    let erased = heap.erase_for_owner(&mut modules, |m, ms| m.meta(ms).owner_slot == obj1);
+    assert_eq!(erased, 2);
+    assert_eq!(heap.len(), 1);
+    assert_eq!(heap.peek(), Some(m_init));
+    assert_eq!(modules.schedule(m_norm).index_in_logic(), -1);
+    assert_eq!(modules.schedule(m_other).index_in_logic(), -1);
+    heap.validate_invariants(&modules).expect("valid after erase_for_owner");
+}
+
+#[test]
+fn test_module_arena_reentered_error_and_deferred_ops() {
+    let mut nk = NameKeyGenerator::new();
+    nk.init();
+    let tag_key = nk.name_to_key("BodyTag");
+
+    let mut arena: ModuleArena<i32> = ModuleArena::new();
+    let slot = arena.allocate(
+        ModuleMeta::new(
+            zh_logic::arena::ObjectSlot(0),
+            ObjectId(1),
+            tag_key,
+            ModuleDataId(1),
+            FacetMask::BODY,
+            SleepyUpdatePhase::Normal,
+        ),
+        100,
+    );
+    arena.set_sidecar(
+        slot,
+        ModuleSidecar::Body {
+            health: 100.0,
+            max_health: 100.0,
+            prev_health: 100.0,
+            damage_scalar: 1.0,
+            damage_state: 0,
+            front_crushed: 0,
+            back_crushed: 0,
+            indestructible: 0,
+        },
+    );
+
+    let mut reenter_err = None;
+    let res = with_module_dispatch_and_drain(
+        &mut arena,
+        slot,
+        |a| a,
+        |hp, a, ctx| {
+            reenter_err = a.take_payload(ctx.mod_slot).err();
+            assert!(a.is_executing(ctx.mod_slot));
+            assert!(a.push_deferred_op(
+                ctx.mod_slot,
+                DeferredSelfOp::ChangeHealth {
+                    delta: -25.0,
+                    change_type: 0,
+                },
+            ));
+            *hp
+        },
+        |hp, _a, _ctx, op| {
+            if let DeferredSelfOp::ChangeHealth { delta, .. } = op {
+                *hp += delta as i32;
+            }
+        },
+    );
+
+    assert_eq!(res, Ok(100));
+    assert_eq!(reenter_err, Some(TakeError::Reentered));
+    assert_eq!(arena.payload(slot).copied(), Some(75));
+
+    let _ = arena.free(slot);
+    assert_eq!(arena.take_payload(slot).err(), Some(TakeError::Dead));
 }

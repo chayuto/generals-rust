@@ -25,7 +25,7 @@ In C++, `UpdateModule::update()` holds a `this` pointer (`BehaviorModule*`) and 
          pub geometry: GeometryInfo,
          pub disabled_mask: DisabledMask,
          pub disabled_till_frame: [UnsignedInt; DISABLED_COUNT],
-         pub upgrades_completed: BitFlags128,
+         pub upgrades_completed: UpgradeMaskType,
          pub weapon_bonus_condition: UnsignedInt,
          pub experience_tracker: ExperienceTrackerState,
          pub weapon_set: WeaponSet,
@@ -35,7 +35,7 @@ In C++, `UpdateModule::update()` holds a `this` pointer (`BehaviorModule*`) and 
          pub producer_id: ObjectId,
          pub builder_id: ObjectId,
          // Modules in exact C++ order (conditional sleep helpers, then INI behaviors)
-         pub behaviors: SmallVec<[(ModuleSlot, FacetMask); 16]>,
+         pub behaviors: Vec<(ModuleSlot, FacetMask)>,
          pub body_slot: Option<ModuleSlot>,
          pub contain_slot: Option<ModuleSlot>,
          pub stealth_slot: Option<ModuleSlot>,
@@ -102,7 +102,7 @@ Synchronous SAGE callback chains routinely re-enter the *same* executing module 
    }
    // Added to ModuleMeta:
    // pub sidecar: ModuleSidecar,
-   // pub deferred_ops: SmallVec<[DeferredSelfOp; 4]>,
+   // pub deferred_ops: Vec<DeferredSelfOp>,
    ```
    - Known re-entrant writes targeting an `executing == true` slot append a `DeferredSelfOp` onto `meta.deferred_ops` **and immediately update `meta.sidecar` in the same call** so subsequent synchronous reads in the same callback chain observe post-write state (e.g., health/damage-state after `ChangeHealth`) before `restore_payload` drains `deferred_ops`.
    - Unexpected re-entrant `take_payload` calls return `Err(TakeError::Reentered)` (panicking in debug/tests instead of silently no-oping).
@@ -215,7 +215,7 @@ pub trait SimApi: SimView {
 2. `crates/zh_logic/src/scheduler/sleepy_heap.rs` (`L447-L464`): Fix `finish_due_update_at_root` to track `let handle = self.cur_update_module.take()?` instead of re-peeking root `0` (verify `rebalance(idx)` vs C++ `GameLogic.cpp:4108-4109` `rebalanceSleepyUpdate(0)` with a Gate V2 heap golden test) + add two-pass reverse-heap-index `erase_for_owner`.
 3. `crates/zh_logic/src/arena/mod.rs` (`L51-L83`): Freeze one canonical 64-bit `FacetMask` layout shared with `zh_ffi.h`.
 4. `crates/zh_logic/src/object/thing_template.rs` (`L336`, `L1270`, `L1451`): Wire `Locomotor` parsing, replace `ini.skip_block()` with `ModuleRegistry` + `ModuleDataStore`, and replace `DefaultModuleMaskLookup`.
-5. `crates/zh_logic/src/object/thing_factory.rs` (`L38-L96`, `L118`): Normalize `by_name` lookups to ASCII lowercase while preserving original `name_string`.
+5. `crates/zh_logic/src/object/thing_factory.rs`: Keep `by_name` strictly case-sensitive to match C++ `ThingTemplateHashMap` (`ThingFactory.h:44`, `STLTypedefs.h:224`, `ThingFactory.cpp:303`); note `ObjectRecord::behaviors` and `ModuleMeta::deferred_ops` use `Vec` (zero external dependencies) and `ObjectRecord::upgrades_completed` uses `UpgradeMaskType`.
 6. `scripts/lint_determinism.py` (`L48-L66`): Never name `SimApi`/`BehaviorModule` methods `.log`, `.round`, `.floor`, `.ceil`, `.trunc`, or `.exp` (`DET003`), and never key `BTreeMap` by raw pointers across FFI (`DET005`; pass `ObjectId` integers instead).
 
 ---

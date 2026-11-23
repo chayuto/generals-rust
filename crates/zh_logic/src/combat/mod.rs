@@ -11,4 +11,6 @@ pub use locomotor::{
     Locomotor, LocomotorAppearance, LocomotorBehaviorZ, LocomotorPriority, LocomotorStore,
     LocomotorTemplate,
 };
-pub use locomotor_set::LocomotorSet;
+pub use locomotor_set::{
+    LocomotorSet, LocomotorSetType, LOCOMOTORSET_COUNT, LOCOMOTOR_SET_NAMES,
+};
