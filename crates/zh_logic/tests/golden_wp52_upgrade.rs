@@ -5,21 +5,14 @@ use zh_common::crc::Crc;
 use zh_common::golden_json::{
     decode_hex_bytes, extract_vector_lines, get_i32, get_i32_vec, get_str, get_u32,
 };
-use zh_common::ini::{IniError, IniLoadType, IniReader, SEPS_DEFAULT};
+use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::Coord3D;
-use zh_common::types::{
-    Bool, Int, NameKeyType, ObjectId, Real, TeamId, UnsignedInt, XferVersion, FALSE, TRUE,
-};
-use zh_common::xfer::{Xfer, XferCrc, XferError, XferLoad, XferSave};
-use zh_logic::arena::{
-    DeferredSelfOp, FacetMask, ModuleContext, ModuleDataId, ModuleSidecar, ModuleSlot, ObjectSlot,
-};
+use zh_common::types::{Int, NameKeyType, ObjectId, Real, TeamId, XferVersion, FALSE, TRUE};
+use zh_common::xfer::{Xfer, XferCrc, XferLoad, XferSave};
+use zh_logic::arena::{FacetMask, ModuleContext, ModuleDataId, ModuleSlot, ObjectSlot};
 use zh_logic::combat::locomotor::LocomotorTemplate;
 use zh_logic::gamelogic::global_data::WeaponBonusConditionType;
-use zh_logic::modules::module::{
-    BehaviorModule, ModuleData, ModuleSnapshotHeader, ModuleType, SpecialPowerFacet, UpgradeFacet,
-};
-use zh_logic::modules::module_factory::ModuleParseContext;
+use zh_logic::modules::module::UpgradeFacet;
 use zh_logic::modules::upgrade::{
     ExperienceScalarUpgradeModuleData, UpgradeModule, UpgradeMuxData,
 };
@@ -30,7 +23,6 @@ use zh_logic::rules::model_state::ModelConditionFlagType;
 use zh_logic::rules::object_status_types::ObjectStatusType;
 use zh_logic::rules::science::ScienceTextLookup;
 use zh_logic::rules::upgrade::UpgradeMaskType;
-use zh_logic::scheduler::SleepyUpdatePhase;
 use zh_logic::sim::{MockSimApi, SimApi, SimContext, SimView};
 
 const WP52_UPGRADE_JSON: &str = include_str!("../../../docs/golden_vectors/WP52_Upgrade.json");
@@ -40,275 +32,6 @@ struct TestScienceText;
 impl ScienceTextLookup for TestScienceText {
     fn fetch_label(&mut self, label: &str) -> String {
         format!("TXT:{label}")
-    }
-}
-
-#[derive(Debug, Clone)]
-struct TestSpecialPowerData {
-    tag_key: NameKeyType,
-    module_name_key: NameKeyType,
-    special_power_name: String,
-    special_power_id: UnsignedInt,
-    reload_time: UnsignedInt,
-    starts_paused: Bool,
-    starts_ready: Bool,
-}
-
-impl ModuleData for TestSpecialPowerData {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn tag_key(&self) -> NameKeyType {
-        self.tag_key
-    }
-
-    fn module_name_key(&self) -> NameKeyType {
-        self.module_name_key
-    }
-
-    fn facet_mask(&self) -> FacetMask {
-        FacetMask::SPECIAL_POWER
-    }
-}
-
-/// Test-local `SpecialPowerModule` stand-in registered as `"CashHackSpecialPower"`
-/// until `WP-5.2-C` implements the concrete special-power modules.
-#[derive(Debug, Clone)]
-struct TestSpecialPowerModule {
-    module_name_key: NameKeyType,
-    special_power_id: UnsignedInt,
-    reload_time: UnsignedInt,
-    starts_paused: Bool,
-    starts_ready: Bool,
-    available_on_frame: UnsignedInt,
-    paused_count: Int,
-    paused_on_frame: UnsignedInt,
-    paused_percent: Real,
-}
-
-impl TestSpecialPowerModule {
-    fn parse(
-        ini: &mut IniReader<'_>,
-        tag_key: NameKeyType,
-        module_name_key: NameKeyType,
-        parse_ctx: &mut ModuleParseContext<'_>,
-    ) -> Result<Box<dyn ModuleData>, IniError> {
-        let mut special_power_name = String::new();
-        let mut special_power_id: UnsignedInt = 0;
-        let mut reload_time: UnsignedInt = 0;
-        let mut starts_paused = FALSE;
-        let mut starts_ready = FALSE;
-        ini.read_block_fields(|field, reader| {
-            if field.eq_ignore_ascii_case("SpecialPowerTemplate") {
-                let tok = reader.next_token(SEPS_DEFAULT)?;
-                special_power_name = tok.to_owned();
-                if let Some(tmpl) = parse_ctx
-                    .special_power_store
-                    .find_special_power_template(tok)
-                {
-                    special_power_id = tmpl.id();
-                    reload_time = tmpl.reload_time();
-                }
-                Ok(())
-            } else if field.eq_ignore_ascii_case("StartsPaused") {
-                reader.parse_bool(&mut starts_paused)
-            } else if field.eq_ignore_ascii_case("StartsReady") {
-                reader.parse_bool(&mut starts_ready)
-            } else {
-                Err(IniError::UnknownToken)
-            }
-        })?;
-        Ok(Box::new(TestSpecialPowerData {
-            tag_key,
-            module_name_key,
-            special_power_name,
-            special_power_id,
-            reload_time,
-            starts_paused,
-            starts_ready,
-        }))
-    }
-
-    fn create(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
-        let typed = data
-            .as_any()
-            .downcast_ref::<TestSpecialPowerData>()
-            .expect("TestSpecialPowerData mismatch");
-        let _ = &typed.special_power_name;
-        Box::new(Self {
-            module_name_key: typed.module_name_key,
-            special_power_id: typed.special_power_id,
-            reload_time: typed.reload_time,
-            starts_paused: typed.starts_paused,
-            starts_ready: typed.starts_ready,
-            available_on_frame: 0,
-            paused_count: 0,
-            paused_on_frame: 0,
-            paused_percent: 0.0,
-        })
-    }
-}
-
-impl BehaviorModule for TestSpecialPowerModule {
-    fn module_name_key(&self) -> NameKeyType {
-        self.module_name_key
-    }
-
-    fn on_object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        let under_const = sim
-            .object(ctx.owner_slot)
-            .is_some_and(|o| o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE);
-        if !under_const {
-            self.start_power_recharge(sim, ctx);
-            if self.starts_ready(sim, ctx) != FALSE {
-                self.available_on_frame = sim.frame();
-            }
-        }
-        if self.starts_paused != FALSE {
-            self.pause_countdown(sim, ctx, TRUE);
-        }
-    }
-
-    fn apply_deferred_op(
-        &mut self,
-        op: DeferredSelfOp,
-        sim: &mut dyn SimApi,
-        ctx: ModuleContext,
-    ) {
-        match op {
-            DeferredSelfOp::SpecialPowerPause { pause } => self.pause_countdown(sim, ctx, pause),
-            DeferredSelfOp::SpecialPowerSetReadyFrame(f) => self.set_ready_frame(sim, ctx, f),
-            _ => {}
-        }
-    }
-
-    fn sync_sidecar(&self) -> ModuleSidecar {
-        ModuleSidecar::SpecialPower {
-            template_id: self.special_power_id,
-            available_on_frame: self.available_on_frame,
-            paused_count: self.paused_count,
-            paused_on_frame: self.paused_on_frame,
-            paused_percent: self.paused_percent,
-            starts_ready: self.starts_ready,
-        }
-    }
-
-    fn xfer(&mut self, xfer: &mut dyn Xfer, _sim: &dyn SimView) -> Result<(), XferError> {
-        let mut version: XferVersion = 1;
-        xfer.xfer_version(&mut version, 1)?;
-        ModuleSnapshotHeader::xfer_special_power_module_header(
-            xfer,
-            &mut self.available_on_frame,
-            &mut self.paused_count,
-            &mut self.paused_on_frame,
-            &mut self.paused_percent,
-        )
-    }
-
-    fn as_special_power(&self) -> Option<&dyn SpecialPowerFacet> {
-        Some(self)
-    }
-
-    fn as_special_power_mut(&mut self) -> Option<&mut dyn SpecialPowerFacet> {
-        Some(self)
-    }
-}
-
-impl SpecialPowerFacet for TestSpecialPowerModule {
-    fn is_module_for_power(
-        &self,
-        _sim: &dyn SimView,
-        _ctx: ModuleContext,
-        template_id: UnsignedInt,
-    ) -> Bool {
-        Bool::from(self.special_power_id == template_id)
-    }
-
-    fn is_ready(&self, sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
-        Bool::from(self.paused_count == 0 && sim.frame() >= self.available_on_frame)
-    }
-
-    fn get_percent_ready(&self, sim: &dyn SimView, ctx: ModuleContext) -> Real {
-        if self.paused_count > 0 && self.paused_percent == 1.0 {
-            return 0.99999;
-        }
-        if self.is_ready(sim, ctx) != FALSE {
-            return 1.0;
-        }
-        if self.paused_count > 0 {
-            return self.paused_percent;
-        }
-        if self.reload_time == 0 {
-            return 1.0;
-        }
-        1.0 - (self.available_on_frame.wrapping_sub(sim.frame()) as Real)
-            / (self.reload_time as Real)
-    }
-
-    fn get_ready_frame(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
-        let disabled = sim
-            .object(ctx.owner_slot)
-            .is_some_and(|o| o.is_disabled() != FALSE);
-        if self.paused_count > 0 || disabled {
-            let paused_frames = sim.frame().wrapping_sub(self.paused_on_frame);
-            self.available_on_frame.wrapping_add(paused_frames)
-        } else {
-            self.available_on_frame
-        }
-    }
-
-    fn get_raw_ready_frame(&self) -> UnsignedInt {
-        self.available_on_frame
-    }
-
-    fn get_special_power_id(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
-        self.special_power_id
-    }
-
-    fn set_ready_frame(
-        &mut self,
-        sim: &mut dyn SimApi,
-        _ctx: ModuleContext,
-        frame: UnsignedInt,
-    ) {
-        self.available_on_frame = frame;
-        self.paused_on_frame = sim.frame();
-    }
-
-    fn is_paused(&self) -> Bool {
-        Bool::from(self.paused_count > 0)
-    }
-
-    fn pause_countdown(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, pause: Bool) {
-        if pause != FALSE {
-            if self.paused_count == 0 {
-                self.paused_on_frame = sim.frame();
-                self.paused_percent = self.get_percent_ready(sim, ctx);
-            }
-            self.paused_count += 1;
-        } else if self.paused_count > 0 {
-            self.paused_count -= 1;
-            if self.paused_count == 0 {
-                let delta = sim.frame().wrapping_sub(self.paused_on_frame);
-                self.available_on_frame = self.available_on_frame.wrapping_add(delta);
-            }
-        }
-    }
-
-    fn starts_ready(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
-        #[cfg(feature = "retail-crc")]
-        {
-            FALSE
-        }
-        #[cfg(not(feature = "retail-crc"))]
-        {
-            self.starts_ready
-        }
-    }
-
-    fn start_power_recharge(&mut self, sim: &mut dyn SimApi, _ctx: ModuleContext) {
-        self.available_on_frame = sim.frame().wrapping_add(self.reload_time);
     }
 }
 
@@ -554,18 +277,6 @@ fn test_wp52_upgrade_1000_golden_vectors() {
     assert_eq!(lines.len(), 1000);
 
     let mut sim = SimContext::new();
-    // Register local TestSpecialPowerModule as CashHackSpecialPower until WP-5.2-C.
-    let nk = &mut sim.rules.name_keys;
-    sim.rules.module_registry.register_module(
-        nk,
-        "CashHackSpecialPower",
-        ModuleType::Behavior,
-        FacetMask::SPECIAL_POWER,
-        SleepyUpdatePhase::Normal,
-        false,
-        TestSpecialPowerModule::parse,
-        TestSpecialPowerModule::create,
-    );
 
     let upg_ini = "\
 Upgrade UpgA
