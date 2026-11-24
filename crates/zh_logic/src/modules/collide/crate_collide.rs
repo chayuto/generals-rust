@@ -12,7 +12,8 @@ use crate::rules::science::{ScienceType, SCIENCE_INVALID};
 use crate::sim::{SimApi, SimView};
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
 use zh_common::types::{
-    Bool, Int, NameKeyType, Real, Relationship, UnsignedInt, XferVersion, FALSE, TRUE,
+    Bool, Int, NameKeyType, Real, Relationship, UnsignedInt, VeterancyLevel, XferVersion, FALSE,
+    TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
@@ -109,17 +110,7 @@ impl CrateCollideData {
         } else if field.eq_ignore_ascii_case("ExecuteFX") {
             let res = (|| {
                 let tok = reader.next_token(SEPS_DEFAULT)?;
-                if tok.eq_ignore_ascii_case("None") {
-                    self.execute_fx = None;
-                } else {
-                    let resolved = parse_ctx
-                        .fx_list_names
-                        .iter()
-                        .find(|n| n.eq_ignore_ascii_case(tok))
-                        .cloned()
-                        .unwrap_or_else(|| tok.to_owned());
-                    self.execute_fx = Some(resolved);
-                }
+                self.execute_fx = resolve_fx_name(tok, parse_ctx);
                 Ok(())
             })();
             Some(res)
@@ -261,6 +252,95 @@ pub fn execute_crate_behavior(
         sim.trigger_fx_list(fx_name, &pos);
     }
     sim.destroy_object(ctx.owner_slot);
+}
+
+/// Resolves an `FXList` token against `parse_ctx.fx_list_names`, mapping `"None"` to `None`.
+pub(crate) fn resolve_fx_name(tok: &str, parse_ctx: &ModuleParseContext<'_>) -> Option<String> {
+    if tok.eq_ignore_ascii_case("None") {
+        None
+    } else {
+        Some(
+            parse_ctx
+                .fx_list_names
+                .iter()
+                .find(|n| n.eq_ignore_ascii_case(tok))
+                .cloned()
+                .unwrap_or_else(|| tok.to_owned()),
+        )
+    }
+}
+
+/// Returns an object's effective shroud clearing range (`Object::getShroudClearingRange`).
+pub(crate) fn object_shroud_clearing_range(sim: &dyn SimView, slot: ObjectSlot) -> Real {
+    let Some(obj) = sim.object(slot) else {
+        return 0.0;
+    };
+    if obj.shroud_clearing_range_override >= 0.0 {
+        return obj.shroud_clearing_range_override;
+    }
+    let Some(tmpl) = obj.thing.template_override().get_final(&sim.rules().thing_factory) else {
+        return 0.0;
+    };
+    let r = tmpl.friend_calc_shroud_clearing_range();
+    if r >= 0.0 {
+        r
+    } else {
+        tmpl.friend_calc_vision_range()
+    }
+}
+
+/// Grants enough experience to advance `target` by `levels_to_gain` (`ExperienceTracker::gainExpForLevel`).
+pub(crate) fn gain_exp_for_level(
+    sim: &mut dyn SimApi,
+    target: ObjectSlot,
+    levels_to_gain: Int,
+    can_scale_for_bonus: Bool,
+) -> Bool {
+    let Some(obj) = sim.object(target) else {
+        return FALSE;
+    };
+    let old_level = obj.experience_tracker.get_veterancy_level();
+    let cur_exp = obj.experience_tracker.get_current_experience();
+    let scalar = obj.experience_tracker.experience_scalar;
+    let is_trainable = obj.experience_tracker.is_trainable();
+    let Some(tmpl) = obj.thing.template_override().get_final(&sim.rules().thing_factory) else {
+        return FALSE;
+    };
+    let mut new_level_idx = old_level.as_i32().wrapping_add(levels_to_gain);
+    if new_level_idx > VeterancyLevel::LAST {
+        new_level_idx = VeterancyLevel::LAST;
+    }
+    if new_level_idx <= old_level.as_i32() {
+        return FALSE;
+    }
+    if is_trainable == FALSE {
+        return TRUE;
+    }
+    let exp_req = [
+        0,
+        tmpl.get_experience_required(1),
+        tmpl.get_experience_required(2),
+        tmpl.get_experience_required(3),
+    ];
+    let exp_needed = exp_req[new_level_idx as usize].wrapping_sub(cur_exp);
+    let gain = if can_scale_for_bonus != FALSE {
+        zh_common::math::cpp_mul_i32_f32(exp_needed, scalar)
+    } else {
+        exp_needed
+    };
+    let final_exp = cur_exp.wrapping_add(gain);
+    let mut lvl_idx: Int = 0;
+    while (lvl_idx + 1) < VeterancyLevel::COUNT && final_exp >= exp_req[(lvl_idx + 1) as usize] {
+        lvl_idx += 1;
+    }
+    let final_level = VeterancyLevel::from_i32(lvl_idx);
+    if final_level != old_level {
+        sim.set_veterancy_level(target, final_level, FALSE, TRUE);
+    }
+    if let Some(obj_mut) = sim.object_mut(target) {
+        obj_mut.experience_tracker.current_experience = final_exp;
+    }
+    TRUE
 }
 
 /// Shared `Sabotage*CrateCollide::isValidToExecute` guard after base `CrateCollide::isValidToExecute`.
