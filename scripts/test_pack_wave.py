@@ -149,6 +149,29 @@ class TestPackWave(unittest.TestCase):
         self.assertIn("pub trait DieFacet", bundle)
         self.assertIn("FXListDie", bundle)
 
+    def test_comma_separated_multi_facet_deduped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            create_fake_repo(root)
+            out_path = root / "multi.md"
+            rc = pack_wave.main(
+                [
+                    "--repo-root",
+                    str(root),
+                    "--packets",
+                    "PKT-211",
+                    "--facet",
+                    "die,update,die",
+                    "--out",
+                    str(out_path),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            text = out_path.read_text(encoding="utf-8")
+            self.assertIn("pub trait DieFacet", text)
+            self.assertIn("pub trait UpdateFacet", text)
+            self.assertEqual(text.count("pub trait DieFacet"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

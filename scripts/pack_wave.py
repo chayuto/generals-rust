@@ -41,6 +41,19 @@ FACET_TRAIT_MAP: Dict[str, str] = {
     "ai": "AiUpdateFacet",
     "physics": "PhysicsFacet",
     "stealth": "StealthFacet",
+    "exit": "ExitFacet",
+    "projectile": "ProjectileFacet",
+    "countermeasures": "CountermeasuresFacet",
+    "parking_place": "ParkingPlaceFacet",
+    "spawn_behavior": "SpawnBehaviorFacet",
+    "bridge": "BridgeFacet",
+    "bridge_tower": "BridgeTowerFacet",
+    "bridge_scaffold": "BridgeScaffoldFacet",
+    "cave": "CaveFacet",
+    "land_mine": "LandMineFacet",
+    "overcharge": "OverchargeFacet",
+    "rebuild_hole": "RebuildHoleFacet",
+    "transport_passenger": "TransportPassengerFacet",
 }
 
 
@@ -223,12 +236,22 @@ def build_wave_bundle(
             if blk:
                 facet_blocks.append(blk)
     elif facet_key != "none":
-        trait_name = FACET_TRAIT_MAP.get(facet_key)
-        if not trait_name:
-            raise ValueError(f"Unknown --facet '{facet}'. Choices: {', '.join(sorted(FACET_TRAIT_MAP))}, none, all")
-        blk = extract_braced_item(mod_text, f"pub trait {trait_name} {{")
-        if blk:
-            facet_blocks.append(blk)
+        seen_traits = set()
+        for raw_part in facet_key.split(","):
+            part = raw_part.strip()
+            if not part or part == "none":
+                continue
+            trait_name = FACET_TRAIT_MAP.get(part)
+            if not trait_name:
+                raise ValueError(
+                    f"Unknown --facet '{part}'. Choices: {', '.join(sorted(FACET_TRAIT_MAP))}, none, all"
+                )
+            if trait_name in seen_traits:
+                continue
+            seen_traits.add(trait_name)
+            blk = extract_braced_item(mod_text, f"pub trait {trait_name} {{")
+            if blk:
+                facet_blocks.append(blk)
 
     builtin_lines = extract_builtin_entries(
         repo_root / "crates/zh_logic/src/modules/module_factory.rs",

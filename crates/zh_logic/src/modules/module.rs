@@ -8,18 +8,21 @@
 
 use std::any::Any;
 
-use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ObjectSlot};
+use crate::arena::{
+    DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ObjectSlot, ThingTemplateId,
+};
 use crate::combat::damage::DamageInfo;
 use crate::gamelogic::global_data::{BodyDamageType, WeaponBonusConditionType};
 pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
-use crate::rules::disabled_types::DisabledMaskType;
+use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
 use crate::rules::object_status_types::ObjectStatusType;
 use crate::rules::science::ScienceType;
 use crate::rules::special_power_types::SpecialPowerType;
 use crate::rules::upgrade::UpgradeMaskType;
 use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
 use crate::sim::{SimApi, SimView};
+use zh_common::ini::SEPS_DEFAULT;
 use zh_common::math::Coord3D;
 use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, TeamId, UnsignedInt, UpdateSleepTime, VeterancyLevel,
@@ -66,6 +69,194 @@ pub const MAX_HEALTH_CHANGE_NAMES: [&str; 4] = [
     "ADD_CURRENT_HEALTH_TOO",
     "FULLY_HEAL",
 ];
+
+/// Exit door slot identifier (`UpdateModule.h`: `ExitDoorType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExitDoorType {
+    #[default]
+    Door1 = 0,
+    Door2 = 1,
+    Door3 = 2,
+    Door4 = 3,
+    DoorNoneAvailable = -1,
+    DoorNoneNeeded = -2,
+}
+
+impl ExitDoorType {
+    pub const DOOR_COUNT_MAX: usize = 4;
+
+    #[inline]
+    pub const fn from_i32(v: Int) -> Option<Self> {
+        match v {
+            0 => Some(Self::Door1),
+            1 => Some(Self::Door2),
+            2 => Some(Self::Door3),
+            3 => Some(Self::Door4),
+            -1 => Some(Self::DoorNoneAvailable),
+            -2 => Some(Self::DoorNoneNeeded),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_i32(self) -> Int {
+        self as Int
+    }
+}
+
+/// Container enter/exit queue intent (`ContainModule.h`: `ObjectEnterExitType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ObjectEnterExitType {
+    WantsToEnter = 0,
+    WantsToExit = 1,
+    #[default]
+    WantsNeither = 2,
+}
+
+/// Evacuation disposition direction (`ContainModule.h`: `EvacDisposition`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EvacDisposition {
+    #[default]
+    Invalid = 0,
+    ToLeft = 1,
+    ToRight = 2,
+    BurstFromCenter = 3,
+}
+
+/// Origin of a unit/container command (`GameCommon.h`: `CommandSourceType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommandSourceType {
+    #[default]
+    FromPlayer = 0,
+    FromScript = 1,
+    FromAi = 2,
+    FromDozer = 3,
+    DefaultSwitchWeapon = 4,
+}
+
+/// Runway reservation kind (`BehaviorModule.h`: `RunwayReservationType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RunwayReservationType {
+    #[default]
+    Takeoff = 0,
+    Landing = 1,
+}
+
+/// Bridge tower slot index (`TerrainRoads.h`: `BridgeTowerType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BridgeTowerType {
+    #[default]
+    FromLeft = 0,
+    FromRight = 1,
+    ToLeft = 2,
+    ToRight = 3,
+}
+
+impl BridgeTowerType {
+    pub const MAX_TOWERS: usize = 4;
+
+    #[inline]
+    pub const fn from_i32(v: Int) -> Option<Self> {
+        match v {
+            0 => Some(Self::FromLeft),
+            1 => Some(Self::FromRight),
+            2 => Some(Self::ToLeft),
+            3 => Some(Self::ToRight),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_i32(self) -> Int {
+        self as Int
+    }
+}
+
+/// Bridge scaffold animation phase (`BridgeScaffoldBehavior.h`: `ScaffoldTargetMotion`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScaffoldTargetMotion {
+    #[default]
+    Still = 0,
+    Rise = 1,
+    BuildAcross = 2,
+    TearDownAcross = 3,
+    Sink = 4,
+}
+
+impl ScaffoldTargetMotion {
+    #[inline]
+    pub const fn from_i32(v: Int) -> Option<Self> {
+        match v {
+            0 => Some(Self::Still),
+            1 => Some(Self::Rise),
+            2 => Some(Self::BuildAcross),
+            3 => Some(Self::TearDownAcross),
+            4 => Some(Self::Sink),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_i32(self) -> Int {
+        self as Int
+    }
+}
+
+/// Slow-death execution milestone (`SlowDeathBehavior.h`: `SlowDeathPhaseType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SlowDeathPhaseType {
+    #[default]
+    Initial = 0,
+    Midpoint = 1,
+    Final = 2,
+}
+
+impl SlowDeathPhaseType {
+    pub const COUNT: usize = 3;
+
+    #[inline]
+    pub const fn from_i32(v: Int) -> Option<Self> {
+        match v {
+            0 => Some(Self::Initial),
+            1 => Some(Self::Midpoint),
+            2 => Some(Self::Final),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn as_i32(self) -> Int {
+        self as Int
+    }
+}
+
+/// Aircraft parking & runway waypoint geometry (`ParkingPlaceBehaviorInterface::PPInfo`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ParkingPlaceInfo {
+    pub parking_space: Coord3D,
+    pub parking_orientation: Real,
+    pub runway_prep: Coord3D,
+    pub runway_start: Coord3D,
+    pub runway_end: Coord3D,
+    pub runway_exit: Coord3D,
+    pub runway_landing_start: Coord3D,
+    pub runway_landing_end: Coord3D,
+    pub runway_approach: Coord3D,
+    pub hangar_internal: Coord3D,
+    pub runway_takeoff_dist: Real,
+    pub hangar_internal_orient: Real,
+}
+
+// Keep unused-import-free access to INI separator constant for facet helpers when needed.
+const _: &str = SEPS_DEFAULT;
 
 /// Immutable per-template module configuration loaded from INI (`ModuleData`).
 pub trait ModuleData: Any + Send + Sync {
@@ -177,6 +368,13 @@ impl ModuleSnapshotHeader {
 
     /// Serializes `DieModule::xfer` (version `1` + `BehaviorModule::xfer`).
     pub fn xfer_die_module_header(xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        Self::xfer_behavior_module_header(xfer)
+    }
+
+    /// Serializes `DamageModule::xfer` (version `1` + `BehaviorModule::xfer`).
+    pub fn xfer_damage_module_header(xfer: &mut dyn Xfer) -> Result<(), XferError> {
         let mut version: XferVersion = 1;
         xfer.xfer_version(&mut version, 1)?;
         Self::xfer_behavior_module_header(xfer)
@@ -343,6 +541,84 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_slow_death_mut(&mut self) -> Option<&mut dyn SlowDeathFacet> {
+        None
+    }
+    fn as_exit(&self) -> Option<&dyn ExitFacet> {
+        None
+    }
+    fn as_exit_mut(&mut self) -> Option<&mut dyn ExitFacet> {
+        None
+    }
+    fn as_projectile(&self) -> Option<&dyn ProjectileFacet> {
+        None
+    }
+    fn as_projectile_mut(&mut self) -> Option<&mut dyn ProjectileFacet> {
+        None
+    }
+    fn as_countermeasures(&self) -> Option<&dyn CountermeasuresFacet> {
+        None
+    }
+    fn as_countermeasures_mut(&mut self) -> Option<&mut dyn CountermeasuresFacet> {
+        None
+    }
+    fn as_parking_place(&self) -> Option<&dyn ParkingPlaceFacet> {
+        None
+    }
+    fn as_parking_place_mut(&mut self) -> Option<&mut dyn ParkingPlaceFacet> {
+        None
+    }
+    fn as_spawn_behavior(&self) -> Option<&dyn SpawnBehaviorFacet> {
+        None
+    }
+    fn as_spawn_behavior_mut(&mut self) -> Option<&mut dyn SpawnBehaviorFacet> {
+        None
+    }
+    fn as_bridge(&self) -> Option<&dyn BridgeFacet> {
+        None
+    }
+    fn as_bridge_mut(&mut self) -> Option<&mut dyn BridgeFacet> {
+        None
+    }
+    fn as_bridge_tower(&self) -> Option<&dyn BridgeTowerFacet> {
+        None
+    }
+    fn as_bridge_tower_mut(&mut self) -> Option<&mut dyn BridgeTowerFacet> {
+        None
+    }
+    fn as_bridge_scaffold(&self) -> Option<&dyn BridgeScaffoldFacet> {
+        None
+    }
+    fn as_bridge_scaffold_mut(&mut self) -> Option<&mut dyn BridgeScaffoldFacet> {
+        None
+    }
+    fn as_cave(&self) -> Option<&dyn CaveFacet> {
+        None
+    }
+    fn as_cave_mut(&mut self) -> Option<&mut dyn CaveFacet> {
+        None
+    }
+    fn as_land_mine(&self) -> Option<&dyn LandMineFacet> {
+        None
+    }
+    fn as_land_mine_mut(&mut self) -> Option<&mut dyn LandMineFacet> {
+        None
+    }
+    fn as_overcharge(&self) -> Option<&dyn OverchargeFacet> {
+        None
+    }
+    fn as_overcharge_mut(&mut self) -> Option<&mut dyn OverchargeFacet> {
+        None
+    }
+    fn as_rebuild_hole(&self) -> Option<&dyn RebuildHoleFacet> {
+        None
+    }
+    fn as_rebuild_hole_mut(&mut self) -> Option<&mut dyn RebuildHoleFacet> {
+        None
+    }
+    fn as_transport_passenger(&self) -> Option<&dyn TransportPassengerFacet> {
+        None
+    }
+    fn as_transport_passenger_mut(&mut self) -> Option<&mut dyn TransportPassengerFacet> {
         None
     }
 }
@@ -603,7 +879,20 @@ pub trait ContainFacet {
     fn is_garrisonable(&self) -> Bool {
         FALSE
     }
+    fn is_valid_container_for(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _obj: ObjectSlot,
+        _check_capacity: Bool,
+    ) -> Bool {
+        FALSE
+    }
+    fn get_contained_items(&self) -> &[ObjectId] {
+        &[]
+    }
     fn add_to_contain(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, obj: ObjectSlot);
+    fn add_to_contain_list(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _obj: ObjectSlot) {}
     fn remove_from_contain(
         &mut self,
         sim: &mut dyn SimApi,
@@ -611,17 +900,92 @@ pub trait ContainFacet {
         obj: ObjectSlot,
         expose_stealthed: Bool,
     );
+    fn remove_all_contained(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _expose_stealthed: Bool,
+    ) {
+    }
+    fn kill_all_contained(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn harm_and_force_exit_all_contained(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _dmg: &DamageInfo,
+    ) {
+    }
     fn is_immune_to_clear_building_attacks(&self) -> Bool {
         FALSE
     }
     fn is_rider_change_contain(&self) -> Bool {
         FALSE
     }
+    fn is_bustable(&self) -> Bool {
+        FALSE
+    }
+    fn is_heal_contain(&self) -> Bool {
+        FALSE
+    }
+    fn is_tunnel_contain(&self) -> Bool {
+        FALSE
+    }
+    fn is_special_overlord_style_container(&self) -> Bool {
+        FALSE
+    }
+    fn is_special_zero_slot_container(&self) -> Bool {
+        FALSE
+    }
+    fn is_kick_out_on_capture(&self) -> Bool {
+        TRUE
+    }
+    fn is_passenger_allowed_to_fire(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _id: ObjectId,
+    ) -> Bool {
+        FALSE
+    }
+    fn set_passenger_allowed_to_fire(&mut self, _permission: Bool) {}
+    fn get_stealth_units_contained(&self) -> UnsignedInt {
+        0
+    }
+    fn get_hero_units_contained(&self) -> UnsignedInt {
+        0
+    }
+    fn get_rider_slot(&self, _sim: &dyn SimView) -> Option<ObjectSlot> {
+        None
+    }
+    fn is_contained(&self, _obj_id: ObjectId) -> Bool {
+        FALSE
+    }
+    fn on_containing(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _obj: ObjectSlot) {}
+    fn on_removing(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _obj: ObjectSlot) {}
+    fn on_selling(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn process_damage_to_contained(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _percent_damage: Real,
+    ) {
+    }
     fn get_closest_rider(&self, _sim: &dyn SimView, _pos: &Coord3D) -> Option<ObjectSlot> {
         None
     }
+    fn order_all_passengers_to_exit(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _cmd_source: CommandSourceType,
+        _instantly: Bool,
+    ) {
+    }
     fn order_all_passengers_to_idle(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn order_all_passengers_to_hack_internet(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn mark_all_passengers_detected(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn set_evac_disposition(&mut self, _disp: EvacDisposition) {}
+    fn set_override_destination(&mut self, _pos: &Coord3D) {}
 }
 
 /// Upgrade trigger facet (`UpgradeModuleInterface`).
@@ -806,9 +1170,362 @@ pub trait HelperFacet {
 
 /// Slow-death facet (`SlowDeathBehaviorInterface`) used by `UndeadBody::start_second_life`.
 pub trait SlowDeathFacet {
-    fn is_die_applicable(&self, dmg: &DamageInfo) -> Bool;
+    fn is_die_applicable(
+        &self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        dmg: &DamageInfo,
+    ) -> Bool;
     fn get_probability_modifier(&self, dmg: &DamageInfo) -> Int;
     fn begin_slow_death(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &DamageInfo);
+    fn is_slow_death_in_progress(&self) -> Bool {
+        FALSE
+    }
+}
+
+/// Exit/door dispatch facet (`ExitInterface`).
+pub trait ExitFacet {
+    fn is_exit_busy(&self) -> Bool {
+        FALSE
+    }
+    fn reserve_door_for_exit(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _tmpl_id: ThingTemplateId,
+        _specific_obj: Option<ObjectSlot>,
+    ) -> ExitDoorType {
+        ExitDoorType::Door1
+    }
+    fn exit_object_via_door(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _new_obj: ObjectSlot,
+        _exit_door: ExitDoorType,
+    ) {
+    }
+    fn exit_object_by_budding(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _new_obj: ObjectSlot,
+        _bud_host: ObjectSlot,
+    ) {
+    }
+    fn unreserve_door_for_exit(&mut self, _exit_door: ExitDoorType) {}
+    fn exit_object_in_a_hurry(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _new_obj: ObjectSlot,
+    ) {
+    }
+    fn set_rally_point(&mut self, _pos: &Coord3D) {}
+    fn get_rally_point(&self) -> Option<&Coord3D> {
+        None
+    }
+    fn use_spawn_rally_point(&self) -> Bool {
+        FALSE
+    }
+    fn get_natural_rally_point(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _rally_point: &mut Coord3D,
+        _offset: Bool,
+    ) -> Bool {
+        FALSE
+    }
+    fn get_exit_position(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _exit_pos: &mut Coord3D,
+    ) -> Bool {
+        FALSE
+    }
+}
+
+/// Ballistic/unguided projectile facet (`ProjectileUpdateInterface`).
+pub trait ProjectileFacet {
+    #[allow(clippy::too_many_arguments)]
+    fn projectile_launch_at_object_or_position(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _victim: Option<ObjectSlot>,
+        _victim_pos: &Coord3D,
+        _launcher: Option<ObjectSlot>,
+        _weapon_slot: crate::object::weapon_set::WeaponSlotType,
+        _specific_barrel_to_use: Int,
+        _detonate_weapon_name: Option<&str>,
+        _exhaust_sys_name: Option<&str>,
+    ) {
+    }
+    fn projectile_fire_at_object_or_position(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _victim: Option<ObjectSlot>,
+        _victim_pos: &Coord3D,
+        _detonate_weapon_name: Option<&str>,
+        _exhaust_sys_name: Option<&str>,
+    ) {
+    }
+    fn projectile_is_armed(&self) -> Bool {
+        TRUE
+    }
+    fn projectile_get_launcher_id(&self) -> ObjectId {
+        ObjectId::INVALID
+    }
+    fn projectile_handle_collision(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _other: Option<ObjectSlot>,
+    ) -> Bool {
+        FALSE
+    }
+    fn set_frames_till_countermeasure_diversion_occurs(&mut self, _frames: UnsignedInt) {}
+    fn projectile_now_jammed(&mut self) {}
+}
+
+/// Aircraft countermeasure flare diversion facet (`CountermeasuresBehaviorInterface`).
+pub trait CountermeasuresFacet {
+    fn report_missile_for_countermeasures(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _missile: ObjectSlot,
+    ) {
+    }
+    fn calculate_countermeasure_to_divert_to(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _victim: ObjectSlot,
+    ) -> ObjectId {
+        ObjectId::INVALID
+    }
+    fn reload_countermeasures(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn is_active(&self) -> Bool {
+        FALSE
+    }
+}
+
+/// Airfield/carrier parking and runway reservation facet (`ParkingPlaceBehaviorInterface`).
+pub trait ParkingPlaceFacet {
+    fn should_reserve_door_when_queued(&self, _tmpl_id: ThingTemplateId) -> Bool {
+        FALSE
+    }
+    fn has_available_space_for(&self, _sim: &dyn SimView, _tmpl_id: ThingTemplateId) -> Bool {
+        FALSE
+    }
+    fn has_reserved_space(&self, _id: ObjectId) -> Bool {
+        FALSE
+    }
+    fn get_space_index(&self, _id: ObjectId) -> Int {
+        -1
+    }
+    fn reserve_space(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _id: ObjectId,
+        _parking_offset: Real,
+        _info: Option<&mut ParkingPlaceInfo>,
+    ) -> Bool {
+        FALSE
+    }
+    fn release_space(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _id: ObjectId) {}
+    fn reserve_runway(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _id: ObjectId,
+        _for_landing: Bool,
+    ) -> Bool {
+        FALSE
+    }
+    fn release_runway(&mut self, _id: ObjectId) {}
+    fn calc_pp_info(&self, _sim: &dyn SimView, _ctx: ModuleContext, _id: ObjectId, _info: &mut ParkingPlaceInfo) {}
+    fn get_runway_index(&self, _id: ObjectId) -> Int {
+        -1
+    }
+    fn get_runway_count(&self) -> Int {
+        0
+    }
+    fn get_runway_reservation(&self, _runway_idx: Int, _rtype: RunwayReservationType) -> ObjectId {
+        ObjectId::INVALID
+    }
+    fn transfer_runway_reservation_to_next_in_line_for_takeoff(&mut self, _id: ObjectId) {}
+    fn get_approach_height(&self) -> Real {
+        0.0
+    }
+    fn get_landing_deck_height_offset(&self) -> Real {
+        0.0
+    }
+    fn set_healee(&mut self, _healee: ObjectSlot, _add: Bool) {}
+    fn kill_all_parked_units(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn defect_all_parked_units(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _new_team: TeamId,
+        _detection_time: UnsignedInt,
+    ) {
+    }
+}
+
+/// Master/slave spawn manager facet (`SpawnBehaviorInterface`).
+pub trait SpawnBehaviorFacet {
+    fn may_spawn_self_task_ai(&self, _max_self_taskers_ratio: Real) -> Bool {
+        FALSE
+    }
+    fn on_spawn_death(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _dead_spawn: ObjectId,
+        _dmg: Option<&DamageInfo>,
+    ) {
+    }
+    fn get_closest_slave(&self, _sim: &dyn SimView, _pos: &Coord3D) -> Option<ObjectSlot> {
+        None
+    }
+    fn order_slaves_to_attack_target(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: ObjectSlot,
+        _max_shots_to_fire: Int,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn order_slaves_to_attack_position(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _pos: &Coord3D,
+        _max_shots_to_fire: Int,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn can_any_slaves_attack(&self, _sim: &dyn SimView) -> Bool {
+        FALSE
+    }
+    fn order_slaves_to_go_idle(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn order_slaves_disabled_until(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _disabled_type: DisabledType,
+        _frame: UnsignedInt,
+    ) {
+    }
+    fn order_slaves_to_clear_disabled(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _disabled_type: DisabledType,
+    ) {
+    }
+    fn give_slaves_stealth_upgrade(&mut self, _sim: &mut dyn SimApi, _grant_stealth: Bool) {}
+    fn are_all_slaves_stealthed(&self, _sim: &dyn SimView) -> Bool {
+        FALSE
+    }
+    fn reveal_slaves(&mut self, _sim: &mut dyn SimApi) {}
+    fn do_slaves_have_freedom(&self) -> Bool {
+        FALSE
+    }
+    fn get_slave_count(&self) -> Int {
+        0
+    }
+}
+
+/// Bridge span coordination facet (`BridgeBehaviorInterface`).
+pub trait BridgeFacet {
+    fn set_tower(&mut self, tower_type: BridgeTowerType, tower_id: ObjectId);
+    fn get_tower_id(&self, tower_type: BridgeTowerType) -> ObjectId;
+    fn create_scaffolding(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+    fn remove_scaffolding(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+    fn is_scaffold_in_motion(&self, sim: &dyn SimView) -> Bool;
+    fn is_scaffold_present(&self) -> Bool;
+}
+
+/// Bridge repair tower facet (`BridgeTowerBehaviorInterface`).
+pub trait BridgeTowerFacet {
+    fn set_bridge(&mut self, bridge_id: ObjectId);
+    fn get_bridge_id(&self) -> ObjectId;
+    fn set_tower_type(&mut self, tower_type: BridgeTowerType);
+}
+
+/// Animated bridge repair scaffold facet (`BridgeScaffoldBehaviorInterface`).
+pub trait BridgeScaffoldFacet {
+    fn set_positions(
+        &mut self,
+        create_pos: &Coord3D,
+        rise_pos: &Coord3D,
+        build_pos: &Coord3D,
+    );
+    fn set_motion(&mut self, target_motion: ScaffoldTargetMotion);
+    fn get_current_motion(&self) -> ScaffoldTargetMotion;
+    fn reverse_motion(&mut self);
+    fn set_lateral_speed(&mut self, lateral_speed: Real);
+    fn set_vertical_speed(&mut self, vertical_speed: Real);
+}
+
+/// Cave tunnel index facet (`CaveInterface`).
+pub trait CaveFacet {
+    fn try_to_set_cave_index(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        new_index: Int,
+    );
+    fn set_original_team(&mut self, old_team: TeamId);
+}
+
+/// Land mine arm/disarm facet (`LandMineInterface`).
+pub trait LandMineFacet {
+    fn set_scoot_parms(&mut self, start: &Coord3D, end: &Coord3D);
+    fn disarm(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+}
+
+/// Reactor overcharge facet (`OverchargeBehaviorInterface`).
+pub trait OverchargeFacet {
+    fn toggle(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+    fn enable(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, enable: Bool);
+    fn is_overcharge_active(&self) -> Bool;
+}
+
+/// GLA rebuild-hole reconstruction facet (`RebuildHoleBehaviorInterface`).
+pub trait RebuildHoleFacet {
+    fn start_rebuild_process(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        rebuild_tmpl: ThingTemplateId,
+        spawner_id: ObjectId,
+    );
+    fn get_spawner_id(&self) -> ObjectId;
+    fn get_reconstructed_building_id(&self) -> ObjectId;
+    fn get_rebuild_template_id(&self) -> ThingTemplateId;
+}
+
+/// Angry-mob nexus evacuation facet (`TransportPassengerInterface`).
+pub trait TransportPassengerFacet {
+    fn try_to_evacuate(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        expose_stealthed_units: Bool,
+    ) -> Bool;
 }
 
 /// Destruction cleanup facet (`DestroyModuleInterface`).

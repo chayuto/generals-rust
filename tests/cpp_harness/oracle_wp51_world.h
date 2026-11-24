@@ -41,6 +41,7 @@
 #include "Common/Team.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "Common/TunnelTracker.h"
 #include "Common/Upgrade.h"
 #include "GameClient/Anim2D.h"
 #include "GameClient/ControlBar.h"
@@ -56,6 +57,7 @@
 #include "GameClient/RayEffect.h"
 #include "GameClient/SelectionXlat.h"
 #include "GameClient/Snow.h"
+#include "GameClient/TerrainRoads.h"
 #include "GameClient/Water.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
@@ -94,6 +96,10 @@ inline Int PlayerList::* access_member(Wp51PlayerListCountTag);
 struct Wp51PlayerDefaultTeamTag { using type = Team* Player::*; };
 template struct MemberAccess<Wp51PlayerDefaultTeamTag, &Player::m_defaultTeam>;
 inline Team* Player::* access_member(Wp51PlayerDefaultTeamTag);
+
+struct Wp51PlayerTunnelTag { using type = TunnelTracker* Player::*; };
+template struct MemberAccess<Wp51PlayerTunnelTag, &Player::m_tunnelSystem>;
+inline TunnelTracker* Player::* access_member(Wp51PlayerTunnelTag);
 
 namespace oracle_wp51 {
 
@@ -261,6 +267,7 @@ struct World {
     oracle::MemINI mem_ini;
     Team* team_a = nullptr;
     Team* team_b = nullptr;
+    Team* team_neutral = nullptr;
 
     World() {
         oracle::init_memory();
@@ -289,6 +296,9 @@ struct World {
 
         TheMultiplayerSettings = NEW MultiplayerSettings;
         TheMultiplayerSettings->init();
+
+        TheTerrainRoads = NEW TerrainRoadCollection;
+        TheTerrainRoads->init();
 
         TheSidesList = NEW SidesList;
         TheSidesList->init();
@@ -394,13 +404,21 @@ struct World {
         Player* p_a = ThePlayerList->getNthPlayer(0);
         Player* p_b = ThePlayerList->getNthPlayer(1);
         ThePlayerList->*access_member(Wp51PlayerListCountTag()) = 2;
-        if (p_a && !p_a->getResourceGatheringManager()) {
-            p_a->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+        if (p_a) {
+            if (!p_a->getResourceGatheringManager()) {
+                p_a->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_a->getTunnelSystem()) {
+                p_a->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
+            }
         }
         if (p_b) {
             p_b->init(nullptr);
             if (!p_b->getResourceGatheringManager()) {
                 p_b->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_b->getTunnelSystem()) {
+                p_b->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
             }
         }
         if (p_a && p_b) {
@@ -423,15 +441,30 @@ struct World {
         set_frame(1);
     }
 
-    void init_players(const char* tmpl_a, const char* tmpl_b) {
-        Player* p_a = ThePlayerList->getNthPlayer(0);
-        Player* p_b = ThePlayerList->getNthPlayer(1);
+    void init_with_neutral_player(const char* tmpl_a = nullptr, const char* tmpl_b = nullptr) {
+        Player* p_n = ThePlayerList->getNthPlayer(0);
+        Player* p_a = ThePlayerList->getNthPlayer(1);
+        Player* p_b = ThePlayerList->getNthPlayer(2);
+        ThePlayerList->*access_member(Wp51PlayerListCountTag()) = 3;
+        if (p_n) {
+            p_n->init(nullptr);
+            if (!p_n->getResourceGatheringManager()) {
+                p_n->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_n->getTunnelSystem()) {
+                p_n->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
+            }
+            team_neutral = p_n->getDefaultTeam();
+        }
         if (p_a) {
             const PlayerTemplate* pta =
                 tmpl_a ? ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(tmpl_a)) : nullptr;
             p_a->init(pta);
             if (!p_a->getResourceGatheringManager()) {
                 p_a->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_a->getTunnelSystem()) {
+                p_a->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
             }
             if (team_a) {
                 team_a->setControllingPlayer(p_a);
@@ -444,6 +477,56 @@ struct World {
             p_b->init(ptb);
             if (!p_b->getResourceGatheringManager()) {
                 p_b->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_b->getTunnelSystem()) {
+                p_b->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
+            }
+            if (team_b) {
+                team_b->setControllingPlayer(p_b);
+                p_b->*access_member(Wp51PlayerDefaultTeamTag()) = team_b;
+            }
+        }
+        if (p_a && p_b) {
+            p_a->setPlayerRelationship(p_b, ENEMIES);
+            p_b->setPlayerRelationship(p_a, ENEMIES);
+        }
+        if (p_n && p_a) {
+            p_a->setPlayerRelationship(p_n, NEUTRAL);
+            p_n->setPlayerRelationship(p_a, NEUTRAL);
+        }
+        if (p_n && p_b) {
+            p_b->setPlayerRelationship(p_n, NEUTRAL);
+            p_n->setPlayerRelationship(p_b, NEUTRAL);
+        }
+    }
+
+    void init_players(const char* tmpl_a, const char* tmpl_b) {
+        Player* p_a = ThePlayerList->getNthPlayer(0);
+        Player* p_b = ThePlayerList->getNthPlayer(1);
+        if (p_a) {
+            const PlayerTemplate* pta =
+                tmpl_a ? ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(tmpl_a)) : nullptr;
+            p_a->init(pta);
+            if (!p_a->getResourceGatheringManager()) {
+                p_a->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_a->getTunnelSystem()) {
+                p_a->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
+            }
+            if (team_a) {
+                team_a->setControllingPlayer(p_a);
+                p_a->*access_member(Wp51PlayerDefaultTeamTag()) = team_a;
+            }
+        }
+        if (p_b) {
+            const PlayerTemplate* ptb =
+                tmpl_b ? ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(tmpl_b)) : nullptr;
+            p_b->init(ptb);
+            if (!p_b->getResourceGatheringManager()) {
+                p_b->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (!p_b->getTunnelSystem()) {
+                p_b->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
             }
             if (team_b) {
                 team_b->setControllingPlayer(p_b);
@@ -494,6 +577,8 @@ struct World {
                 WeaponStore::parseWeaponTemplateDefinition(ini);
             } else if (std::strcmp(tok, "Locomotor") == 0) {
                 LocomotorStore::parseLocomotorTemplateDefinition(ini);
+            } else if (std::strcmp(tok, "Bridge") == 0) {
+                INI::parseTerrainBridgeDefinition(ini);
             } else if (std::strcmp(tok, "Object") == 0) {
                 AsciiString name = ini->getNextToken();
                 ThingFactory::parseObjectDefinition(ini, name, AsciiString::TheEmptyString);

@@ -711,6 +711,9 @@ End
             count: 2,
             max: 5,
             enclosing: TRUE,
+            stealth_units: 0,
+            garrisoned: FALSE,
+            rider_id: ObjectId::INVALID,
         },
     );
 
@@ -809,6 +812,9 @@ End
             count: 3,
             max: 5,
             enclosing: TRUE,
+            stealth_units: 0,
+            garrisoned: FALSE,
+            rider_id: ObjectId::INVALID,
         },
     );
     let sv_ms = find_sp_module(&sim, sv);

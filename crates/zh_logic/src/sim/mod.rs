@@ -21,7 +21,8 @@ use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::{
-    BehaviorModule, MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
+    BehaviorModule, BridgeTowerType, MaxHealthChangeType, ModuleData, ModuleDataStore,
+    ModuleRegistry, ModuleType, ParkingPlaceInfo,
 };
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
@@ -49,6 +50,7 @@ use crate::rules::upgrade::{UpgradeCenter, UpgradeMaskType, UpgradeType};
 use crate::scheduler::{
     should_process_disabled_update, ScheduleStore, SleepyUpdateHeap, SleepyUpdatePhase,
 };
+use crate::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use crate::spatial::crate_system::CrateSystem;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
@@ -58,8 +60,181 @@ use zh_common::math::Coord3D;
 use zh_common::random_value::PrngState;
 use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, Relationship, TeamId, UnsignedInt, UpdateSleepTime,
-    VeterancyLevel, FALSE, TRUE,
+    VeterancyLevel, XferVersion, FALSE, TRUE,
 };
+use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
+
+/// Per-player or per-cave shared tunnel containment tracker (`TunnelTracker.h` / `TunnelTracker.cpp`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelTrackerState {
+    pub tunnel_ids: Vec<ObjectId>,
+    pub contain_list: Vec<ObjectId>,
+    pub contain_list_size: Int,
+    pub hero_units_contained: UnsignedInt,
+    pub tunnel_count: UnsignedInt,
+    pub frames_for_full_heal: UnsignedInt,
+    pub needs_full_heal_time_update: Bool,
+    pub cur_nemesis_id: ObjectId,
+    pub nemesis_timestamp: UnsignedInt,
+}
+
+impl Default for TunnelTrackerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TunnelTrackerState {
+    pub const fn new() -> Self {
+        Self {
+            tunnel_ids: Vec::new(),
+            contain_list: Vec::new(),
+            contain_list_size: 0,
+            hero_units_contained: 0,
+            tunnel_count: 0,
+            frames_for_full_heal: 0,
+            needs_full_heal_time_update: FALSE,
+            cur_nemesis_id: ObjectId::INVALID,
+            nemesis_timestamp: 0,
+        }
+    }
+
+    pub fn on_tunnel_created(&mut self, tunnel_id: ObjectId) {
+        if !self.tunnel_ids.contains(&tunnel_id) {
+            self.tunnel_ids.push(tunnel_id);
+        }
+        #[cfg(feature = "retail-crc")]
+        {
+            self.tunnel_count = self.tunnel_count.saturating_add(1);
+        }
+        #[cfg(not(feature = "retail-crc"))]
+        {
+            self.tunnel_count = self.tunnel_ids.len() as UnsignedInt;
+        }
+        self.needs_full_heal_time_update = TRUE;
+    }
+
+    /// Removes `tunnel_id` and returns `TRUE` when zero entrances remain (signaling kill-all).
+    pub fn on_tunnel_destroyed(&mut self, tunnel_id: ObjectId) -> Bool {
+        if let Some(pos) = self.tunnel_ids.iter().position(|&id| id == tunnel_id) {
+            self.tunnel_ids.remove(pos);
+        }
+        #[cfg(feature = "retail-crc")]
+        {
+            self.tunnel_count = self.tunnel_count.saturating_sub(1);
+            Bool::from(self.tunnel_count == 0)
+        }
+        #[cfg(not(feature = "retail-crc"))]
+        {
+            self.tunnel_count = self.tunnel_ids.len() as UnsignedInt;
+            self.needs_full_heal_time_update = TRUE;
+            Bool::from(self.tunnel_ids.is_empty())
+        }
+    }
+
+    #[inline]
+    pub fn tunnel_count_effective(&self) -> UnsignedInt {
+        #[cfg(feature = "retail-crc")]
+        {
+            self.tunnel_count
+        }
+        #[cfg(not(feature = "retail-crc"))]
+        {
+            self.tunnel_ids.len() as UnsignedInt
+        }
+    }
+
+    pub fn add_to_contain_list(&mut self, obj_id: ObjectId, is_hero: Bool) {
+        self.contain_list.push(obj_id);
+        self.contain_list_size += 1;
+        if is_hero != FALSE {
+            self.hero_units_contained = self.hero_units_contained.saturating_add(1);
+        }
+    }
+
+    pub fn remove_from_contain(&mut self, obj_id: ObjectId, is_hero: Bool) -> Bool {
+        if let Some(pos) = self.contain_list.iter().position(|&id| id == obj_id) {
+            self.contain_list.remove(pos);
+            self.contain_list_size -= 1;
+            if is_hero != FALSE {
+                self.hero_units_contained = self.hero_units_contained.saturating_sub(1);
+            }
+            return TRUE;
+        }
+        FALSE
+    }
+
+    #[inline]
+    pub fn is_in_container(&self, obj_id: ObjectId) -> Bool {
+        Bool::from(self.contain_list.contains(&obj_id))
+    }
+}
+
+impl CaveTunnelTracker for TunnelTrackerState {
+    #[inline]
+    fn contain_count(&self) -> UnsignedInt {
+        if self.contain_list_size > 0 {
+            self.contain_list_size as UnsignedInt
+        } else {
+            0
+        }
+    }
+}
+
+impl Snapshot for TunnelTrackerState {
+    fn crc(&self, _xfer: &mut dyn Xfer) {}
+
+    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        #[cfg(feature = "retail-xfer-save")]
+        let current_version: XferVersion = 1;
+        #[cfg(not(feature = "retail-xfer-save"))]
+        let current_version: XferVersion = 2;
+
+        let mut version = current_version;
+        xfer.xfer_version(&mut version, current_version)?;
+        xfer.xfer_stl_object_id_vec(&mut self.tunnel_ids)?;
+        xfer.xfer_int(&mut self.contain_list_size)?;
+
+        if xfer.mode() == XferMode::Save || xfer.mode() == XferMode::Crc {
+            for id in &mut self.contain_list {
+                xfer.xfer_object_id(id)?;
+            }
+        } else {
+            self.contain_list.clear();
+            let count = if self.contain_list_size > 0 {
+                self.contain_list_size as usize
+            } else {
+                0
+            };
+            for _ in 0..count {
+                let mut id = ObjectId::INVALID;
+                xfer.xfer_object_id(&mut id)?;
+                self.contain_list.push(id);
+            }
+            self.needs_full_heal_time_update = TRUE;
+        }
+
+        if version <= 1 {
+            #[cfg(feature = "retail-crc")]
+            {
+                xfer.xfer_unsigned_int(&mut self.tunnel_count)?;
+            }
+            #[cfg(not(feature = "retail-crc"))]
+            {
+                let mut tunnel_count = self.tunnel_ids.len() as UnsignedInt;
+                xfer.xfer_unsigned_int(&mut tunnel_count)?;
+                if xfer.mode() == XferMode::Load {
+                    self.tunnel_count = tunnel_count;
+                }
+            }
+        } else if xfer.mode() == XferMode::Load {
+            self.tunnel_count = self.tunnel_ids.len() as UnsignedInt;
+        }
+        Ok(())
+    }
+
+    fn load_post_process(&mut self) {}
+}
 
 /// `Object::ObjectPrivateStatusBits` bit flags (`Object.h:694-700`).
 pub const PRIVATE_STATUS_EFFECTIVELY_DEAD: u8 = 1 << 0;
@@ -347,6 +522,7 @@ pub struct ObjectRecord {
     pub armor_set_flags: ArmorSetFlags,
     pub layer: PathfindLayerEnum,
     pub contained_by: Option<ObjectSlot>,
+    pub contained_by_frame: UnsignedInt,
     pub producer_id: ObjectId,
     pub builder_id: ObjectId,
     pub sole_healing_benefactor_id: ObjectId,
@@ -358,6 +534,18 @@ pub struct ObjectRecord {
     pub stealth_slot: Option<ModuleSlot>,
     pub ai_slot: Option<ModuleSlot>,
     pub physics_slot: Option<ModuleSlot>,
+    pub bridge_slot: Option<ModuleSlot>,
+    pub bridge_tower_slot: Option<ModuleSlot>,
+    pub bridge_scaffold_slot: Option<ModuleSlot>,
+    pub parking_slot: Option<ModuleSlot>,
+    pub spawn_slot: Option<ModuleSlot>,
+    pub projectile_slot: Option<ModuleSlot>,
+    pub countermeasures_slot: Option<ModuleSlot>,
+    pub exit_slot: Option<ModuleSlot>,
+    pub rebuild_hole_slot: Option<ModuleSlot>,
+    pub overcharge_slot: Option<ModuleSlot>,
+    pub land_mine_slot: Option<ModuleSlot>,
+    pub cave_slot: Option<ModuleSlot>,
     pub smc_helper_slot: Option<ModuleSlot>,
     pub status_damage_helper_slot: Option<ModuleSlot>,
     pub subdual_damage_helper_slot: Option<ModuleSlot>,
@@ -401,6 +589,7 @@ impl ObjectRecord {
             armor_set_flags: ArmorSetFlags::new(),
             layer: PathfindLayerEnum::Ground,
             contained_by: None,
+            contained_by_frame: 0,
             producer_id: ObjectId::INVALID,
             builder_id: ObjectId::INVALID,
             sole_healing_benefactor_id: ObjectId::INVALID,
@@ -412,6 +601,18 @@ impl ObjectRecord {
             stealth_slot: None,
             ai_slot: None,
             physics_slot: None,
+            bridge_slot: None,
+            bridge_tower_slot: None,
+            bridge_scaffold_slot: None,
+            parking_slot: None,
+            spawn_slot: None,
+            projectile_slot: None,
+            countermeasures_slot: None,
+            exit_slot: None,
+            rebuild_hole_slot: None,
+            overcharge_slot: None,
+            land_mine_slot: None,
+            cave_slot: None,
             smc_helper_slot: None,
             status_damage_helper_slot: None,
             subdual_damage_helper_slot: None,
@@ -666,6 +867,20 @@ pub trait SimView {
     fn object_is_trainable(&self, owner: ObjectSlot) -> Bool;
     fn object_crusher_level(&self, owner: ObjectSlot) -> Int;
     fn object_crushable_level(&self, owner: ObjectSlot) -> Int;
+
+    fn contain_count(&self, owner: ObjectSlot) -> UnsignedInt;
+    fn contain_max(&self, owner: ObjectSlot) -> Int;
+    fn is_valid_container_for(
+        &self,
+        container: ObjectSlot,
+        obj: ObjectSlot,
+        check_capacity: Bool,
+    ) -> Bool;
+    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState>;
+    fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState>;
+    fn cave_can_switch_index(&self, old_index: Int, new_index: Int) -> Bool;
+    fn bridge_is_passable(&self, bridge_id: ObjectId) -> Bool;
+    fn neutral_team_id(&self) -> TeamId;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -926,6 +1141,66 @@ pub trait SimApi: SimView {
     fn eject_pilot_dying(&mut self, owner: ObjectSlot);
     fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
     fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
+
+    fn contain_add(&mut self, container: ObjectSlot, passenger: ObjectSlot);
+    fn contain_remove(
+        &mut self,
+        container: ObjectSlot,
+        passenger: ObjectSlot,
+        expose_stealthed: Bool,
+    );
+    fn contain_remove_all(&mut self, container: ObjectSlot, expose_stealthed: Bool);
+    fn contain_kill_all(&mut self, container: ObjectSlot);
+    fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>);
+    fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D);
+    fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real);
+    fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum);
+    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId);
+    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool;
+    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState;
+    fn cave_register(&mut self, cave_index: Int);
+    fn cave_unregister(&mut self, cave_index: Int);
+    fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState>;
+    fn launch_projectile(
+        &mut self,
+        proj: ObjectSlot,
+        victim: Option<ObjectSlot>,
+        victim_pos: &Coord3D,
+        launcher: ObjectSlot,
+        wslot: WeaponSlotType,
+        weapon_name: &str,
+    );
+    fn report_missile_to_countermeasures(&mut self, target: ObjectSlot, missile: ObjectSlot);
+    fn divert_projectile_to_target(&mut self, missile: ObjectSlot, frames: UnsignedInt);
+    fn set_bridge_passable(&mut self, bridge_id: ObjectId, passable: Bool);
+    fn notify_bridge_tower_damage(&mut self, bridge_slot: ObjectSlot, dmg: &mut DamageInfo);
+    fn link_bridge_tower(
+        &mut self,
+        bridge_id: ObjectId,
+        tower_type: BridgeTowerType,
+        tower_id: ObjectId,
+    );
+    fn reserve_parking_space(
+        &mut self,
+        airfield: ObjectSlot,
+        aircraft_id: ObjectId,
+        offset: Real,
+    ) -> Option<ParkingPlaceInfo>;
+    fn release_parking_space(&mut self, airfield: ObjectSlot, aircraft_id: ObjectId);
+    fn notify_spawn_slave_died(
+        &mut self,
+        master: ObjectSlot,
+        slave_id: ObjectId,
+        dmg: &DamageInfo,
+    );
+    fn start_rebuild_hole(
+        &mut self,
+        hole: ObjectSlot,
+        rebuild_tmpl: ThingTemplateId,
+        spawner_id: ObjectId,
+    );
+    fn record_mine_detonation(&mut self, mine_id: ObjectId, trigger_id: ObjectId);
+    fn order_passenger(&mut self, passenger_id: ObjectId, order: &str);
     fn client(&mut self) -> &mut dyn ClientSink;
 }
 
@@ -984,6 +1259,17 @@ pub struct SimWorld {
     pub player_inactive: BTreeSet<TeamId>,
     pub demoralized_events: Vec<(ObjectId, UnsignedInt)>,
     pub supply_dropzone_resets: Vec<ObjectId>,
+    pub neutral_team_id: TeamId,
+    pub tunnel_trackers: BTreeMap<TeamId, TunnelTrackerState>,
+    pub cave_system: CaveSystem<TunnelTrackerState>,
+    pub bridge_links: BTreeMap<ObjectId, [ObjectId; 4]>,
+    pub bridge_passable: BTreeMap<ObjectId, Bool>,
+    pub mine_detonations: Vec<(ObjectId, ObjectId)>,
+    pub projectile_launches: Vec<(ObjectId, Option<ObjectId>, Coord3D)>,
+    pub countermeasure_reports: Vec<(ObjectId, ObjectId)>,
+    pub parking_reservations: BTreeMap<ObjectId, ObjectId>,
+    pub spawn_death_notifications: Vec<(ObjectId, ObjectId)>,
+    pub passenger_orders: Vec<(ObjectId, String)>,
 }
 
 impl Default for SimWorld {
@@ -1048,6 +1334,17 @@ impl SimWorld {
             player_inactive: BTreeSet::new(),
             demoralized_events: Vec::new(),
             supply_dropzone_resets: Vec::new(),
+            neutral_team_id: TeamId(0),
+            tunnel_trackers: BTreeMap::new(),
+            cave_system: CaveSystem::new(),
+            bridge_links: BTreeMap::new(),
+            bridge_passable: BTreeMap::new(),
+            mine_detonations: Vec::new(),
+            projectile_launches: Vec::new(),
+            countermeasure_reports: Vec::new(),
+            parking_reservations: BTreeMap::new(),
+            spawn_death_notifications: Vec::new(),
+            passenger_orders: Vec::new(),
         }
     }
 
@@ -1093,6 +1390,45 @@ impl SimWorld {
             }
             if facet_mask.contains(FacetMask::PHYSICS_UPDATE) && obj.physics_slot.is_none() {
                 obj.physics_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::BRIDGE_BEHAVIOR) && obj.bridge_slot.is_none() {
+                obj.bridge_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::BRIDGE_TOWER) && obj.bridge_tower_slot.is_none() {
+                obj.bridge_tower_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::BRIDGE_SCAFFOLD)
+                && obj.bridge_scaffold_slot.is_none()
+            {
+                obj.bridge_scaffold_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::PARKING_PLACE) && obj.parking_slot.is_none() {
+                obj.parking_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::SPAWN_BEHAVIOR) && obj.spawn_slot.is_none() {
+                obj.spawn_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::PROJECTILE_UPDATE) && obj.projectile_slot.is_none() {
+                obj.projectile_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::COUNTERMEASURES) && obj.countermeasures_slot.is_none()
+            {
+                obj.countermeasures_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::EXIT_INTERFACE) && obj.exit_slot.is_none() {
+                obj.exit_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::REBUILD_HOLE) && obj.rebuild_hole_slot.is_none() {
+                obj.rebuild_hole_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::OVERCHARGE) && obj.overcharge_slot.is_none() {
+                obj.overcharge_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::LAND_MINE) && obj.land_mine_slot.is_none() {
+                obj.land_mine_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::CAVE_INTERFACE) && obj.cave_slot.is_none() {
+                obj.cave_slot = Some(mod_slot);
             }
         }
 
@@ -2236,6 +2572,76 @@ impl SimView for SimContext {
             })
             .unwrap_or(0)
     }
+
+    fn contain_count(&self, owner: ObjectSlot) -> UnsignedInt {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return 0;
+        };
+        if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
+            return c.get_contain_count();
+        }
+        match self.world.modules.sidecar(cs) {
+            ModuleSidecar::Contain { count, .. } => count,
+            _ => 0,
+        }
+    }
+
+    fn contain_max(&self, owner: ObjectSlot) -> Int {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return -1;
+        };
+        if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
+            return c.get_contain_max();
+        }
+        match self.world.modules.sidecar(cs) {
+            ModuleSidecar::Contain { max, .. } => max,
+            _ => -1,
+        }
+    }
+
+    fn is_valid_container_for(
+        &self,
+        container: ObjectSlot,
+        obj: ObjectSlot,
+        check_capacity: Bool,
+    ) -> Bool {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
+            let ctx = self.world.modules.meta(cs).context(cs);
+            return c.is_valid_container_for(self, ctx, obj, check_capacity);
+        }
+        FALSE
+    }
+
+    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState> {
+        self.world.tunnel_trackers.get(&team_id)
+    }
+
+    fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState> {
+        self.world
+            .cave_system
+            .get_tunnel_tracker_for_cave_index(cave_index)
+    }
+
+    fn cave_can_switch_index(&self, old_index: Int, new_index: Int) -> Bool {
+        self.world
+            .cave_system
+            .can_switch_index_to_index(old_index, new_index)
+    }
+
+    fn bridge_is_passable(&self, bridge_id: ObjectId) -> Bool {
+        self.world
+            .bridge_passable
+            .get(&bridge_id)
+            .copied()
+            .unwrap_or(TRUE)
+    }
+
+    fn neutral_team_id(&self) -> TeamId {
+        self.world.neutral_team_id
+    }
 }
 
 impl SimApi for SimContext {
@@ -2999,17 +3405,16 @@ impl SimApi for SimContext {
         let mut total: Int = 0;
         let mut applicable = Vec::new();
         for &ms in &beh_slots {
-            if let Some(sd) = self
-                .world
-                .modules
-                .payload(ms)
-                .and_then(|p| p.as_slow_death())
-            {
-                if sd.is_die_applicable(dmg) != FALSE {
-                    let w = sd.get_probability_modifier(dmg);
-                    total = total.wrapping_add(w);
-                    applicable.push((ms, w));
+            if let Ok(Some(w)) = self.dispatch_module(ms, |m, sim, ctx| {
+                let sd = m.as_slow_death()?;
+                if sd.is_die_applicable(sim, ctx, dmg) != FALSE {
+                    Some(sd.get_probability_modifier(dmg))
+                } else {
+                    None
                 }
+            }) {
+                total = total.wrapping_add(w);
+                applicable.push((ms, w));
             }
         }
         if total <= 0 {
@@ -3314,6 +3719,15 @@ impl SimApi for SimContext {
     fn set_passengers_allowed_to_fire(&mut self, owner: ObjectSlot, allowed: Bool) {
         if let Some(obj) = self.world.objects.get_mut(owner) {
             obj.passengers_allowed_to_fire = allowed;
+        }
+        if let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) {
+            if !self.world.modules.is_executing(cs) {
+                let _ = self.dispatch_module(cs, |m, _, _| {
+                    if let Some(c) = m.as_contain_mut() {
+                        c.set_passenger_allowed_to_fire(allowed);
+                    }
+                });
+            }
         }
     }
 
@@ -3674,6 +4088,14 @@ impl SimApi for SimContext {
         self.world
             .rebuild_hole_events
             .push((dead_id, hole_id, hole_max_health));
+        if let Some(dead_tmpl) = self
+            .world
+            .objects
+            .get(dead_obj)
+            .and_then(|o| o.thing.template_override().get_non_overloaded_key())
+        {
+            self.start_rebuild_hole(hole_obj, dead_tmpl, dead_id);
+        }
     }
 
     fn trigger_special_ability(
@@ -3938,6 +4360,365 @@ impl SimApi for SimContext {
         }
     }
 
+    fn contain_add(&mut self, container: ObjectSlot, passenger: ObjectSlot) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(cs) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(cs, DeferredSelfOp::ContainAdd(passenger));
+            return;
+        }
+        let _ = self.dispatch_module(cs, |m, sim, ctx| {
+            if let Some(c) = m.as_contain_mut() {
+                c.add_to_contain(sim, ctx, passenger);
+            }
+        });
+    }
+
+    fn contain_remove(
+        &mut self,
+        container: ObjectSlot,
+        passenger: ObjectSlot,
+        expose_stealthed: Bool,
+    ) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(cs) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(cs, DeferredSelfOp::ContainRemove(passenger));
+            return;
+        }
+        let _ = self.dispatch_module(cs, |m, sim, ctx| {
+            if let Some(c) = m.as_contain_mut() {
+                c.remove_from_contain(sim, ctx, passenger, expose_stealthed);
+            }
+        });
+    }
+
+    fn contain_remove_all(&mut self, container: ObjectSlot, expose_stealthed: Bool) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(cs) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(cs, DeferredSelfOp::ContainRemoveAll { expose_stealthed });
+            return;
+        }
+        let _ = self.dispatch_module(cs, |m, sim, ctx| {
+            if let Some(c) = m.as_contain_mut() {
+                c.remove_all_contained(sim, ctx, expose_stealthed);
+            }
+        });
+    }
+
+    fn contain_kill_all(&mut self, container: ObjectSlot) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(cs) {
+            let _ = self.dispatch_module(cs, |m, sim, ctx| {
+                if let Some(c) = m.as_contain_mut() {
+                    c.kill_all_contained(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>) {
+        let frame = self.world.frame;
+        if let Some(obj) = self.world.objects.get_mut(passenger) {
+            obj.contained_by = container;
+            obj.contained_by_frame = if container.is_some() { frame } else { 0 };
+        }
+    }
+
+    fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            let mut dummy = crate::object::thing::NoopTransformReactor;
+            obj.thing
+                .set_position(&self.rules.thing_factory, pos, self.terrain.as_ref(), &mut dummy);
+        }
+    }
+
+    fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            let mut dummy = crate::object::thing::NoopTransformReactor;
+            obj.thing
+                .set_orientation(&self.rules.thing_factory, angle, self.terrain.as_ref(), &mut dummy);
+        }
+    }
+
+    fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.layer = layer;
+        }
+    }
+
+    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) {
+        self.world
+            .tunnel_trackers
+            .entry(team_id)
+            .or_default()
+            .on_tunnel_created(tunnel_id);
+    }
+
+    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool {
+        self.world
+            .tunnel_trackers
+            .entry(team_id)
+            .or_default()
+            .on_tunnel_destroyed(tunnel_id)
+    }
+
+    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState {
+        self.world.tunnel_trackers.entry(team_id).or_default()
+    }
+
+    fn cave_register(&mut self, cave_index: Int) {
+        self.world.cave_system.register_new_cave(cave_index);
+    }
+
+    fn cave_unregister(&mut self, cave_index: Int) {
+        self.world.cave_system.unregister_cave(cave_index);
+    }
+
+    fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState> {
+        self.world
+            .cave_system
+            .get_tunnel_tracker_for_cave_index_mut(cave_index)
+    }
+
+    fn launch_projectile(
+        &mut self,
+        proj: ObjectSlot,
+        victim: Option<ObjectSlot>,
+        victim_pos: &Coord3D,
+        launcher: ObjectSlot,
+        wslot: WeaponSlotType,
+        weapon_name: &str,
+    ) {
+        let proj_id = self.world.objects.id_of(proj).unwrap_or(ObjectId::INVALID);
+        let victim_id = victim.and_then(|v| self.world.objects.id_of(v));
+        self.world
+            .projectile_launches
+            .push((proj_id, victim_id, *victim_pos));
+
+        if let Some(ps) = self.world.objects.get(proj).and_then(|o| o.projectile_slot) {
+            let det_name = if weapon_name.is_empty() {
+                None
+            } else {
+                Some(weapon_name)
+            };
+            let _ = self.dispatch_module(ps, |m, sim, ctx| {
+                if let Some(p) = m.as_projectile_mut() {
+                    p.projectile_launch_at_object_or_position(
+                        sim,
+                        ctx,
+                        victim,
+                        victim_pos,
+                        Some(launcher),
+                        wslot,
+                        0,
+                        det_name,
+                        None,
+                    );
+                }
+            });
+        }
+    }
+
+    fn report_missile_to_countermeasures(&mut self, target: ObjectSlot, missile: ObjectSlot) {
+        let target_id = self.world.objects.id_of(target).unwrap_or(ObjectId::INVALID);
+        let missile_id = self
+            .world
+            .objects
+            .id_of(missile)
+            .unwrap_or(ObjectId::INVALID);
+        self.world
+            .countermeasure_reports
+            .push((target_id, missile_id));
+        if let Some(cm_slot) = self
+            .world
+            .objects
+            .get(target)
+            .and_then(|o| o.countermeasures_slot)
+        {
+            if !self.world.modules.is_executing(cm_slot) {
+                let _ = self.dispatch_module(cm_slot, |m, sim, ctx| {
+                    if let Some(cm) = m.as_countermeasures_mut() {
+                        cm.report_missile_for_countermeasures(sim, ctx, missile);
+                    }
+                });
+            }
+        }
+    }
+
+    fn divert_projectile_to_target(&mut self, missile: ObjectSlot, frames: UnsignedInt) {
+        if let Some(ps) = self
+            .world
+            .objects
+            .get(missile)
+            .and_then(|o| o.projectile_slot)
+        {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_projectile_mut() {
+                    p.set_frames_till_countermeasure_diversion_occurs(frames);
+                }
+            });
+        }
+    }
+
+    fn set_bridge_passable(&mut self, bridge_id: ObjectId, passable: Bool) {
+        self.world.bridge_passable.insert(bridge_id, passable);
+    }
+
+    fn notify_bridge_tower_damage(&mut self, bridge_slot: ObjectSlot, dmg: &mut DamageInfo) {
+        let Some(bs) = self.world.objects.get(bridge_slot).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(bs) {
+            return;
+        }
+        self.attempt_damage_on(bridge_slot, dmg);
+    }
+
+    fn link_bridge_tower(
+        &mut self,
+        bridge_id: ObjectId,
+        tower_type: BridgeTowerType,
+        tower_id: ObjectId,
+    ) {
+        let entry = self
+            .world
+            .bridge_links
+            .entry(bridge_id)
+            .or_insert([ObjectId::INVALID; 4]);
+        let idx = tower_type.as_i32();
+        if (0..4).contains(&idx) {
+            entry[idx as usize] = tower_id;
+        }
+    }
+
+    fn reserve_parking_space(
+        &mut self,
+        airfield: ObjectSlot,
+        aircraft_id: ObjectId,
+        offset: Real,
+    ) -> Option<ParkingPlaceInfo> {
+        let ps = self.world.objects.get(airfield).and_then(|o| o.parking_slot)?;
+        let airfield_id = self
+            .world
+            .objects
+            .id_of(airfield)
+            .unwrap_or(ObjectId::INVALID);
+        let mut info = ParkingPlaceInfo::default();
+        let reserved = self
+            .dispatch_module(ps, |m, sim, ctx| {
+                m.as_parking_place_mut()
+                    .map_or(FALSE, |pp| pp.reserve_space(sim, ctx, aircraft_id, offset, Some(&mut info)))
+            })
+            .unwrap_or(FALSE);
+        if reserved != FALSE {
+            self.world
+                .parking_reservations
+                .insert(aircraft_id, airfield_id);
+            Some(info)
+        } else {
+            None
+        }
+    }
+
+    fn release_parking_space(&mut self, airfield: ObjectSlot, aircraft_id: ObjectId) {
+        self.world.parking_reservations.remove(&aircraft_id);
+        let Some(ps) = self.world.objects.get(airfield).and_then(|o| o.parking_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(ps) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(ps, DeferredSelfOp::ParkingRelease(aircraft_id));
+            return;
+        }
+        let _ = self.dispatch_module(ps, |m, sim, ctx| {
+            if let Some(pp) = m.as_parking_place_mut() {
+                pp.release_space(sim, ctx, aircraft_id);
+            }
+        });
+    }
+
+    fn notify_spawn_slave_died(
+        &mut self,
+        master: ObjectSlot,
+        slave_id: ObjectId,
+        dmg: &DamageInfo,
+    ) {
+        let master_id = self
+            .world
+            .objects
+            .id_of(master)
+            .unwrap_or(ObjectId::INVALID);
+        self.world
+            .spawn_death_notifications
+            .push((master_id, slave_id));
+        let Some(ss) = self.world.objects.get(master).and_then(|o| o.spawn_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(ss) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(ss, DeferredSelfOp::SpawnNotifySlaveDied(slave_id));
+            return;
+        }
+        let _ = self.dispatch_module(ss, |m, sim, ctx| {
+            if let Some(sb) = m.as_spawn_behavior_mut() {
+                sb.on_spawn_death(sim, ctx, slave_id, Some(dmg));
+            }
+        });
+    }
+
+    fn start_rebuild_hole(
+        &mut self,
+        hole: ObjectSlot,
+        rebuild_tmpl: ThingTemplateId,
+        spawner_id: ObjectId,
+    ) {
+        let Some(rs) = self
+            .world
+            .objects
+            .get(hole)
+            .and_then(|o| o.rebuild_hole_slot)
+        else {
+            return;
+        };
+        if !self.world.modules.is_executing(rs) {
+            let _ = self.dispatch_module(rs, |m, sim, ctx| {
+                if let Some(rh) = m.as_rebuild_hole_mut() {
+                    rh.start_rebuild_process(sim, ctx, rebuild_tmpl, spawner_id);
+                }
+            });
+        }
+    }
+
+    fn record_mine_detonation(&mut self, mine_id: ObjectId, trigger_id: ObjectId) {
+        self.world.mine_detonations.push((mine_id, trigger_id));
+    }
+
+    fn order_passenger(&mut self, passenger_id: ObjectId, order: &str) {
+        self.world
+            .passenger_orders
+            .push((passenger_id, order.to_owned()));
+    }
+
     fn client(&mut self) -> &mut dyn ClientSink {
         self.client.as_mut()
     }
@@ -4175,6 +4956,44 @@ impl SimView for MockSimApi {
 
     fn object_crushable_level(&self, owner: ObjectSlot) -> Int {
         self.ctx.object_crushable_level(owner)
+    }
+
+    fn contain_count(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.ctx.contain_count(owner)
+    }
+
+    fn contain_max(&self, owner: ObjectSlot) -> Int {
+        self.ctx.contain_max(owner)
+    }
+
+    fn is_valid_container_for(
+        &self,
+        container: ObjectSlot,
+        obj: ObjectSlot,
+        check_capacity: Bool,
+    ) -> Bool {
+        self.ctx
+            .is_valid_container_for(container, obj, check_capacity)
+    }
+
+    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState> {
+        self.ctx.tunnel_tracker(team_id)
+    }
+
+    fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState> {
+        self.ctx.cave_tracker(cave_index)
+    }
+
+    fn cave_can_switch_index(&self, old_index: Int, new_index: Int) -> Bool {
+        self.ctx.cave_can_switch_index(old_index, new_index)
+    }
+
+    fn bridge_is_passable(&self, bridge_id: ObjectId) -> Bool {
+        self.ctx.bridge_is_passable(bridge_id)
+    }
+
+    fn neutral_team_id(&self) -> TeamId {
+        self.ctx.neutral_team_id()
     }
 }
 
@@ -4779,6 +5598,148 @@ impl SimApi for MockSimApi {
 
     fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
         self.ctx.dispatch_reset_upgrade(owner, mask);
+    }
+
+    fn contain_add(&mut self, container: ObjectSlot, passenger: ObjectSlot) {
+        self.ctx.contain_add(container, passenger);
+    }
+
+    fn contain_remove(
+        &mut self,
+        container: ObjectSlot,
+        passenger: ObjectSlot,
+        expose_stealthed: Bool,
+    ) {
+        self.ctx
+            .contain_remove(container, passenger, expose_stealthed);
+    }
+
+    fn contain_remove_all(&mut self, container: ObjectSlot, expose_stealthed: Bool) {
+        self.ctx.contain_remove_all(container, expose_stealthed);
+    }
+
+    fn contain_kill_all(&mut self, container: ObjectSlot) {
+        self.ctx.contain_kill_all(container);
+    }
+
+    fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>) {
+        self.ctx.set_contained_by(passenger, container);
+    }
+
+    fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D) {
+        self.ctx.set_object_position(owner, pos);
+    }
+
+    fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
+        self.ctx.set_object_orientation(owner, angle);
+    }
+
+    fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
+        self.ctx.set_object_layer(owner, layer);
+    }
+
+    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) {
+        self.ctx.tunnel_add_entrance(team_id, tunnel_id);
+    }
+
+    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool {
+        self.ctx.tunnel_remove_entrance(team_id, tunnel_id)
+    }
+
+    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState {
+        self.ctx.tunnel_tracker_mut(team_id)
+    }
+
+    fn cave_register(&mut self, cave_index: Int) {
+        self.ctx.cave_register(cave_index);
+    }
+
+    fn cave_unregister(&mut self, cave_index: Int) {
+        self.ctx.cave_unregister(cave_index);
+    }
+
+    fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState> {
+        self.ctx.cave_tracker_mut(cave_index)
+    }
+
+    fn launch_projectile(
+        &mut self,
+        proj: ObjectSlot,
+        victim: Option<ObjectSlot>,
+        victim_pos: &Coord3D,
+        launcher: ObjectSlot,
+        wslot: WeaponSlotType,
+        weapon_name: &str,
+    ) {
+        self.ctx
+            .launch_projectile(proj, victim, victim_pos, launcher, wslot, weapon_name);
+    }
+
+    fn report_missile_to_countermeasures(&mut self, target: ObjectSlot, missile: ObjectSlot) {
+        self.ctx
+            .report_missile_to_countermeasures(target, missile);
+    }
+
+    fn divert_projectile_to_target(&mut self, missile: ObjectSlot, frames: UnsignedInt) {
+        self.ctx.divert_projectile_to_target(missile, frames);
+    }
+
+    fn set_bridge_passable(&mut self, bridge_id: ObjectId, passable: Bool) {
+        self.ctx.set_bridge_passable(bridge_id, passable);
+    }
+
+    fn notify_bridge_tower_damage(&mut self, bridge_slot: ObjectSlot, dmg: &mut DamageInfo) {
+        self.ctx.notify_bridge_tower_damage(bridge_slot, dmg);
+    }
+
+    fn link_bridge_tower(
+        &mut self,
+        bridge_id: ObjectId,
+        tower_type: BridgeTowerType,
+        tower_id: ObjectId,
+    ) {
+        self.ctx.link_bridge_tower(bridge_id, tower_type, tower_id);
+    }
+
+    fn reserve_parking_space(
+        &mut self,
+        airfield: ObjectSlot,
+        aircraft_id: ObjectId,
+        offset: Real,
+    ) -> Option<ParkingPlaceInfo> {
+        self.ctx
+            .reserve_parking_space(airfield, aircraft_id, offset)
+    }
+
+    fn release_parking_space(&mut self, airfield: ObjectSlot, aircraft_id: ObjectId) {
+        self.ctx.release_parking_space(airfield, aircraft_id);
+    }
+
+    fn notify_spawn_slave_died(
+        &mut self,
+        master: ObjectSlot,
+        slave_id: ObjectId,
+        dmg: &DamageInfo,
+    ) {
+        self.ctx.notify_spawn_slave_died(master, slave_id, dmg);
+    }
+
+    fn start_rebuild_hole(
+        &mut self,
+        hole: ObjectSlot,
+        rebuild_tmpl: ThingTemplateId,
+        spawner_id: ObjectId,
+    ) {
+        self.ctx
+            .start_rebuild_hole(hole, rebuild_tmpl, spawner_id);
+    }
+
+    fn record_mine_detonation(&mut self, mine_id: ObjectId, trigger_id: ObjectId) {
+        self.ctx.record_mine_detonation(mine_id, trigger_id);
+    }
+
+    fn order_passenger(&mut self, passenger_id: ObjectId, order: &str) {
+        self.ctx.order_passenger(passenger_id, order);
     }
 
     fn client(&mut self) -> &mut dyn ClientSink {

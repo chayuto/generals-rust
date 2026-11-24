@@ -113,7 +113,12 @@ impl BehaviorModule for TestSlowDeath {
 }
 
 impl SlowDeathFacet for TestSlowDeath {
-    fn is_die_applicable(&self, _dmg: &DamageInfo) -> Bool {
+    fn is_die_applicable(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _dmg: &DamageInfo,
+    ) -> Bool {
         TRUE
     }
 

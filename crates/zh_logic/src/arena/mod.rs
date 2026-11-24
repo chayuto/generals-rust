@@ -91,6 +91,13 @@ impl FacetMask {
     pub const RAILED_TRANSPORT_DOCK: Self = Self(1 << 29);
     pub const TRANSPORT_PASSENGER: Self = Self(1 << 30);
     pub const EJECT_PILOT_DIE: Self = Self(1 << 31);
+    pub const BRIDGE_BEHAVIOR: Self = Self(1 << 32);
+    pub const BRIDGE_TOWER: Self = Self(1 << 33);
+    pub const BRIDGE_SCAFFOLD: Self = Self(1 << 34);
+    pub const OVERCHARGE: Self = Self(1 << 35);
+    pub const REBUILD_HOLE: Self = Self(1 << 36);
+    pub const PROPAGANDA_TOWER: Self = Self(1 << 37);
+    pub const TUNNEL_CONTAIN: Self = Self(1 << 38);
 
     pub const PRIMARY_CPP_MASK: u64 = 0x0fff;
 
@@ -168,6 +175,19 @@ pub enum ModuleSidecar {
         count: u32,
         max: i32,
         enclosing: Bool,
+        stealth_units: u32,
+        garrisoned: Bool,
+        rider_id: ObjectId,
+    },
+    Bridge {
+        damage_state: u8,
+        passable: Bool,
+        scaffold_present: Bool,
+    },
+    ParkingPlace {
+        occupied_mask: u32,
+        runway_mask: u32,
+        heal_count: u32,
     },
     Physics {
         velocity: Coord3D,
@@ -230,7 +250,25 @@ pub enum DeferredSelfOp {
     SpecialPowerSetReadyFrame(UnsignedInt),
     UpgradeResetKey(NameKeyType),
     AiSetIdle,
+    ContainAdd(ObjectSlot),
     ContainRemove(ObjectSlot),
+    ContainRemoveAll {
+        expose_stealthed: Bool,
+    },
+    ContainEvacuate {
+        force_exit: Bool,
+    },
+    SlowDeathBegin {
+        damage_type: u8,
+        death_type: u8,
+        source_id: ObjectId,
+    },
+    SpawnNotifySlaveDied(ObjectId),
+    ParkingRelease(ObjectId),
+    BridgeSyncTowerState {
+        tower_index: u8,
+        damage_state: u8,
+    },
 }
 
 /// Disjoint module header record stored separately from the `ModuleArena` payload array so

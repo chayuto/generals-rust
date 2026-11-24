@@ -14,11 +14,15 @@ pub mod special_power;
 pub mod upgrade;
 
 pub use module::{
-    AiUpdateFacet, BehaviorModule, BodyFacet, CollideFacet, ContainFacet, CreateFacet,
-    DamageFacet, DestroyFacet, DieFacet, HelperFacet, MaxHealthChangeType, ModuleData,
-    ModuleSnapshotHeader, ModuleType, PhysicsFacet, SlowDeathFacet, SpecialPowerFacet,
-    StealthFacet, StubModuleData, UpdateFacet, UpgradeFacet, INVALID_BODY_TIMESTAMP,
-    MAX_HEALTH_CHANGE_NAMES,
+    AiUpdateFacet, BehaviorModule, BodyFacet, BridgeFacet, BridgeScaffoldFacet, BridgeTowerFacet,
+    BridgeTowerType, CaveFacet, CollideFacet, CommandSourceType, ContainFacet,
+    CountermeasuresFacet, CreateFacet, DamageFacet, DestroyFacet, DieFacet, EvacDisposition,
+    ExitDoorType, ExitFacet, HelperFacet, LandMineFacet, MaxHealthChangeType, ModuleData,
+    ModuleSnapshotHeader, ModuleType, ObjectEnterExitType, OverchargeFacet, ParkingPlaceFacet,
+    ParkingPlaceInfo, PhysicsFacet, ProjectileFacet, RebuildHoleFacet, RunwayReservationType,
+    ScaffoldTargetMotion, SlowDeathFacet, SlowDeathPhaseType, SpawnBehaviorFacet,
+    SpecialPowerFacet, StealthFacet, StubModuleData, TransportPassengerFacet, UpdateFacet,
+    UpgradeFacet, INVALID_BODY_TIMESTAMP, MAX_HEALTH_CHANGE_NAMES,
 };
 pub use module_factory::{
     ModuleCreateFn, ModuleDataParseFn, ModuleDataStore, ModuleDescriptor, ModuleParseContext,

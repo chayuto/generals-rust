@@ -483,6 +483,9 @@ impl BehaviorModule for StubContainBehavior {
             count: self.count,
             max: 2,
             enclosing: FALSE,
+            stealth_units: 0,
+            garrisoned: FALSE,
+            rider_id: zh_common::types::ObjectId::INVALID,
         }
     }
 
