@@ -21,8 +21,9 @@ use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::{
-    BehaviorModule, BridgeTowerType, CommandSourceType, MaxHealthChangeType, ModuleData,
-    ModuleDataStore, ModuleRegistry, ModuleType, ParkingPlaceInfo,
+    AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
+    MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
+    ParkingPlaceInfo,
 };
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
@@ -34,6 +35,7 @@ use crate::object::weapon::WeaponStore;
 use crate::object::weapon_set::{
     WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType, WEAPONSLOT_COUNT,
 };
+use crate::pathfinder::pathfind_cell::CellType as PathfindCellType;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::rules::combat_types::{
     is_subdual_damage, ArmorSetFlags, ArmorSetType, DamageType, WeaponSetFlags, WeaponSetType,
@@ -54,15 +56,56 @@ use crate::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use crate::spatial::crate_system::CrateSystem;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
-use zh_common::math::div_safe_f32;
 use zh_common::math::geometry::GeometryInfo;
-use zh_common::math::Coord3D;
+use zh_common::math::{
+    div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D,
+};
 use zh_common::random_value::PrngState;
 use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, Relationship, TeamId, UnsignedInt, UnsignedShort,
     UpdateSleepTime, VeterancyLevel, XferVersion, FALSE, TRUE,
 };
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
+
+pub type FindPositionFlags = UnsignedInt;
+pub const FPF_NONE: UnsignedInt = 0;
+pub const FPF_IGNORE_WATER: UnsignedInt = 1 << 0;
+pub const FPF_WATER_ONLY: UnsignedInt = 1 << 1;
+pub const FPF_IGNORE_ALL_OBJECTS: UnsignedInt = 1 << 2;
+pub const FPF_IGNORE_ALLY_OR_NEUTRAL_UNITS: UnsignedInt = 1 << 3;
+pub const FPF_IGNORE_ENEMY_UNITS: UnsignedInt = 1 << 4;
+pub const FPF_IGNORE_ALLY_OR_NEUTRAL_STRUCTURES: UnsignedInt = 1 << 5;
+pub const FPF_IGNORE_ENEMY_STRUCTURES: UnsignedInt = 1 << 6;
+pub const FPF_USE_HIGHEST_LAYER: UnsignedInt = 1 << 7;
+pub const FPF_CLEAR_CELLS_ONLY: UnsignedInt = 1 << 8;
+
+/// Legal-position search parameters matching `PartitionManager.h` `FindPositionOptions`.
+#[derive(Debug, Clone, Copy)]
+pub struct FindPositionOptions {
+    pub flags: UnsignedInt,
+    pub min_radius: Real,
+    pub max_radius: Real,
+    pub start_angle: Option<Real>,
+    pub max_z_delta: Real,
+    pub ignore_object: Option<ObjectSlot>,
+    pub source_to_path_to_dest: Option<ObjectSlot>,
+    pub relationship_object: Option<ObjectSlot>,
+}
+
+impl Default for FindPositionOptions {
+    fn default() -> Self {
+        Self {
+            flags: FPF_NONE,
+            min_radius: 0.0,
+            max_radius: 0.0,
+            start_angle: None,
+            max_z_delta: 1e10,
+            ignore_object: None,
+            source_to_path_to_dest: None,
+            relationship_object: None,
+        }
+    }
+}
 
 /// Per-player or per-cave shared tunnel containment tracker (`TunnelTracker.h` / `TunnelTracker.cpp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,6 +615,27 @@ pub struct ObjectRecord {
     pub physics_extra_bounciness: Real,
     pub physics_extra_friction: Real,
     pub physics_last_collidee: ObjectId,
+    pub physics_velocity: Coord3D,
+    pub physics_mass: Real,
+    pub physics_center_of_mass_offset: Real,
+    pub physics_pitch_rate: Real,
+    pub physics_roll_rate: Real,
+    pub physics_yaw_rate: Real,
+    pub physics_is_in_free_fall: Bool,
+    pub physics_stick_to_ground: Bool,
+    pub physics_shock_max_yaw: Real,
+    pub physics_shock_max_pitch: Real,
+    pub physics_shock_max_roll: Real,
+    pub ai_attitude: AttitudeType,
+    pub ai_free_to_exit: Bool,
+    pub ai_current_victim: Option<ObjectSlot>,
+    pub ai_current_victim_pos: Option<Coord3D>,
+    pub ai_has_locomotor: Bool,
+    pub loco_max_lift: Real,
+    pub loco_max_turn_rate: Real,
+    pub loco_ultra_accurate: Bool,
+    pub loco_close_enough_dist: Real,
+    pub loco_close_enough_dist_3d: Bool,
 }
 
 impl ObjectRecord {
@@ -647,6 +711,27 @@ impl ObjectRecord {
             physics_extra_bounciness: 0.0,
             physics_extra_friction: 0.0,
             physics_last_collidee: ObjectId::INVALID,
+            physics_velocity: Coord3D::default(),
+            physics_mass: 1.0,
+            physics_center_of_mass_offset: 0.0,
+            physics_pitch_rate: 0.0,
+            physics_roll_rate: 0.0,
+            physics_yaw_rate: 0.0,
+            physics_is_in_free_fall: FALSE,
+            physics_stick_to_ground: FALSE,
+            physics_shock_max_yaw: 0.05,
+            physics_shock_max_pitch: 0.025,
+            physics_shock_max_roll: 0.025,
+            ai_attitude: AttitudeType::Normal,
+            ai_free_to_exit: TRUE,
+            ai_current_victim: None,
+            ai_current_victim_pos: None,
+            ai_has_locomotor: FALSE,
+            loco_max_lift: 1e10,
+            loco_max_turn_rate: 1e10,
+            loco_ultra_accurate: FALSE,
+            loco_close_enough_dist: 1.0,
+            loco_close_enough_dist_3d: FALSE,
         }
     }
 
@@ -907,6 +992,34 @@ pub trait SimView {
     fn slow_death_scale(&self) -> Real;
     fn hulk_max_lifetime_override(&self) -> Int;
     fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId;
+    fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool;
+    fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool;
+    fn contain_items(&self, owner: ObjectSlot) -> Vec<ObjectId>;
+    fn contain_is_passenger_allowed_to_fire(&self, owner: ObjectSlot, id: ObjectId) -> Bool;
+    fn exit_use_spawn_rally_point(&self, owner: ObjectSlot) -> Bool;
+    fn has_physics(&self, owner: ObjectSlot) -> Bool;
+    fn physics_velocity(&self, owner: ObjectSlot) -> Coord3D;
+    fn physics_mass(&self, owner: ObjectSlot) -> Real;
+    fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real;
+    fn has_ai(&self, owner: ObjectSlot) -> Bool;
+    fn ai_free_to_exit(&self, owner: ObjectSlot) -> Bool;
+    fn ai_current_victim(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
+    fn ai_current_victim_pos(&self, owner: ObjectSlot) -> Option<Coord3D>;
+    fn ai_has_cur_locomotor(&self, owner: ObjectSlot) -> Bool;
+    fn valid_movement_terrain(&self, layer: PathfindLayerEnum, rider: ObjectSlot, pos: &Coord3D) -> Bool;
+    fn pathfind_cell_type(
+        &self,
+        layer: PathfindLayerEnum,
+        cell_x: Int,
+        cell_y: Int,
+    ) -> PathfindCellType;
+    fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum;
+    fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real;
+    fn get_highest_layer_for_destination(
+        &self,
+        pos: &Coord3D,
+        only_healthy_bridges: Bool,
+    ) -> PathfindLayerEnum;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -1252,6 +1365,59 @@ pub trait SimApi: SimView {
         container: ObjectSlot,
         cmd_source: CommandSourceType,
     );
+    fn contain_process_damage_to_contained(&mut self, container: ObjectSlot, percent_damage: Real);
+    fn exit_object_via_door(&mut self, container: ObjectSlot, obj: ObjectSlot, door: ExitDoorType);
+    fn set_object_team(&mut self, owner: ObjectSlot, new_team: TeamId);
+    fn set_physics_allow_to_fall(&mut self, owner: ObjectSlot, allow: Bool);
+    fn physics_clear_acceleration(&mut self, owner: ObjectSlot);
+    fn physics_scrub_velocity_2d(&mut self, owner: ObjectSlot, desired_velocity: Real);
+    fn physics_apply_force(&mut self, owner: ObjectSlot, force: &Coord3D);
+    fn physics_apply_shock(&mut self, owner: ObjectSlot, force: &Coord3D);
+    fn physics_apply_motive_force(&mut self, owner: ObjectSlot, force: &Coord3D);
+    fn physics_apply_random_rotation(&mut self, owner: ObjectSlot);
+    fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real);
+    fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real);
+    fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool);
+    fn ai_idle(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_hunt(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_move_to_position(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        cmd_source: CommandSourceType,
+    );
+    fn ai_follow_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    );
+    fn ai_hack_internet(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_set_attitude(&mut self, owner: ObjectSlot, attitude: AttitudeType);
+    fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot);
+    fn set_locomotor_max_lift(&mut self, owner: ObjectSlot, max_lift: Real);
+    fn set_locomotor_max_turn_rate(&mut self, owner: ObjectSlot, max_turn_rate: Real);
+    fn set_locomotor_ultra_accurate(&mut self, owner: ObjectSlot, ultra: Bool);
+    fn set_locomotor_close_enough_dist(&mut self, owner: ObjectSlot, dist: Real);
+    fn set_locomotor_close_enough_dist_3d(&mut self, owner: ObjectSlot, is_3d: Bool);
+    fn find_position_around(
+        &mut self,
+        center: &Coord3D,
+        options: &FindPositionOptions,
+    ) -> Option<Coord3D>;
+    fn pathfinder_add_object(&mut self, owner: ObjectSlot);
+    fn pathfinder_adjust_to_possible_destination(
+        &mut self,
+        owner: ObjectSlot,
+        dest: &mut Coord3D,
+    ) -> Bool;
+    fn pathfinder_update_goal(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        layer: PathfindLayerEnum,
+    );
     fn client(&mut self) -> &mut dyn ClientSink;
 }
 
@@ -1327,6 +1493,13 @@ pub struct SimWorld {
     pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
     pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
+    pub ai_commands: Vec<(ObjectId, String)>,
+    pub physics_events: Vec<(ObjectId, String)>,
+    pub pathfind_map_objects: BTreeSet<ObjectId>,
+    pub pathfind_goals: BTreeMap<ObjectId, (Coord3D, PathfindLayerEnum)>,
+    pub blocked_pathfind_cells: BTreeMap<(Int, Int, Int), PathfindCellType>,
+    pub valid_movement_terrain_override: Option<Bool>,
+    pub map_extent_hi: Coord3D,
 }
 
 impl Default for SimWorld {
@@ -1408,6 +1581,13 @@ impl SimWorld {
             stealth_detected_events: Vec::new(),
             slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
+            ai_commands: Vec::new(),
+            physics_events: Vec::new(),
+            pathfind_map_objects: BTreeSet::new(),
+            pathfind_goals: BTreeMap::new(),
+            blocked_pathfind_cells: BTreeMap::new(),
+            valid_movement_terrain_override: None,
+            map_extent_hi: Coord3D::new(1000.0, 1000.0, 100.0),
         }
     }
 
@@ -2831,6 +3011,338 @@ impl SimView for SimContext {
             .objects
             .get(owner)
             .map_or(ObjectId::INVALID, |o| o.physics_last_collidee)
+    }
+
+    fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        self.world
+            .modules
+            .payload(cs)
+            .and_then(|p| p.as_contain())
+            .map_or(FALSE, |c| c.is_special_zero_slot_container())
+    }
+
+    fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        self.world
+            .modules
+            .payload(cs)
+            .and_then(|p| p.as_contain())
+            .map_or(FALSE, |c| c.is_special_overlord_style_container())
+    }
+
+    fn contain_items(&self, owner: ObjectSlot) -> Vec<ObjectId> {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return Vec::new();
+        };
+        self.world
+            .modules
+            .payload(cs)
+            .and_then(|p| p.as_contain())
+            .map_or_else(Vec::new, |c| c.get_contained_items().to_vec())
+    }
+
+    fn contain_is_passenger_allowed_to_fire(&self, owner: ObjectSlot, id: ObjectId) -> Bool {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
+            let ctx = self.world.modules.meta(cs).context(cs);
+            return c.is_passenger_allowed_to_fire(self, ctx, id);
+        }
+        FALSE
+    }
+
+    fn exit_use_spawn_rally_point(&self, owner: ObjectSlot) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return FALSE;
+        };
+        let Some(es) = obj.exit_slot.or(obj.contain_slot) else {
+            return FALSE;
+        };
+        self.world
+            .modules
+            .payload(es)
+            .and_then(|p| p.as_exit())
+            .map_or(FALSE, |e| e.use_spawn_rally_point())
+    }
+
+    fn has_physics(&self, owner: ObjectSlot) -> Bool {
+        Bool::from(self.world.objects.get(owner).is_some_and(|o| o.physics_slot.is_some()))
+    }
+
+    fn physics_velocity(&self, owner: ObjectSlot) -> Coord3D {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return Coord3D::default();
+        };
+        if let Some(ps) = obj.physics_slot {
+            if let ModuleSidecar::Physics { velocity, .. } = self.world.modules.sidecar(ps) {
+                return velocity;
+            }
+            if let Some(p) = self.world.modules.payload(ps).and_then(|m| m.as_physics()) {
+                let v = p.velocity();
+                if v != Coord3D::default() {
+                    return v;
+                }
+            }
+        }
+        obj.physics_velocity
+    }
+
+    fn physics_mass(&self, owner: ObjectSlot) -> Real {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return 1.0;
+        };
+        if let Some(ps) = obj.physics_slot {
+            if let ModuleSidecar::Physics { mass, .. } = self.world.modules.sidecar(ps) {
+                return mass;
+            }
+            if let Some(p) = self.world.modules.payload(ps).and_then(|m| m.as_physics()) {
+                let m = p.get_mass();
+                if m != 1.0 {
+                    return m;
+                }
+            }
+        }
+        obj.physics_mass
+    }
+
+    fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return 0.0;
+        };
+        if let Some(ps) = obj.physics_slot {
+            if let Some(p) = self.world.modules.payload(ps).and_then(|m| m.as_physics()) {
+                let off = p.get_center_of_mass_offset();
+                if off != 0.0 {
+                    return off;
+                }
+            }
+        }
+        obj.physics_center_of_mass_offset
+    }
+
+    fn has_ai(&self, owner: ObjectSlot) -> Bool {
+        Bool::from(self.world.objects.get(owner).is_some_and(|o| o.ai_slot.is_some()))
+    }
+
+    fn ai_free_to_exit(&self, owner: ObjectSlot) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return TRUE;
+        };
+        if obj.ai_free_to_exit == FALSE {
+            return FALSE;
+        }
+        if let Some(ai_ms) = obj.ai_slot {
+            if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|m| m.as_ai()) {
+                let ctx = self.world.modules.meta(ai_ms).context(ai_ms);
+                return ai.is_free_to_exit(self, ctx);
+            }
+        }
+        TRUE
+    }
+
+    fn ai_current_victim(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
+        let obj = self.world.objects.get(owner)?;
+        if let Some(ai_ms) = obj.ai_slot {
+            if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|m| m.as_ai()) {
+                if let Some(v) = ai.get_current_victim() {
+                    return Some(v);
+                }
+            }
+        }
+        obj.ai_current_victim
+    }
+
+    fn ai_current_victim_pos(&self, owner: ObjectSlot) -> Option<Coord3D> {
+        let obj = self.world.objects.get(owner)?;
+        if let Some(ai_ms) = obj.ai_slot {
+            if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|m| m.as_ai()) {
+                if let Some(pos) = ai.get_current_victim_pos() {
+                    return Some(pos);
+                }
+            }
+        }
+        obj.ai_current_victim_pos
+    }
+
+    fn ai_has_cur_locomotor(&self, owner: ObjectSlot) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return FALSE;
+        };
+        if let Some(ai_ms) = obj.ai_slot {
+            if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|m| m.as_ai()) {
+                if ai.has_cur_locomotor() != FALSE {
+                    return TRUE;
+                }
+            }
+        }
+        obj.ai_has_locomotor
+    }
+
+    fn valid_movement_terrain(&self, layer: PathfindLayerEnum, _rider: ObjectSlot, pos: &Coord3D) -> Bool {
+        if let Some(ov) = self.world.valid_movement_terrain_override {
+            return ov;
+        }
+        if pos.x < 0.0
+            || pos.y < 0.0
+            || pos.x > self.world.map_extent_hi.x
+            || pos.y > self.world.map_extent_hi.y
+        {
+            return FALSE;
+        }
+        let cell_x = real_to_int_floor(pos.x / 10.0_f32);
+        let cell_y = real_to_int_floor(pos.y / 10.0_f32);
+        Bool::from(self.pathfind_cell_type(layer, cell_x, cell_y) != PathfindCellType::Impassable)
+    }
+
+    fn pathfind_cell_type(
+        &self,
+        layer: PathfindLayerEnum,
+        cell_x: Int,
+        cell_y: Int,
+    ) -> PathfindCellType {
+        if let Some(&ct) = self
+            .world
+            .blocked_pathfind_cells
+            .get(&(layer as Int, cell_x, cell_y))
+        {
+            return ct;
+        }
+        let max_cx = real_to_int_floor(self.world.map_extent_hi.x / 10.0_f32);
+        let max_cy = real_to_int_floor(self.world.map_extent_hi.y / 10.0_f32);
+        if cell_x < 0 || cell_y < 0 || cell_x >= max_cx || cell_y >= max_cy {
+            PathfindCellType::Impassable
+        } else {
+            PathfindCellType::Clear
+        }
+    }
+
+    fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum {
+        self.terrain.get_layer_for_destination(pos)
+    }
+
+    fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
+        self.terrain.get_layer_height(x, y, layer, None, TRUE)
+    }
+
+    fn get_highest_layer_for_destination(
+        &self,
+        pos: &Coord3D,
+        only_healthy_bridges: Bool,
+    ) -> PathfindLayerEnum {
+        self.terrain
+            .get_highest_layer_for_destination(pos, only_healthy_bridges)
+    }
+}
+
+impl SimContext {
+    fn try_find_position(
+        &self,
+        center: &Coord3D,
+        dist: Real,
+        angle: Real,
+        options: &FindPositionOptions,
+    ) -> Option<Coord3D> {
+        let mut pos = Coord3D::new(
+            dist * gm_cosf(angle) + center.x,
+            dist * gm_sinf(angle) + center.y,
+            0.0,
+        );
+        let mut layer = PathfindLayerEnum::Ground;
+        if (options.flags & FPF_USE_HIGHEST_LAYER) != 0 {
+            pos.z = 99999.0;
+            layer = self.terrain.get_highest_layer_for_destination(&pos, FALSE);
+            pos.z = self.terrain.get_layer_height(pos.x, pos.y, layer, None, TRUE);
+            if layer != PathfindLayerEnum::Ground {
+                pos.z += 1.0;
+            }
+        } else {
+            pos.z = self.terrain.get_ground_height(pos.x, pos.y, None);
+        }
+
+        if zh_common::math::gm_fabsf(pos.z - center.z) > options.max_z_delta {
+            return None;
+        }
+        let cell_x = real_to_int_floor(pos.x / 10.0_f32);
+        let cell_y = real_to_int_floor(pos.y / 10.0_f32);
+        let ctype = self.pathfind_cell_type(layer, cell_x, cell_y);
+        if ctype == PathfindCellType::Impassable {
+            return None;
+        }
+        if (options.flags & FPF_CLEAR_CELLS_ONLY) != 0 && ctype != PathfindCellType::Clear {
+            return None;
+        }
+
+        if (options.flags & FPF_IGNORE_WATER) == 0 {
+            let underwater = self.terrain.is_underwater(pos.x, pos.y, None, None) != FALSE;
+            if (options.flags & FPF_WATER_ONLY) != 0 {
+                if !underwater || layer != PathfindLayerEnum::Ground {
+                    return None;
+                }
+            } else if underwater && layer == PathfindLayerEnum::Ground {
+                return None;
+            }
+        }
+
+        if (options.flags & FPF_IGNORE_ALL_OBJECTS) == 0 {
+            for other in self.world_object_slots() {
+                if Some(other) == options.ignore_object || Some(other) == options.source_to_path_to_dest {
+                    continue;
+                }
+                let Some(o) = self.world.objects.get(other) else {
+                    continue;
+                };
+                if o.is_destroyed() || o.contained_by.is_some() {
+                    continue;
+                }
+                let opos = o.thing.get_position();
+                let radius = o.geometry.get_bounding_circle_radius() + 5.0_f32;
+                let dx = opos.x - pos.x;
+                let dy = opos.y - pos.y;
+                if dx * dx + dy * dy > radius * radius {
+                    continue;
+                }
+                if let Some(rel_slot) = options.relationship_object {
+                    let rel = self.player_relationship(rel_slot, other);
+                    let is_unit = o
+                        .thing
+                        .is_kind_of(&self.rules.thing_factory, KindOfType::Infantry)
+                        != FALSE
+                        || o
+                            .thing
+                            .is_kind_of(&self.rules.thing_factory, KindOfType::Vehicle)
+                            != FALSE;
+                    let is_struct = o
+                        .thing
+                        .is_kind_of(&self.rules.thing_factory, KindOfType::Structure)
+                        != FALSE;
+                    if rel != Relationship::Enemies {
+                        if (options.flags & FPF_IGNORE_ALLY_OR_NEUTRAL_UNITS) != 0 && is_unit {
+                            continue;
+                        }
+                        if (options.flags & FPF_IGNORE_ALLY_OR_NEUTRAL_STRUCTURES) != 0 && is_struct
+                        {
+                            continue;
+                        }
+                    } else {
+                        if (options.flags & FPF_IGNORE_ENEMY_UNITS) != 0 && is_unit {
+                            continue;
+                        }
+                        if (options.flags & FPF_IGNORE_ENEMY_STRUCTURES) != 0 && is_struct {
+                            continue;
+                        }
+                    }
+                }
+                return None;
+            }
+        }
+
+        Some(pos)
     }
 }
 
@@ -5042,6 +5554,630 @@ impl SimApi for SimContext {
         }
     }
 
+    fn contain_process_damage_to_contained(&mut self, container: ObjectSlot, percent_damage: Real) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(cs) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(cs, DeferredSelfOp::ContainProcessDamage(percent_damage));
+            return;
+        }
+        let _ = self.dispatch_module(cs, |m, sim, ctx| {
+            if let Some(c) = m.as_contain_mut() {
+                c.process_damage_to_contained(sim, ctx, percent_damage);
+            }
+        });
+    }
+
+    fn exit_object_via_door(&mut self, container: ObjectSlot, obj: ObjectSlot, door: ExitDoorType) {
+        let Some(es) = self
+            .world
+            .objects
+            .get(container)
+            .and_then(|o| o.exit_slot.or(o.contain_slot))
+        else {
+            return;
+        };
+        if !self.world.modules.is_executing(es) {
+            let _ = self.dispatch_module(es, |m, sim, ctx| {
+                if let Some(e) = m.as_exit_mut() {
+                    e.exit_object_via_door(sim, ctx, obj, door);
+                }
+            });
+        }
+    }
+
+    fn set_object_team(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.team_id = new_team;
+        }
+    }
+
+    fn set_physics_allow_to_fall(&mut self, owner: ObjectSlot, allow: Bool) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.physics_allow_to_fall = allow;
+        let Some(ps) = obj.physics_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.set_allow_to_fall(allow);
+                }
+            });
+        }
+    }
+
+    fn physics_clear_acceleration(&mut self, owner: ObjectSlot) {
+        let Some((obj_id, ps)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.physics_slot.map(|p| (o.id, p)))
+        else {
+            return;
+        };
+        self.world
+            .physics_events
+            .push((obj_id, "clearAcceleration".to_owned()));
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.clear_acceleration();
+                }
+            });
+        }
+    }
+
+    fn physics_scrub_velocity_2d(&mut self, owner: ObjectSlot, desired_velocity: Real) {
+        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
+            let ps = o.physics_slot?;
+            if desired_velocity < 0.001_f32 {
+                o.physics_velocity.x = 0.0;
+                o.physics_velocity.y = 0.0;
+            } else {
+                let cur_vel = gm_sqrtf(
+                    o.physics_velocity.x * o.physics_velocity.x
+                        + o.physics_velocity.y * o.physics_velocity.y,
+                );
+                if desired_velocity <= cur_vel && cur_vel > 0.0 {
+                    let scale = desired_velocity / cur_vel;
+                    o.physics_velocity.x *= scale;
+                    o.physics_velocity.y *= scale;
+                }
+            }
+            Some((o.id, ps))
+        }) else {
+            return;
+        };
+        self.world
+            .physics_events
+            .push((obj_id, "scrubVelocity2D".to_owned()));
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.scrub_velocity_2d(desired_velocity);
+                }
+            });
+        }
+    }
+
+    fn physics_apply_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
+        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
+            let ps = o.physics_slot?;
+            let inv_mass = if o.physics_mass > 0.0 {
+                1.0 / o.physics_mass
+            } else {
+                0.0
+            };
+            o.physics_velocity.x += force.x * inv_mass;
+            o.physics_velocity.y += force.y * inv_mass;
+            o.physics_velocity.z += force.z * inv_mass;
+            Some((o.id, ps))
+        }) else {
+            return;
+        };
+        self.world
+            .physics_events
+            .push((obj_id, "applyForce".to_owned()));
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, sim, ctx| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.apply_force(sim, ctx, force);
+                }
+            });
+        }
+    }
+
+    fn physics_apply_shock(&mut self, owner: ObjectSlot, force: &Coord3D) {
+        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
+            let ps = o.physics_slot?;
+            let inv_mass = if o.physics_mass > 0.0 {
+                1.0 / o.physics_mass
+            } else {
+                0.0
+            };
+            o.physics_velocity.x += force.x * inv_mass;
+            o.physics_velocity.y += force.y * inv_mass;
+            o.physics_velocity.z += force.z * inv_mass;
+            Some((o.id, ps))
+        }) else {
+            return;
+        };
+        self.world
+            .physics_events
+            .push((obj_id, "applyShock".to_owned()));
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, sim, ctx| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.apply_shock(sim, ctx, force);
+                }
+            });
+        }
+    }
+
+    fn physics_apply_motive_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
+        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
+            let ps = o.physics_slot?;
+            let inv_mass = if o.physics_mass > 0.0 {
+                1.0 / o.physics_mass
+            } else {
+                0.0
+            };
+            o.physics_velocity.x += force.x * inv_mass;
+            o.physics_velocity.y += force.y * inv_mass;
+            o.physics_velocity.z += force.z * inv_mass;
+            Some((o.id, ps))
+        }) else {
+            return;
+        };
+        self.world
+            .physics_events
+            .push((obj_id, "applyMotiveForce".to_owned()));
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, sim, ctx| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.apply_motive_force(sim, ctx, force);
+                }
+            });
+        }
+    }
+
+    fn physics_apply_random_rotation(&mut self, owner: ObjectSlot) {
+        let Some((obj_id, ps_opt, stick_flag, sy, sp, sr)) = self.world.objects.get(owner).map(|o| {
+            (
+                o.id,
+                o.physics_slot,
+                o.physics_stick_to_ground,
+                o.physics_shock_max_yaw,
+                o.physics_shock_max_pitch,
+                o.physics_shock_max_roll,
+            )
+        }) else {
+            return;
+        };
+        let Some(ps) = ps_opt else {
+            return;
+        };
+        let mod_stick = self
+            .world
+            .modules
+            .payload(ps)
+            .and_then(|m| m.as_physics())
+            .map_or(FALSE, |p| p.is_stick_to_ground());
+        if stick_flag != FALSE || mod_stick != FALSE {
+            return;
+        }
+        let handled_by_mod = if !self.world.modules.is_executing(ps) {
+            self.dispatch_module(ps, |m, sim, ctx| {
+                m.as_physics_mut()
+                    .map_or(FALSE, |p| p.apply_random_rotation(sim, ctx))
+            })
+            .unwrap_or(FALSE)
+        } else {
+            FALSE
+        };
+        if handled_by_mod == FALSE {
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.physics_allow_bouncing = TRUE;
+            }
+            if !self.world.modules.is_executing(ps) {
+                let _ = self.dispatch_module(ps, |m, _, _| {
+                    if let Some(p) = m.as_physics_mut() {
+                        p.set_allow_bouncing(TRUE);
+                    }
+                });
+            }
+            let ry = self.rng_logic_real(-1.0, 1.0);
+            let rp = self.rng_logic_real(-1.0, 1.0);
+            let rr = self.rng_logic_real(-1.0, 1.0);
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.physics_yaw_rate += sy * ry;
+                obj.physics_pitch_rate += sp * rp;
+                obj.physics_roll_rate += sr * rr;
+            }
+        }
+        self.world
+            .physics_events
+            .push((obj_id, "applyRandomRotation".to_owned()));
+    }
+
+    fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.physics_roll_rate = rate;
+        let Some(ps) = obj.physics_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.set_roll_rate(rate);
+                }
+            });
+        }
+    }
+
+    fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.physics_pitch_rate = rate;
+        let Some(ps) = obj.physics_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.set_pitch_rate(rate);
+                }
+            });
+        }
+    }
+
+    fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.physics_is_in_free_fall = in_free_fall;
+        let Some(ps) = obj.physics_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ps) {
+            let _ = self.dispatch_module(ps, |m, _, _| {
+                if let Some(p) = m.as_physics_mut() {
+                    p.set_is_in_free_fall(in_free_fall);
+                }
+            });
+        }
+    }
+
+    fn ai_idle(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world.ai_commands.push((obj_id, "aiIdle".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.ai_idle(sim, ctx, cmd_source);
+                }
+            });
+        }
+    }
+
+    fn ai_hunt(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world.ai_commands.push((obj_id, "aiHunt".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.ai_hunt(sim, ctx, cmd_source);
+                }
+            });
+        }
+    }
+
+    fn ai_move_to_position(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        cmd_source: CommandSourceType,
+    ) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world
+            .ai_commands
+            .push((obj_id, "aiMoveToPosition".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.ai_move_to_position(sim, ctx, pos, cmd_source);
+                }
+            });
+        }
+    }
+
+    fn ai_follow_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    ) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world
+            .ai_commands
+            .push((obj_id, "aiFollowPath".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.ai_follow_path(sim, ctx, path, ignore_obj, cmd_source);
+                }
+            });
+        }
+    }
+
+    fn ai_hack_internet(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world
+            .ai_commands
+            .push((obj_id, "aiHackInternet".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.ai_hack_internet(sim, ctx, cmd_source);
+                }
+            });
+        }
+    }
+
+    fn ai_set_attitude(&mut self, owner: ObjectSlot, attitude: AttitudeType) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.ai_attitude = attitude;
+        let obj_id = obj.id;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        self.world
+            .ai_commands
+            .push((obj_id, "setAttitude".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_attitude(attitude);
+                }
+            });
+        }
+    }
+
+    fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world
+            .ai_commands
+            .push((obj_id, "wakeUpAndAttemptToTarget".to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.wake_up_and_attempt_to_target(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn set_locomotor_max_lift(&mut self, owner: ObjectSlot, max_lift: Real) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.loco_max_lift = max_lift;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_max_lift(max_lift);
+                }
+            });
+        }
+    }
+
+    fn set_locomotor_max_turn_rate(&mut self, owner: ObjectSlot, max_turn_rate: Real) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.loco_max_turn_rate = max_turn_rate;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_max_turn_rate(max_turn_rate);
+                }
+            });
+        }
+    }
+
+    fn set_locomotor_ultra_accurate(&mut self, owner: ObjectSlot, ultra: Bool) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.loco_ultra_accurate = ultra;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_ultra_accurate(ultra);
+                }
+            });
+        }
+    }
+
+    fn set_locomotor_close_enough_dist(&mut self, owner: ObjectSlot, dist: Real) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.loco_close_enough_dist = dist;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_close_enough_dist(dist);
+                }
+            });
+        }
+    }
+
+    fn set_locomotor_close_enough_dist_3d(&mut self, owner: ObjectSlot, is_3d: Bool) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.loco_close_enough_dist_3d = is_3d;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_close_enough_dist_3d(is_3d);
+                }
+            });
+        }
+    }
+
+    fn find_position_around(
+        &mut self,
+        center: &Coord3D,
+        options: &FindPositionOptions,
+    ) -> Option<Coord3D> {
+        let extent_hi = self.world.map_extent_hi;
+        if center.x < 0.0 || center.x > extent_hi.x || center.y < 0.0 || center.y > extent_hi.y {
+            return Some(*center);
+        }
+        let two_pi = zh_common::math::TWO_PI;
+        let start_angle = match options.start_angle {
+            Some(a) => a,
+            None => self.rng_logic_real(0.0, two_pi),
+        };
+        let ring_spacing = 5.0_f32;
+        let mut dist = options.min_radius;
+        while dist <= options.max_radius {
+            let angle_spacing = if dist == options.min_radius {
+                two_pi
+            } else {
+                (ring_spacing / (dist + 1.0_f32)) * (two_pi / 6.0_f32)
+            };
+            let samples = real_to_int_ceil((two_pi / angle_spacing) / 2.0_f32);
+            for i in 0..samples {
+                let angle_pos = start_angle + angle_spacing * (i as Real);
+                if let Some(found) = self.try_find_position(center, dist, angle_pos, options) {
+                    return Some(found);
+                }
+                if i != 0 {
+                    let angle_neg = start_angle - angle_spacing * (i as Real);
+                    if let Some(found) = self.try_find_position(center, dist, angle_neg, options) {
+                        return Some(found);
+                    }
+                }
+            }
+            dist += ring_spacing;
+        }
+        None
+    }
+
+    fn pathfinder_add_object(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.pathfind_map_objects.insert(id);
+        }
+    }
+
+    fn pathfinder_adjust_to_possible_destination(
+        &mut self,
+        owner: ObjectSlot,
+        dest: &mut Coord3D,
+    ) -> Bool {
+        let layer = self.get_layer_for_destination(dest);
+        if self.valid_movement_terrain(layer, owner, dest) != FALSE {
+            return TRUE;
+        }
+        let opts = FindPositionOptions {
+            flags: FPF_IGNORE_ALL_OBJECTS,
+            min_radius: 0.0,
+            max_radius: 40.0,
+            start_angle: Some(0.0),
+            ..FindPositionOptions::default()
+        };
+        if let Some(found) = self.find_position_around(dest, &opts) {
+            *dest = found;
+            TRUE
+        } else {
+            FALSE
+        }
+    }
+
+    fn pathfinder_update_goal(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        layer: PathfindLayerEnum,
+    ) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.pathfind_goals.insert(id, (*pos, layer));
+        }
+    }
+
     fn client(&mut self) -> &mut dyn ClientSink {
         self.client.as_mut()
     }
@@ -5349,6 +6485,97 @@ impl SimView for MockSimApi {
 
     fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId {
         self.ctx.physics_last_collidee(owner)
+    }
+
+    fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.contain_is_special_zero_slot(owner)
+    }
+
+    fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.contain_is_special_overlord_style(owner)
+    }
+
+    fn contain_items(&self, owner: ObjectSlot) -> Vec<ObjectId> {
+        self.ctx.contain_items(owner)
+    }
+
+    fn contain_is_passenger_allowed_to_fire(&self, owner: ObjectSlot, id: ObjectId) -> Bool {
+        self.ctx.contain_is_passenger_allowed_to_fire(owner, id)
+    }
+
+    fn exit_use_spawn_rally_point(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.exit_use_spawn_rally_point(owner)
+    }
+
+    fn has_physics(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.has_physics(owner)
+    }
+
+    fn physics_velocity(&self, owner: ObjectSlot) -> Coord3D {
+        self.ctx.physics_velocity(owner)
+    }
+
+    fn physics_mass(&self, owner: ObjectSlot) -> Real {
+        self.ctx.physics_mass(owner)
+    }
+
+    fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real {
+        self.ctx.physics_center_of_mass_offset(owner)
+    }
+
+    fn has_ai(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.has_ai(owner)
+    }
+
+    fn ai_free_to_exit(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.ai_free_to_exit(owner)
+    }
+
+    fn ai_current_victim(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
+        self.ctx.ai_current_victim(owner)
+    }
+
+    fn ai_current_victim_pos(&self, owner: ObjectSlot) -> Option<Coord3D> {
+        self.ctx.ai_current_victim_pos(owner)
+    }
+
+    fn ai_has_cur_locomotor(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.ai_has_cur_locomotor(owner)
+    }
+
+    fn valid_movement_terrain(
+        &self,
+        layer: PathfindLayerEnum,
+        rider: ObjectSlot,
+        pos: &Coord3D,
+    ) -> Bool {
+        self.ctx.valid_movement_terrain(layer, rider, pos)
+    }
+
+    fn pathfind_cell_type(
+        &self,
+        layer: PathfindLayerEnum,
+        cell_x: Int,
+        cell_y: Int,
+    ) -> PathfindCellType {
+        self.ctx.pathfind_cell_type(layer, cell_x, cell_y)
+    }
+
+    fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum {
+        self.ctx.get_layer_for_destination(pos)
+    }
+
+    fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
+        self.ctx.get_layer_height(x, y, layer)
+    }
+
+    fn get_highest_layer_for_destination(
+        &self,
+        pos: &Coord3D,
+        only_healthy_bridges: Bool,
+    ) -> PathfindLayerEnum {
+        self.ctx
+            .get_highest_layer_for_destination(pos, only_healthy_bridges)
     }
 }
 
@@ -6151,6 +7378,150 @@ impl SimApi for MockSimApi {
         cmd_source: CommandSourceType,
     ) {
         self.ctx.order_ai_exit(rider, container, cmd_source);
+    }
+
+    fn contain_process_damage_to_contained(&mut self, container: ObjectSlot, percent_damage: Real) {
+        self.ctx
+            .contain_process_damage_to_contained(container, percent_damage);
+    }
+
+    fn exit_object_via_door(&mut self, container: ObjectSlot, obj: ObjectSlot, door: ExitDoorType) {
+        self.ctx.exit_object_via_door(container, obj, door);
+    }
+
+    fn set_object_team(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        self.ctx.set_object_team(owner, new_team);
+    }
+
+    fn set_physics_allow_to_fall(&mut self, owner: ObjectSlot, allow: Bool) {
+        self.ctx.set_physics_allow_to_fall(owner, allow);
+    }
+
+    fn physics_clear_acceleration(&mut self, owner: ObjectSlot) {
+        self.ctx.physics_clear_acceleration(owner);
+    }
+
+    fn physics_scrub_velocity_2d(&mut self, owner: ObjectSlot, desired_velocity: Real) {
+        self.ctx
+            .physics_scrub_velocity_2d(owner, desired_velocity);
+    }
+
+    fn physics_apply_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
+        self.ctx.physics_apply_force(owner, force);
+    }
+
+    fn physics_apply_shock(&mut self, owner: ObjectSlot, force: &Coord3D) {
+        self.ctx.physics_apply_shock(owner, force);
+    }
+
+    fn physics_apply_motive_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
+        self.ctx.physics_apply_motive_force(owner, force);
+    }
+
+    fn physics_apply_random_rotation(&mut self, owner: ObjectSlot) {
+        self.ctx.physics_apply_random_rotation(owner);
+    }
+
+    fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        self.ctx.physics_set_roll_rate(owner, rate);
+    }
+
+    fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        self.ctx.physics_set_pitch_rate(owner, rate);
+    }
+
+    fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool) {
+        self.ctx.physics_set_is_in_free_fall(owner, in_free_fall);
+    }
+
+    fn ai_idle(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_idle(owner, cmd_source);
+    }
+
+    fn ai_hunt(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_hunt(owner, cmd_source);
+    }
+
+    fn ai_move_to_position(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        cmd_source: CommandSourceType,
+    ) {
+        self.ctx.ai_move_to_position(owner, pos, cmd_source);
+    }
+
+    fn ai_follow_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    ) {
+        self.ctx
+            .ai_follow_path(owner, path, ignore_obj, cmd_source);
+    }
+
+    fn ai_hack_internet(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_hack_internet(owner, cmd_source);
+    }
+
+    fn ai_set_attitude(&mut self, owner: ObjectSlot, attitude: AttitudeType) {
+        self.ctx.ai_set_attitude(owner, attitude);
+    }
+
+    fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot) {
+        self.ctx.ai_wake_up_and_attempt_to_target(owner);
+    }
+
+    fn set_locomotor_max_lift(&mut self, owner: ObjectSlot, max_lift: Real) {
+        self.ctx.set_locomotor_max_lift(owner, max_lift);
+    }
+
+    fn set_locomotor_max_turn_rate(&mut self, owner: ObjectSlot, max_turn_rate: Real) {
+        self.ctx.set_locomotor_max_turn_rate(owner, max_turn_rate);
+    }
+
+    fn set_locomotor_ultra_accurate(&mut self, owner: ObjectSlot, ultra: Bool) {
+        self.ctx.set_locomotor_ultra_accurate(owner, ultra);
+    }
+
+    fn set_locomotor_close_enough_dist(&mut self, owner: ObjectSlot, dist: Real) {
+        self.ctx.set_locomotor_close_enough_dist(owner, dist);
+    }
+
+    fn set_locomotor_close_enough_dist_3d(&mut self, owner: ObjectSlot, is_3d: Bool) {
+        self.ctx.set_locomotor_close_enough_dist_3d(owner, is_3d);
+    }
+
+    fn find_position_around(
+        &mut self,
+        center: &Coord3D,
+        options: &FindPositionOptions,
+    ) -> Option<Coord3D> {
+        self.ctx.find_position_around(center, options)
+    }
+
+    fn pathfinder_add_object(&mut self, owner: ObjectSlot) {
+        self.ctx.pathfinder_add_object(owner);
+    }
+
+    fn pathfinder_adjust_to_possible_destination(
+        &mut self,
+        owner: ObjectSlot,
+        dest: &mut Coord3D,
+    ) -> Bool {
+        self.ctx
+            .pathfinder_adjust_to_possible_destination(owner, dest)
+    }
+
+    fn pathfinder_update_goal(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        layer: PathfindLayerEnum,
+    ) {
+        self.ctx.pathfinder_update_goal(owner, pos, layer);
     }
 
     fn client(&mut self) -> &mut dyn ClientSink {

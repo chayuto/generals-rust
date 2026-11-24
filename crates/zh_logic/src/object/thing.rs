@@ -35,6 +35,26 @@ pub trait ThingTerrainAccess {
         water_z: Option<&mut Real>,
         terrain_z: Option<&mut Real>,
     ) -> Bool;
+    fn get_layer_for_destination(&self, _pos: &Coord3D) -> PathfindLayerEnum {
+        PathfindLayerEnum::Ground
+    }
+    fn get_layer_height(
+        &self,
+        x: Real,
+        y: Real,
+        _layer: PathfindLayerEnum,
+        normal: Option<&mut Coord3D>,
+        _clip: Bool,
+    ) -> Real {
+        self.get_ground_height(x, y, normal)
+    }
+    fn get_highest_layer_for_destination(
+        &self,
+        pos: &Coord3D,
+        _only_healthy_bridges: Bool,
+    ) -> PathfindLayerEnum {
+        self.get_layer_for_destination(pos)
+    }
 }
 
 /// Subclass hook equivalent to virtual `Thing::reactToTransformChange`.

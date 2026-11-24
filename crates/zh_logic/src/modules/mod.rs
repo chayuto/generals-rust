@@ -16,8 +16,8 @@ pub mod special_power;
 pub mod upgrade;
 
 pub use module::{
-    AiUpdateFacet, BehaviorModule, BodyFacet, BridgeFacet, BridgeScaffoldFacet, BridgeTowerFacet,
-    BridgeTowerType, CaveFacet, CollideFacet, CommandSourceType, ContainFacet,
+    AiUpdateFacet, AttitudeType, BehaviorModule, BodyFacet, BridgeFacet, BridgeScaffoldFacet,
+    BridgeTowerFacet, BridgeTowerType, CaveFacet, CollideFacet, CommandSourceType, ContainFacet,
     CountermeasuresFacet, CreateFacet, DamageFacet, DestroyFacet, DieFacet, EvacDisposition,
     ExitDoorType, ExitFacet, HelperFacet, LandMineFacet, MaxHealthChangeType, ModuleData,
     ModuleSnapshotHeader, ModuleType, ObjectEnterExitType, OverchargeFacet, ParkingPlaceFacet,

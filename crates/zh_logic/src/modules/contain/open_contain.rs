@@ -816,6 +816,10 @@ impl BehaviorModule for OpenContain {
                 self.core
                     .remove_all_contained(&self.data, sim, ctx, expose_stealthed);
             }
+            DeferredSelfOp::ContainProcessDamage(percent_damage) => {
+                self.core
+                    .process_damage_to_contained(&self.data, sim, ctx, percent_damage);
+            }
             _ => {}
         }
     }

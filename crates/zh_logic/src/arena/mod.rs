@@ -261,6 +261,7 @@ pub enum DeferredSelfOp {
     ContainEvacuate {
         force_exit: Bool,
     },
+    ContainProcessDamage(Real),
     SlowDeathBegin {
         damage_type: u8,
         death_type: u8,

@@ -126,6 +126,19 @@ pub enum EvacDisposition {
     BurstFromCenter = 3,
 }
 
+/// AI engagement attitude (`AI.h`: `AttitudeType`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AttitudeType {
+    Sleep = -2,
+    Passive = -1,
+    #[default]
+    Normal = 0,
+    Alert = 1,
+    Aggressive = 2,
+    Invalid = 3,
+}
+
 /// Origin of a unit/container command (`GameCommon.h`: `CommandSourceType`).
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -523,6 +536,9 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_ai_mut(&mut self) -> Option<&mut dyn AiUpdateFacet> {
+        None
+    }
+    fn as_physics(&self) -> Option<&dyn PhysicsFacet> {
         None
     }
     fn as_physics_mut(&mut self) -> Option<&mut dyn PhysicsFacet> {
@@ -1588,6 +1604,53 @@ pub trait AiUpdateFacet {
     }
     fn set_locomotor_goal_none(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn destroy_path(&mut self) {}
+    fn ai_idle(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _cmd_source: CommandSourceType) {
+    }
+    fn ai_hunt(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _cmd_source: CommandSourceType) {
+    }
+    fn ai_move_to_position(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _pos: &Coord3D,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_follow_path(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _path: &[Coord3D],
+        _ignore_obj: Option<ObjectSlot>,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_hack_internet(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn set_attitude(&mut self, _attitude: AttitudeType) {}
+    fn wake_up_and_attempt_to_target(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn is_free_to_exit(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+        TRUE
+    }
+    fn get_current_victim(&self) -> Option<ObjectSlot> {
+        None
+    }
+    fn get_current_victim_pos(&self) -> Option<Coord3D> {
+        None
+    }
+    fn has_cur_locomotor(&self) -> Bool {
+        FALSE
+    }
+    fn set_locomotor_max_lift(&mut self, _max_lift: Real) {}
+    fn set_locomotor_max_turn_rate(&mut self, _max_turn_rate: Real) {}
+    fn set_locomotor_ultra_accurate(&mut self, _ultra: Bool) {}
+    fn set_locomotor_close_enough_dist(&mut self, _dist: Real) {}
+    fn set_locomotor_close_enough_dist_3d(&mut self, _is_3d: Bool) {}
 }
 
 /// Rigid-body physics facet (`PhysicsBehavior`).
@@ -1606,6 +1669,26 @@ pub trait PhysicsFacet {
     fn set_angles(&mut self, _yaw: Real, _pitch: Real, _roll: Real) {}
     fn get_last_collidee(&self) -> ObjectId {
         ObjectId::INVALID
+    }
+    fn clear_acceleration(&mut self) {}
+    fn scrub_velocity_2d(&mut self, _desired_velocity: Real) {}
+    fn apply_shock(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _force: &Coord3D) {}
+    /// Returns `TRUE` if the module executed its own 3 `rng_logic_real(-1.0, 1.0)` draws.
+    fn apply_random_rotation(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) -> Bool {
+        FALSE
+    }
+    fn apply_motive_force(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _force: &Coord3D) {}
+    fn set_roll_rate(&mut self, _rate: Real) {}
+    fn set_pitch_rate(&mut self, _rate: Real) {}
+    fn set_is_in_free_fall(&mut self, _in_free_fall: Bool) {}
+    fn get_mass(&self) -> Real {
+        1.0
+    }
+    fn get_center_of_mass_offset(&self) -> Real {
+        0.0
+    }
+    fn is_stick_to_ground(&self) -> Bool {
+        FALSE
     }
 }
 
