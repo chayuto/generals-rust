@@ -299,9 +299,33 @@ impl WeaponSet {
         self.weapons[slot.as_i32() as usize].as_mut()
     }
     pub fn set_weapon_lock(&mut self, slot: WeaponSlotType, lock: WeaponLockType) -> Bool {
-        if slot != self.cur_weapon { return FALSE; }
-        self.cur_weapon_locked_status = lock;
+        if lock == WeaponLockType::NotLocked {
+            return FALSE;
+        }
+        let idx = slot.as_i32() as usize;
+        if idx >= WEAPONSLOT_COUNT || self.weapons[idx].is_none() {
+            return FALSE;
+        }
+        if lock == WeaponLockType::LockedPermanently {
+            self.cur_weapon = slot;
+            self.cur_weapon_locked_status = lock;
+        } else if lock == WeaponLockType::LockedTemporarily
+            && self.cur_weapon_locked_status != WeaponLockType::LockedPermanently
+        {
+            self.cur_weapon = slot;
+            self.cur_weapon_locked_status = lock;
+        }
         TRUE
+    }
+    pub fn init_from_template_set(&mut self, tmpl_set: &WeaponTemplateSet, now: UnsignedInt) {
+        self.cur_weapon_template_set = Some(tmpl_set.clone());
+        for (i, wt_opt) in tmpl_set.templates.iter().enumerate() {
+            let slot = WeaponSlotType::from_i32(i as Int).unwrap_or(WeaponSlotType::Primary);
+            self.weapons[i] = wt_opt.as_ref().map(|wt| Weapon::new(wt.clone(), slot, now));
+        }
+        self.cur_weapon = WeaponSlotType::Primary;
+        self.cur_weapon_locked_status = WeaponLockType::NotLocked;
+        self.rebuild_masks();
     }
     pub fn release_weapon_lock(&mut self, lock: WeaponLockType) {
         if self.cur_weapon_locked_status == lock { self.cur_weapon_locked_status = WeaponLockType::NotLocked; }

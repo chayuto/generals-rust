@@ -424,6 +424,55 @@ impl<const NUMBITS: usize> BitFlags<NUMBITS> {
         }
         Ok(())
     }
+
+    /// Serializes bitflags matching C++ `BitFlags::xfer` (`BitFlagsIO.h:156-232`).
+    pub fn xfer_named(
+        &mut self,
+        xfer: &mut dyn crate::xfer::Xfer,
+        bit_names: &[&str],
+    ) -> Result<(), crate::xfer::XferError> {
+        let mut version: crate::types::XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+
+        match xfer.mode() {
+            crate::xfer::XferMode::Save => {
+                let mut count = self.count();
+                xfer.xfer_int(&mut count)?;
+                for i in 0..NUMBITS {
+                    if let Some(name) = (self.test(i as Int) != 0)
+                        .then(|| Self::get_name_from_single_bit(bit_names, i as Int))
+                        .flatten()
+                    {
+                        let mut s = name.to_owned();
+                        xfer.xfer_ascii_string(&mut s)?;
+                    }
+                }
+                Ok(())
+            }
+            crate::xfer::XferMode::Load => {
+                self.clear();
+                let mut count: Int = 0;
+                xfer.xfer_int(&mut count)?;
+                if count < 0 {
+                    return Err(crate::xfer::XferError::InvalidData);
+                }
+                for _ in 0..count {
+                    let mut name = String::new();
+                    xfer.xfer_ascii_string(&mut name)?;
+                    let idx = Self::get_single_bit_from_name(bit_names, &name);
+                    if idx < 0 {
+                        return Err(crate::xfer::XferError::InvalidData);
+                    }
+                    self.set(idx, 1);
+                }
+                Ok(())
+            }
+            crate::xfer::XferMode::Crc => {
+                let mut raw = self.to_unsigned_int().to_le_bytes();
+                xfer.xfer_user(&mut raw)
+            }
+        }
+    }
 }
 
 impl<const NUMBITS: usize> PartialOrd for BitFlags<NUMBITS> {

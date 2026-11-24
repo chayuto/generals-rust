@@ -79,6 +79,14 @@ pub trait ModuleData: Any + Send + Sync {
     fn is_ai_module(&self) -> bool {
         false
     }
+
+    fn subdual_damage_heal_rate(&self) -> UnsignedInt {
+        0
+    }
+
+    fn subdual_damage_heal_amount(&self) -> Real {
+        0.0
+    }
 }
 
 /// Placeholder `ModuleData` recorded for unported modules during phased `WP-5.x` bring-up.
@@ -425,6 +433,7 @@ pub trait BodyFacet {
     fn is_inactive_body(&self) -> Bool {
         FALSE
     }
+    fn set_constructor_object(&mut self, _constructor_id: ObjectId) {}
 }
 
 /// Death reaction facet (`DieModuleInterface`).
@@ -496,6 +505,17 @@ pub trait ContainFacet {
         obj: ObjectSlot,
         expose_stealthed: Bool,
     );
+    fn is_immune_to_clear_building_attacks(&self) -> Bool {
+        FALSE
+    }
+    fn is_rider_change_contain(&self) -> Bool {
+        FALSE
+    }
+    fn get_closest_rider(&self, _sim: &dyn SimView, _pos: &Coord3D) -> Option<ObjectSlot> {
+        None
+    }
+    fn order_all_passengers_to_idle(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn order_all_passengers_to_hack_internet(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
 }
 
 /// Upgrade trigger facet (`UpgradeModuleInterface`).

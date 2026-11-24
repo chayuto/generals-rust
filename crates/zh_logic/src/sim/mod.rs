@@ -571,6 +571,10 @@ pub trait SimView {
     fn terrain(&self) -> &dyn ThingTerrainAccess;
 
     fn get_wake_frame(&self, slot: ModuleSlot) -> UpdateSleepTime;
+    fn module_schedule(&self, slot: ModuleSlot) -> Option<crate::scheduler::UpdateModuleScheduleState>;
+    fn get_subdual_damage_heal_rate(&self, owner: ObjectSlot) -> UnsignedInt;
+    fn get_subdual_damage_heal_amount(&self, owner: ObjectSlot) -> Real;
+    fn has_any_subdual_damage(&self, owner: ObjectSlot) -> Bool;
     fn player_relationship(&self, a: ObjectSlot, b: ObjectSlot) -> Relationship;
     fn player_has_science(&self, team_id: TeamId, science: ScienceType) -> Bool;
     fn player_is_preorder(&self, team_id: TeamId) -> Bool;
@@ -594,6 +598,11 @@ pub trait SimApi: SimView {
     fn set_module_sidecar(&mut self, slot: ModuleSlot, sidecar: ModuleSidecar);
     fn awaken_module(&mut self, slot: ModuleSlot, when: UnsignedInt) -> bool;
     fn set_wake_frame(&mut self, slot: ModuleSlot, sleep: UpdateSleepTime);
+    fn set_module_schedule(
+        &mut self,
+        slot: ModuleSlot,
+        schedule: crate::scheduler::UpdateModuleScheduleState,
+    );
     fn spawn_object(
         &mut self,
         tmpl: ThingTemplateId,
@@ -1210,11 +1219,142 @@ impl SimContext {
             }
             return;
         }
+        if let Some(p) = self.world.modules.payload(body_slot) {
+            let sc = p.sync_sidecar();
+            if sc != ModuleSidecar::None {
+                self.world.modules.set_sidecar(body_slot, sc);
+            }
+        }
         let _ = self.dispatch_module(body_slot, |m, sim, ctx| {
             if let Some(body) = m.as_body_mut() {
                 body.attempt_healing(sim, ctx, healing);
             }
         });
+    }
+
+    /// Spawns an object from `tmpl` with explicit `initial_status` flags matching
+    /// `ThingFactory::newObject(tmpl, team, statusBits)`.
+    pub fn spawn_object_with_status(
+        &mut self,
+        tmpl: ThingTemplateId,
+        team: TeamId,
+        pos: Coord3D,
+        angle: Real,
+        initial_status: ObjectStatusMaskType,
+    ) -> ObjectSlot {
+        let id = self.world.allocate_object_id();
+        let tmpl_data = self
+            .rules
+            .thing_factory
+            .find_by_template_id_final(tmpl.0 as u16)
+            .map(|t| {
+                (
+                    t.get_template_geometry_info().clone(),
+                    t.is_trainable(),
+                    t.get_behavior_module_info().nuggets().to_vec(),
+                    t.find_weapon_template_set(&crate::rules::combat_types::WeaponSetFlags::new())
+                        .cloned(),
+                )
+            });
+        let (geom, trainable, nuggets, wts) = match tmpl_data {
+            Some((g, tr, n, w)) => (g, tr, n, w),
+            None => (GeometryInfo::default(), FALSE, Vec::new(), None),
+        };
+
+        let mut record = ObjectRecord::new(id, tmpl, team, geom);
+        record.status = initial_status;
+        record.experience_tracker.set_trainable(trainable);
+        if let Some(ref set) = wts {
+            record.weapon_set.init_from_template_set(set, self.world.frame);
+        }
+        let mut dummy_reactor = crate::object::thing::NoopTransformReactor;
+        let mut mtx = zh_common::math::Matrix3D::identity();
+        self.terrain.align_on_terrain(angle, &pos, FALSE, &mut mtx);
+        record.thing.set_transform_matrix(&mtx, &mut dummy_reactor);
+
+        let has_template = self
+            .rules
+            .thing_factory
+            .find_by_template_id_final(tmpl.0 as u16)
+            .is_some();
+        if !has_template {
+            let slot = self.world.objects.spawn(id, record, true);
+            self.client.on_object_created(id, tmpl);
+            return slot;
+        }
+
+        // Attach helpers + INI behavior modules while unlinked so constructor initial
+        // sleep frames are preserved when pushing UPDATE facets into SleepyUpdateHeap.
+        let slot = self.world.objects.spawn(id, record, false);
+        crate::modules::helper::attach_object_helpers(self, slot);
+
+        for nug in &nuggets {
+            let Some(desc) = self
+                .rules
+                .module_registry
+                .find_descriptor(&nug.name, ModuleType::Behavior)
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(create_fn) = desc.create_module else {
+                continue;
+            };
+            let Some(mod_data) = self.rules.module_data_store.get(nug.data_id) else {
+                continue;
+            };
+            let ctx = ModuleContext {
+                mod_slot: ModuleSlot::INVALID,
+                owner_slot: slot,
+                owner_id: id,
+                tag_key: nug.tag_key,
+                template_data_id: nug.data_id,
+            };
+            let module = create_fn(mod_data, ctx);
+            self.world.attach_module(
+                slot,
+                nug.tag_key,
+                nug.data_id,
+                desc.facet_mask,
+                desc.update_phase,
+                module,
+            );
+        }
+
+        self.world.objects.link_into_world(slot);
+        let behaviors: Vec<(ModuleSlot, FacetMask)> = self
+            .world
+            .objects
+            .get(slot)
+            .map_or_else(Vec::new, |o| o.behaviors.clone());
+        for &(ms, mask) in &behaviors {
+            if mask.contains(FacetMask::UPDATE) {
+                self.world.sleepy_updates.register_update_module(
+                    &mut self.world.modules,
+                    ms,
+                    self.world.frame,
+                );
+            }
+        }
+        for &(ms, _) in &behaviors {
+            if self.world.modules.is_alive(ms) {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    m.on_object_created(sim, ctx);
+                });
+            }
+        }
+        for &(ms, mask) in &behaviors {
+            if mask.contains(FacetMask::CREATE) && self.world.modules.is_alive(ms) {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    if let Some(c) = m.as_create_mut() {
+                        c.on_create(sim, ctx);
+                    }
+                });
+            }
+        }
+
+        self.client.on_object_created(id, tmpl);
+        slot
     }
 }
 
@@ -1307,6 +1447,63 @@ impl SimView for SimContext {
             .modules
             .schedule(slot)
             .get_wake_frame(self.world.frame)
+    }
+
+    fn module_schedule(&self, slot: ModuleSlot) -> Option<crate::scheduler::UpdateModuleScheduleState> {
+        if !self.world.modules.is_alive(slot) {
+            return None;
+        }
+        Some(*self.world.modules.schedule(slot))
+    }
+
+    fn get_subdual_damage_heal_rate(&self, owner: ObjectSlot) -> UnsignedInt {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return 0;
+        };
+        if let Some(body) = self.world.modules.payload(bs).and_then(|m| m.as_body()) {
+            return body.get_subdual_damage_heal_rate();
+        }
+        if !self.world.modules.is_alive(bs) {
+            return 0;
+        }
+        let data_id = self.world.modules.meta(bs).template_data_id;
+        self.rules
+            .module_data_store
+            .get(data_id)
+            .map_or(0, |d| d.subdual_damage_heal_rate())
+    }
+
+    fn get_subdual_damage_heal_amount(&self, owner: ObjectSlot) -> Real {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return 0.0;
+        };
+        if let Some(body) = self.world.modules.payload(bs).and_then(|m| m.as_body()) {
+            return body.get_subdual_damage_heal_amount();
+        }
+        if !self.world.modules.is_alive(bs) {
+            return 0.0;
+        }
+        let data_id = self.world.modules.meta(bs).template_data_id;
+        self.rules
+            .module_data_store
+            .get(data_id)
+            .map_or(0.0, |d| d.subdual_damage_heal_amount())
+    }
+
+    fn has_any_subdual_damage(&self, owner: ObjectSlot) -> Bool {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return FALSE;
+        };
+        if let Some(body) = self.world.modules.payload(bs).and_then(|m| m.as_body()) {
+            return body.has_any_subdual_damage();
+        }
+        match self.world.modules.sidecar(bs) {
+            ModuleSidecar::Body {
+                current_subdual_damage,
+                ..
+            } => Bool::from(current_subdual_damage > 0.0),
+            _ => FALSE,
+        }
     }
 
     fn player_relationship(&self, a: ObjectSlot, b: ObjectSlot) -> Relationship {
@@ -1435,6 +1632,16 @@ impl SimApi for SimContext {
         let _ = self.awaken_module(slot, when);
     }
 
+    fn set_module_schedule(
+        &mut self,
+        slot: ModuleSlot,
+        schedule: crate::scheduler::UpdateModuleScheduleState,
+    ) {
+        if self.world.modules.is_alive(slot) {
+            let _ = self.awaken_module(slot, schedule.next_call_frame());
+        }
+    }
+
     fn spawn_object(
         &mut self,
         tmpl: ThingTemplateId,
@@ -1442,113 +1649,7 @@ impl SimApi for SimContext {
         pos: Coord3D,
         angle: Real,
     ) -> ObjectSlot {
-        let id = self.world.allocate_object_id();
-        let tmpl_data = self
-            .rules
-            .thing_factory
-            .find_by_template_id_final(tmpl.0 as u16)
-            .map(|t| {
-                (
-                    t.get_template_geometry_info().clone(),
-                    t.is_trainable(),
-                    t.get_behavior_module_info().nuggets().to_vec(),
-                )
-            });
-        let (geom, trainable, nuggets) = match tmpl_data {
-            Some((g, tr, n)) => (g, tr, n),
-            None => (GeometryInfo::default(), FALSE, Vec::new()),
-        };
-
-        let mut record = ObjectRecord::new(id, tmpl, team, geom);
-        record.experience_tracker.set_trainable(trainable);
-        let mut dummy_reactor = crate::object::thing::NoopTransformReactor;
-        let mut mtx = zh_common::math::Matrix3D::identity();
-        self.terrain.align_on_terrain(angle, &pos, FALSE, &mut mtx);
-        record.thing.set_transform_matrix(&mtx, &mut dummy_reactor);
-
-        let has_template = self
-            .rules
-            .thing_factory
-            .find_by_template_id_final(tmpl.0 as u16)
-            .is_some();
-        if !has_template {
-            let slot = self.world.objects.spawn(id, record, true);
-            self.client.on_object_created(id, tmpl);
-            return slot;
-        }
-
-        // Attach helpers + INI behavior modules while unlinked so constructor initial
-        // sleep frames are preserved when pushing UPDATE facets into SleepyUpdateHeap.
-        let slot = self.world.objects.spawn(id, record, false);
-        crate::modules::helper::attach_object_helpers(self, slot);
-
-        for nug in &nuggets {
-            let Some(desc) = self
-                .rules
-                .module_registry
-                .find_descriptor(&nug.name, ModuleType::Behavior)
-                .cloned()
-            else {
-                continue;
-            };
-            let Some(create_fn) = desc.create_module else {
-                continue;
-            };
-            let Some(mod_data) = self.rules.module_data_store.get(nug.data_id) else {
-                continue;
-            };
-            let ctx = ModuleContext {
-                mod_slot: ModuleSlot::INVALID,
-                owner_slot: slot,
-                owner_id: id,
-                tag_key: nug.tag_key,
-                template_data_id: nug.data_id,
-            };
-            let module = create_fn(mod_data, ctx);
-            self.world.attach_module(
-                slot,
-                nug.tag_key,
-                nug.data_id,
-                desc.facet_mask,
-                desc.update_phase,
-                module,
-            );
-        }
-
-        self.world.objects.link_into_world(slot);
-        let behaviors: Vec<(ModuleSlot, FacetMask)> = self
-            .world
-            .objects
-            .get(slot)
-            .map_or_else(Vec::new, |o| o.behaviors.clone());
-        for &(ms, mask) in &behaviors {
-            if mask.contains(FacetMask::UPDATE) {
-                self.world.sleepy_updates.register_update_module(
-                    &mut self.world.modules,
-                    ms,
-                    self.world.frame,
-                );
-            }
-        }
-        for &(ms, _) in &behaviors {
-            if self.world.modules.is_alive(ms) {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    m.on_object_created(sim, ctx);
-                });
-            }
-        }
-        for &(ms, mask) in &behaviors {
-            if mask.contains(FacetMask::CREATE) && self.world.modules.is_alive(ms) {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    if let Some(c) = m.as_create_mut() {
-                        c.on_create(sim, ctx);
-                    }
-                });
-            }
-        }
-
-        self.client.on_object_created(id, tmpl);
-        slot
+        self.spawn_object_with_status(tmpl, team, pos, angle, ObjectStatusMaskType::new())
     }
 
     fn destroy_object(&mut self, slot: ObjectSlot) {
@@ -2020,6 +2121,10 @@ impl SimApi for SimContext {
         if let Some(obj) = self.world.objects.get_mut(owner) {
             obj.status.set(status.as_i32(), 1);
         }
+        if status == ObjectStatusType::Repulsor {
+            let until = self.world.frame.saturating_add(2 * 30);
+            self.trigger_repulsor(owner, until);
+        }
     }
 
     fn clear_status(&mut self, owner: ObjectSlot, status: ObjectStatusType) {
@@ -2322,6 +2427,22 @@ impl SimView for MockSimApi {
         self.ctx.get_wake_frame(slot)
     }
 
+    fn module_schedule(&self, slot: ModuleSlot) -> Option<crate::scheduler::UpdateModuleScheduleState> {
+        self.ctx.module_schedule(slot)
+    }
+
+    fn get_subdual_damage_heal_rate(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.ctx.get_subdual_damage_heal_rate(owner)
+    }
+
+    fn get_subdual_damage_heal_amount(&self, owner: ObjectSlot) -> Real {
+        self.ctx.get_subdual_damage_heal_amount(owner)
+    }
+
+    fn has_any_subdual_damage(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.has_any_subdual_damage(owner)
+    }
+
     fn player_relationship(&self, a: ObjectSlot, b: ObjectSlot) -> Relationship {
         self.ctx.player_relationship(a, b)
     }
@@ -2381,6 +2502,14 @@ impl SimApi for MockSimApi {
 
     fn set_wake_frame(&mut self, slot: ModuleSlot, sleep: UpdateSleepTime) {
         self.ctx.set_wake_frame(slot, sleep);
+    }
+
+    fn set_module_schedule(
+        &mut self,
+        slot: ModuleSlot,
+        schedule: crate::scheduler::UpdateModuleScheduleState,
+    ) {
+        self.ctx.set_module_schedule(slot, schedule);
     }
 
     fn spawn_object(

@@ -1161,6 +1161,12 @@ pub fn inverse_lerp_f32(a: f32, b: f32, v: f32) -> f32 {
     }
 }
 
+/// `WWMath::Div_Safe` under `USE_DETERMINISTIC_MATH` (`wwmath.h:1077-1084`).
+#[inline]
+pub fn div_safe_f32(dividend: f32, divisor: f32) -> f32 {
+    dividend / divisor.max(super::WWMATH_EPSILON)
+}
+
 /// `WWMath::Clamp` (`wwmath.h:887`).
 #[inline]
 pub fn clamp_f32(val: f32, min: f32, max: f32) -> f32 {

@@ -76,6 +76,14 @@ impl NameKeyGenerator {
         self.next_id = 1;
     }
 
+    pub fn lookup_key(&self, name: &str) -> Option<NameKeyType> {
+        let hash = (calc_hash_for_string(name) % SOCKET_COUNT as u32) as usize;
+        self.sockets[hash]
+            .iter()
+            .find(|bucket| bucket.name == name)
+            .map(|bucket| bucket.key)
+    }
+
     pub fn name_to_key(&mut self, name: &str) -> NameKeyType {
         let hash = (calc_hash_for_string(name) % SOCKET_COUNT as u32) as usize;
         if let Some(bucket) = self.sockets[hash].iter().find(|bucket| bucket.name == name) {

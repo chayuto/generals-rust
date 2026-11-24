@@ -2,7 +2,10 @@
 
 #![allow(unused_variables, dead_code)]
 
-use zh_common::ini::{DAMAGE_TYPE_NAMES as INI_DAMAGE_NAMES, DEATH_TYPE_NAMES as INI_DEATH_NAMES};
+use zh_common::ini::{
+    IniError, IniReader, DAMAGE_TYPE_NAMES as INI_DAMAGE_NAMES, DEATH_TYPE_NAMES as INI_DEATH_NAMES,
+    SEPS_DEFAULT,
+};
 use zh_common::types::{Bool, Int, UnsignedInt};
 use zh_common::xfer::bit_flags::BitFlags;
 use zh_common::xfer::bit_flags::{ArmorSetFlags as CommonArmorSetFlags, ARMOR_SET_BIT_NAMES};
@@ -157,6 +160,32 @@ pub fn set_damage_type_flag(mut flags: DamageTypeFlags, dt: Int) -> DamageTypeFl
 pub fn clear_damage_type_flag(mut flags: DamageTypeFlags, dt: Int) -> DamageTypeFlags {
     flags.set(dt, 0);
     flags
+}
+
+/// Parses `DamageTypeFlags` (`INI::parseDamageTypeFlags` in `INI.cpp:2062-2090`).
+pub fn parse_damage_type_flags(ini: &mut IniReader<'_>) -> Result<DamageTypeFlags, IniError> {
+    let mut flags = DamageTypeFlags::new_set_all();
+    let mut first = true;
+    while let Some(tok) = ini.next_token_or_null(SEPS_DEFAULT) {
+        if tok.eq_ignore_ascii_case("ALL") {
+            flags = DamageTypeFlags::new_set_all();
+        } else if tok.eq_ignore_ascii_case("NONE") {
+            flags.clear();
+        } else if let Some(name) = tok.strip_prefix('+') {
+            let idx = IniReader::scan_index_list(name, &DAMAGE_TYPE_NAMES)?;
+            flags.set(idx, 1);
+        } else if let Some(name) = tok.strip_prefix('-') {
+            let idx = IniReader::scan_index_list(name, &DAMAGE_TYPE_NAMES)?;
+            flags.set(idx, 0);
+        } else {
+            return Err(IniError::UnknownToken);
+        }
+        first = false;
+    }
+    if first {
+        return Err(IniError::InvalidData);
+    }
+    Ok(flags)
 }
 
 pub fn is_subdual_damage(dt: Int) -> bool {

@@ -21,6 +21,7 @@
 #include "Common/DamageFX.h"
 #include "Common/Dict.h"
 #include "Common/GameAudio.h"
+#include "Common/GameLOD.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
 #include "Common/ModuleFactory.h"
@@ -31,6 +32,7 @@
 #include "Common/PlayerTemplate.h"
 #include "Common/Radar.h"
 #include "Common/RandomValue.h"
+#include "Common/ResourceGatheringManager.h"
 #include "Common/Science.h"
 #include "Common/SpecialPower.h"
 #include "Common/Team.h"
@@ -41,11 +43,15 @@
 #include "GameClient/ControlBar.h"
 #include "GameClient/DisplayStringManager.h"
 #include "GameClient/Drawable.h"
+#include "GameClient/Eva.h"
 #include "GameClient/FXList.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/Image.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/ParticleSys.h"
+#include "GameClient/RayEffect.h"
+#include "GameClient/Snow.h"
+#include "GameClient/Water.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/Armor.h"
 #include "GameLogic/Damage.h"
@@ -67,6 +73,14 @@ ORACLE_DEFINE_LINK_GLOBALS("wp51_oracle")
 struct Wp51GLFrameTag { using type = UnsignedInt GameLogic::*; };
 template struct MemberAccess<Wp51GLFrameTag, &GameLogic::m_frame>;
 inline UnsignedInt GameLogic::* access_member(Wp51GLFrameTag);
+
+struct Wp51PlayerRgmTag { using type = ResourceGatheringManager* Player::*; };
+template struct MemberAccess<Wp51PlayerRgmTag, &Player::m_resourceGatheringManager>;
+inline ResourceGatheringManager* Player::* access_member(Wp51PlayerRgmTag);
+
+struct Wp51PlayerListCountTag { using type = Int PlayerList::*; };
+template struct MemberAccess<Wp51PlayerListCountTag, &PlayerList::m_playerCount>;
+inline Int PlayerList::* access_member(Wp51PlayerListCountTag);
 
 namespace oracle_wp51 {
 
@@ -180,6 +194,8 @@ struct World {
         TheWritableGlobalData->m_headless = TRUE;
         TheWritableGlobalData->m_partitionCellSize = 20.0f;
 
+        TheGameLODManager = NEW GameLODManager;
+
         TheNameKeyGenerator = NEW NameKeyGenerator;
         TheNameKeyGenerator->init();
 
@@ -254,6 +270,9 @@ struct World {
         TheRadar = NEW RadarDummy;
         TheRadar->init();
 
+        TheParticleSystemManager = NEW ParticleSystemManagerDummy;
+        TheParticleSystemManager->init();
+
         TheMappedImageCollection = NEW ImageCollection;
         TheMappedImageCollection->init();
 
@@ -265,13 +284,27 @@ struct World {
         TheGameClient = new NullGameClient;
         TheInGameUI = new NullInGameUI;
         TheControlBar = NEW ControlBar;
+        TheRayEffects = NEW RayEffectSystem;
+        TheRayEffects->init();
+        TheEva = NEW Eva;
+        TheEva->reset();
+        TheWaterTransparency = newInstance(WaterTransparencySetting);
+        TheWeatherSetting = newInstance(WeatherSetting);
 
         TheGameLogic = NEW GameLogic;
+        TheGameLogic->reset();
 
         Player* p_a = ThePlayerList->getNthPlayer(0);
         Player* p_b = ThePlayerList->getNthPlayer(1);
+        ThePlayerList->*access_member(Wp51PlayerListCountTag()) = 2;
+        if (p_a && !p_a->getResourceGatheringManager()) {
+            p_a->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+        }
         if (p_b) {
             p_b->init(nullptr);
+            if (!p_b->getResourceGatheringManager()) {
+                p_b->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
         }
         if (p_a && p_b) {
             p_a->setPlayerRelationship(p_b, ENEMIES);
