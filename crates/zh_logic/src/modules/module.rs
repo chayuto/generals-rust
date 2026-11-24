@@ -528,6 +528,8 @@ pub trait DieFacet {
         TRUE
     }
     fn eject_pilot_dying(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn set_creator(&mut self, _creator_id: ObjectId) {}
+    fn notify_script_engine(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
 }
 
 /// Damage reaction facet (`DamageModuleInterface`).

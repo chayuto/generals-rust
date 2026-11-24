@@ -659,6 +659,13 @@ pub trait SimView {
     fn player_energy_production(&self, team_id: TeamId) -> Int;
     fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int);
     fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real;
+    fn world_object_slots(&self) -> Vec<ObjectSlot>;
+    fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool;
+    fn player_is_active(&self, team_id: TeamId) -> Bool;
+    fn player_bounty_percent(&self, team_id: TeamId) -> Real;
+    fn object_is_trainable(&self, owner: ObjectSlot) -> Bool;
+    fn object_crusher_level(&self, owner: ObjectSlot) -> Int;
+    fn object_crushable_level(&self, owner: ObjectSlot) -> Int;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -911,6 +918,12 @@ pub trait SimApi: SimView {
     );
     fn capture_object(&mut self, owner: ObjectSlot, new_team: TeamId);
     fn update_upgrade_modules(&mut self, owner: ObjectSlot);
+    fn set_crushed(&mut self, owner: ObjectSlot, front: Option<Bool>, back: Option<Bool>);
+    fn set_special_power_creator(&mut self, owner: ObjectSlot, creator_id: ObjectId);
+    fn set_geometry_info(&mut self, owner: ObjectSlot, geom: &GeometryInfo);
+    fn set_demoralized(&mut self, owner: ObjectSlot, frames: UnsignedInt);
+    fn reset_supply_dropzone_timer(&mut self, owner: ObjectSlot);
+    fn eject_pilot_dying(&mut self, owner: ObjectSlot);
     fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
     fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
     fn client(&mut self) -> &mut dyn ClientSink;
@@ -968,6 +981,9 @@ pub struct SimWorld {
     pub cleanup_area_events: Vec<(ObjectId, Coord3D)>,
     pub baikonur_launch_events: Vec<ObjectId>,
     pub stealth_granted: BTreeSet<ObjectId>,
+    pub player_inactive: BTreeSet<TeamId>,
+    pub demoralized_events: Vec<(ObjectId, UnsignedInt)>,
+    pub supply_dropzone_resets: Vec<ObjectId>,
 }
 
 impl Default for SimWorld {
@@ -1029,6 +1045,9 @@ impl SimWorld {
             cleanup_area_events: Vec::new(),
             baikonur_launch_events: Vec::new(),
             stealth_granted: BTreeSet::new(),
+            player_inactive: BTreeSet::new(),
+            demoralized_events: Vec::new(),
+            supply_dropzone_resets: Vec::new(),
         }
     }
 
@@ -2160,6 +2179,62 @@ impl SimView for SimContext {
             }
         }
         start
+    }
+
+    fn world_object_slots(&self) -> Vec<ObjectSlot> {
+        self.world.objects.world_iter().collect()
+    }
+
+    fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool {
+        self.world.objects.get(owner).map_or(FALSE, |o| {
+            o.thing
+                .is_significantly_above_terrain(self.terrain.as_ref(), self.rules.global_data.gravity)
+        })
+    }
+
+    fn player_is_active(&self, team_id: TeamId) -> Bool {
+        Bool::from(!self.world.player_inactive.contains(&team_id))
+    }
+
+    fn player_bounty_percent(&self, team_id: TeamId) -> Real {
+        self.world
+            .player_bounty_percent
+            .get(&team_id)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    fn object_is_trainable(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(FALSE, |o| o.experience_tracker.is_trainable())
+    }
+
+    fn object_crusher_level(&self, owner: ObjectSlot) -> Int {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| {
+                o.thing
+                    .template_override()
+                    .get_final(&self.rules.thing_factory)
+                    .map(|t| t.get_crusher_level() as Int)
+            })
+            .unwrap_or(0)
+    }
+
+    fn object_crushable_level(&self, owner: ObjectSlot) -> Int {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| {
+                o.thing
+                    .template_override()
+                    .get_final(&self.rules.thing_factory)
+                    .map(|t| t.get_crushable_level() as Int)
+            })
+            .unwrap_or(0)
     }
 }
 
@@ -3684,6 +3759,124 @@ impl SimApi for SimContext {
         }
     }
 
+    fn set_crushed(&mut self, owner: ObjectSlot, front: Option<Bool>, back: Option<Bool>) {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(bs) {
+            if let ModuleSidecar::Body {
+                health,
+                max_health,
+                prev_health,
+                initial_health,
+                damage_scalar,
+                damage_state,
+                mut front_crushed,
+                mut back_crushed,
+                indestructible,
+                current_subdual_damage,
+                subdued,
+                last_damage_ts,
+                last_healing_ts,
+                armor_set_bits,
+            } = self.world.modules.sidecar(bs)
+            {
+                if let Some(f) = front {
+                    front_crushed = f;
+                }
+                if let Some(bk) = back {
+                    back_crushed = bk;
+                }
+                self.world.modules.set_sidecar(
+                    bs,
+                    ModuleSidecar::Body {
+                        health,
+                        max_health,
+                        prev_health,
+                        initial_health,
+                        damage_scalar,
+                        damage_state,
+                        front_crushed,
+                        back_crushed,
+                        indestructible,
+                        current_subdual_damage,
+                        subdued,
+                        last_damage_ts,
+                        last_healing_ts,
+                        armor_set_bits,
+                    },
+                );
+            }
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(bs, DeferredSelfOp::SetCrushed { front, back });
+            return;
+        }
+        let _ = self.dispatch_module(bs, |m, _, _| {
+            if let Some(b) = m.as_body_mut() {
+                if let Some(f) = front {
+                    b.set_front_crushed(f);
+                }
+                if let Some(bk) = back {
+                    b.set_back_crushed(bk);
+                }
+            }
+        });
+    }
+
+    fn set_special_power_creator(&mut self, owner: ObjectSlot, creator_id: ObjectId) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::DIE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let _ = self.dispatch_module(ms, |m, _, _| {
+                if let Some(d) = m.as_die_mut() {
+                    d.set_creator(creator_id);
+                }
+            });
+        }
+    }
+
+    fn set_geometry_info(&mut self, owner: ObjectSlot, geom: &GeometryInfo) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.geometry = geom.clone();
+        }
+    }
+
+    fn set_demoralized(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.demoralized_events.push((id, frames));
+        }
+    }
+
+    fn reset_supply_dropzone_timer(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.supply_dropzone_resets.push(id);
+        }
+    }
+
+    fn eject_pilot_dying(&mut self, owner: ObjectSlot) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::EJECT_PILOT_DIE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(d) = m.as_die_mut() {
+                    d.eject_pilot_dying(sim, ctx);
+                }
+            });
+        }
+    }
+
     fn update_upgrade_modules(&mut self, owner: ObjectSlot) {
         let Some((team_id, obj_mask, under_const, destroyed)) = self.world.objects.get(owner).map(|o| {
             (
@@ -3954,6 +4147,34 @@ impl SimView for MockSimApi {
 
     fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real {
         self.ctx.production_cost_change(team_id, kindof)
+    }
+
+    fn world_object_slots(&self) -> Vec<ObjectSlot> {
+        self.ctx.world_object_slots()
+    }
+
+    fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_is_significantly_above_terrain(owner)
+    }
+
+    fn player_is_active(&self, team_id: TeamId) -> Bool {
+        self.ctx.player_is_active(team_id)
+    }
+
+    fn player_bounty_percent(&self, team_id: TeamId) -> Real {
+        self.ctx.player_bounty_percent(team_id)
+    }
+
+    fn object_is_trainable(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_is_trainable(owner)
+    }
+
+    fn object_crusher_level(&self, owner: ObjectSlot) -> Int {
+        self.ctx.object_crusher_level(owner)
+    }
+
+    fn object_crushable_level(&self, owner: ObjectSlot) -> Int {
+        self.ctx.object_crushable_level(owner)
     }
 }
 
@@ -4526,6 +4747,30 @@ impl SimApi for MockSimApi {
 
     fn update_upgrade_modules(&mut self, owner: ObjectSlot) {
         self.ctx.update_upgrade_modules(owner);
+    }
+
+    fn set_crushed(&mut self, owner: ObjectSlot, front: Option<Bool>, back: Option<Bool>) {
+        self.ctx.set_crushed(owner, front, back);
+    }
+
+    fn set_special_power_creator(&mut self, owner: ObjectSlot, creator_id: ObjectId) {
+        self.ctx.set_special_power_creator(owner, creator_id);
+    }
+
+    fn set_geometry_info(&mut self, owner: ObjectSlot, geom: &GeometryInfo) {
+        self.ctx.set_geometry_info(owner, geom);
+    }
+
+    fn set_demoralized(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        self.ctx.set_demoralized(owner, frames);
+    }
+
+    fn reset_supply_dropzone_timer(&mut self, owner: ObjectSlot) {
+        self.ctx.reset_supply_dropzone_timer(owner);
+    }
+
+    fn eject_pilot_dying(&mut self, owner: ObjectSlot) {
+        self.ctx.eject_pilot_dying(owner);
     }
 
     fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
