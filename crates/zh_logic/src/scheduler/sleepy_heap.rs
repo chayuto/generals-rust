@@ -468,6 +468,23 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
         }
     }
 
+    /// Restores `next_call_frame` unconditionally after snapshot load and rebalances if queued.
+    pub fn restore_module_schedule<S: ScheduleStore<Handle>>(
+        &mut self,
+        store: &mut S,
+        handle: Handle,
+        next_call_frame: UnsignedInt,
+    ) {
+        store.schedule_mut(handle).set_next_call_frame(next_call_frame);
+        let idx = store.schedule(handle).index_in_logic();
+        if idx >= 0 {
+            let usize_idx = idx as usize;
+            if usize_idx < self.entries.len() && self.entries[usize_idx] == handle {
+                self.rebalance(store, usize_idx);
+            }
+        }
+    }
+
     /// Finalizes the executing update (`cur_update_module`) or the root entry if disabled-skipped.
     pub fn finish_due_update_at_root<S: ScheduleStore<Handle>>(
         &mut self,

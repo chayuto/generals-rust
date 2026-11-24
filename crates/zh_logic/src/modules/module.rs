@@ -25,8 +25,8 @@ use crate::sim::{SimApi, SimView};
 use zh_common::ini::SEPS_DEFAULT;
 use zh_common::math::Coord3D;
 use zh_common::types::{
-    Bool, Int, NameKeyType, ObjectId, Real, TeamId, UnsignedInt, UpdateSleepTime, VeterancyLevel,
-    XferVersion, FALSE, TRUE,
+    Bool, Int, NameKeyType, ObjectId, Real, TeamId, UnsignedInt, UnsignedShort, UpdateSleepTime,
+    VeterancyLevel, XferVersion, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
@@ -624,6 +624,12 @@ pub trait BehaviorModule: Send {
     fn as_slaved_update_mut(&mut self) -> Option<&mut dyn SlavedUpdateFacet> {
         None
     }
+    fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
+        None
+    }
 }
 
 /// Sleepy-update facet (`UpdateModuleInterface`).
@@ -961,6 +967,19 @@ pub trait ContainFacet {
         None
     }
     fn is_contained(&self, _obj_id: ObjectId) -> Bool {
+        FALSE
+    }
+    fn get_player_entered_mask(&self) -> UnsignedShort {
+        0
+    }
+    fn set_player_entered_mask(&mut self, _mask: UnsignedShort) {}
+    fn on_object_wants_to_enter_or_exit(
+        &mut self,
+        _obj_id: ObjectId,
+        _wants: ObjectEnterExitType,
+    ) {
+    }
+    fn has_objects_wanting_to_enter_or_exit(&self) -> Bool {
         FALSE
     }
     fn on_containing(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _obj: ObjectSlot) {}

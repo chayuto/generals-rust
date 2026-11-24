@@ -414,6 +414,8 @@ impl RulesRegistry {
             &mut name_keys,
         );
         crate::modules::collide::register_collide_modules(&mut module_registry, &mut name_keys);
+        crate::modules::behavior::register_behavior_modules(&mut module_registry, &mut name_keys);
+        crate::modules::contain::register_contain_modules(&mut module_registry, &mut name_keys);
 
         let mut science_store = ScienceStore::new();
         science_store.init();
@@ -2875,7 +2877,11 @@ impl SimApi for SimContext {
         schedule: crate::scheduler::UpdateModuleScheduleState,
     ) {
         if self.world.modules.is_alive(slot) {
-            let _ = self.awaken_module(slot, schedule.next_call_frame());
+            self.world.sleepy_updates.restore_module_schedule(
+                &mut self.world.modules,
+                slot,
+                schedule.next_call_frame(),
+            );
         }
     }
 
