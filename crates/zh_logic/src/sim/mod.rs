@@ -17,6 +17,7 @@ use crate::combat::damage::DamageInfo;
 use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::LocomotorStore;
 use crate::combat::locomotor_set::LocomotorSetType;
+use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::{
@@ -655,6 +656,9 @@ pub trait SimView {
     fn shared_special_power_ready_frame(&self, team_id: TeamId, template_id: UnsignedInt) -> UnsignedInt;
     fn player_captured_object_count(&self, team_id: TeamId) -> Int;
     fn special_power_uses_delay(&self) -> Bool;
+    fn player_energy_production(&self, team_id: TeamId) -> Int;
+    fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int);
+    fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -825,6 +829,9 @@ pub trait SimApi: SimView {
     fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool);
     fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt);
     fn extend_power_plant(&mut self, owner: ObjectSlot);
+    fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot);
+    fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot);
+    fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool);
     fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt);
     fn pause_special_power(
         &mut self,
@@ -832,6 +839,7 @@ pub trait SimApi: SimView {
         template_id: UnsignedInt,
         pause: Bool,
     );
+    fn unpause_special_power(&mut self, owner: ObjectSlot, template_id: UnsignedInt);
     fn reset_special_power_timer(&mut self, owner: ObjectSlot, template_id: UnsignedInt);
     fn express_shared_special_power_ready_frame(
         &mut self,
@@ -901,6 +909,8 @@ pub trait SimApi: SimView {
         loc: Option<&Coord3D>,
         normal: Option<&Coord3D>,
     );
+    fn capture_object(&mut self, owner: ObjectSlot, new_team: TeamId);
+    fn update_upgrade_modules(&mut self, owner: ObjectSlot);
     fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
     fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
     fn client(&mut self) -> &mut dyn ClientSink;
@@ -932,8 +942,9 @@ pub struct SimWorld {
     pub player_money: BTreeMap<TeamId, UnsignedInt>,
     pub player_is_human: BTreeMap<TeamId, Bool>,
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
-    pub player_cost_modifiers: BTreeMap<TeamId, Vec<(KindOfMaskType, Real)>>,
+    pub player_cost_modifiers: BTreeMap<TeamId, Vec<(KindOfMaskType, Real, Int)>>,
     pub player_radars: BTreeMap<TeamId, (Int, Int)>,
+    pub player_energy: BTreeMap<TeamId, Energy>,
     pub player_radar_disabled_until: BTreeMap<TeamId, UnsignedInt>,
     pub player_power_sabotaged_until: BTreeMap<TeamId, UnsignedInt>,
     pub player_bounty_percent: BTreeMap<TeamId, Real>,
@@ -994,6 +1005,7 @@ impl SimWorld {
             team_is_neutral: BTreeMap::new(),
             player_cost_modifiers: BTreeMap::new(),
             player_radars: BTreeMap::new(),
+            player_energy: BTreeMap::new(),
             player_radar_disabled_until: BTreeMap::new(),
             player_power_sabotaged_until: BTreeMap::new(),
             player_bounty_percent: BTreeMap::new(),
@@ -1583,6 +1595,77 @@ impl SimContext {
         self.client.on_object_created(id, tmpl);
         slot
     }
+
+    /// Grants a player-level upgrade (`Player::addUpgrade`) and refreshes all live
+    /// objects belonging to `team_id`.
+    pub fn grant_player_upgrade(&mut self, team_id: TeamId, upgrade_name: &str) {
+        let Some(upgrade_mask) = self
+            .rules
+            .upgrade_center
+            .find_upgrade(upgrade_name, &mut self.rules.name_keys)
+            .map(|ut| ut.upgrade_mask().clone())
+        else {
+            return;
+        };
+        let empty_mask = UpgradeMaskType::new();
+        self.world
+            .player_upgrades
+            .entry(team_id)
+            .or_default()
+            .clear_and_set(&empty_mask, &upgrade_mask);
+        let player_slots: Vec<ObjectSlot> = self
+            .world
+            .objects
+            .world_iter()
+            .filter(|&slot| {
+                self.world
+                    .objects
+                    .get(slot)
+                    .is_some_and(|o| !o.is_destroyed() && o.team_id == team_id)
+            })
+            .collect();
+        for pslot in player_slots {
+            self.update_upgrade_modules(pslot);
+        }
+    }
+
+    fn energy_object_info(&self, owner: ObjectSlot) -> Option<EnergyObjectInfo> {
+        let obj = self.world.objects.get(owner)?;
+        let tmpl = obj
+            .thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)?;
+        Some(EnergyObjectInfo {
+            energy_production: tmpl.get_energy_production(),
+            energy_bonus: tmpl.get_energy_bonus(),
+            is_disabled: obj.is_disabled(),
+        })
+    }
+
+    fn adjust_power_on_disabled_edge(&mut self, owner: ObjectSlot, becoming_disabled: Bool) {
+        let Some((team_id, under_const, power)) = self.world.objects.get(owner).and_then(|o| {
+            let tmpl = o
+                .thing
+                .template_override()
+                .get_final(&self.rules.thing_factory)?;
+            Some((
+                o.team_id,
+                o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE,
+                tmpl.get_energy_production(),
+            ))
+        }) else {
+            return;
+        };
+        #[cfg(feature = "retail-crc")]
+        let _ = under_const;
+        #[cfg(not(feature = "retail-crc"))]
+        if under_const {
+            return;
+        }
+        if power > 0 {
+            self.adjust_player_power(team_id, power, Bool::from(becoming_disabled == FALSE));
+        }
+    }
 }
 
 struct ObjectExpParent<'a> {
@@ -2051,6 +2134,33 @@ impl SimView for SimContext {
     fn special_power_uses_delay(&self) -> Bool {
         self.world.special_power_uses_delay
     }
+
+    fn player_energy_production(&self, team_id: TeamId) -> Int {
+        self.world
+            .player_energy
+            .get(&team_id)
+            .map_or(0, |e| e.get_production(self.world.frame))
+    }
+
+    fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int) {
+        self.world
+            .player_radars
+            .get(&team_id)
+            .copied()
+            .unwrap_or((0, 0))
+    }
+
+    fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real {
+        let mut start = 1.0_f32;
+        if let Some(list) = self.world.player_cost_modifiers.get(&team_id) {
+            for (ko_mask, percent, _refs) in list {
+                if kindof.test_for_all(ko_mask) != FALSE {
+                    start *= 1.0_f32 + *percent;
+                }
+            }
+        }
+        start
+    }
 }
 
 impl SimApi for SimContext {
@@ -2326,12 +2436,15 @@ impl SimApi for SimContext {
         if !was_disabled && obj.is_disabled() != FALSE {
             behaviors_to_edge = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
         }
-        for ms in behaviors_to_edge {
-            if self.world.modules.is_alive(ms) {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    m.on_disabled_edge(sim, ctx, TRUE);
-                });
+        if !behaviors_to_edge.is_empty() {
+            for ms in behaviors_to_edge {
+                if self.world.modules.is_alive(ms) {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        m.on_disabled_edge(sim, ctx, TRUE);
+                    });
+                }
             }
+            self.adjust_power_on_disabled_edge(owner, TRUE);
         }
     }
 
@@ -2353,12 +2466,15 @@ impl SimApi for SimContext {
         } else {
             Vec::new()
         };
-        for ms in behaviors_to_edge {
-            if self.world.modules.is_alive(ms) {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    m.on_disabled_edge(sim, ctx, FALSE);
-                });
+        if !behaviors_to_edge.is_empty() {
+            for ms in behaviors_to_edge {
+                if self.world.modules.is_alive(ms) {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        m.on_disabled_edge(sim, ctx, FALSE);
+                    });
+                }
             }
+            self.adjust_power_on_disabled_edge(owner, FALSE);
         }
         TRUE
     }
@@ -2394,14 +2510,14 @@ impl SimApi for SimContext {
                 })
                 .collect();
             for pslot in player_slots {
-                self.dispatch_attempt_upgrade(pslot, &upgrade_mask);
+                self.update_upgrade_modules(pslot);
             }
         } else {
             if let Some(obj) = self.world.objects.get_mut(owner) {
                 obj.upgrades_completed
                     .clear_and_set(&empty_mask, &upgrade_mask);
             }
-            self.dispatch_attempt_upgrade(owner, &upgrade_mask);
+            self.update_upgrade_modules(owner);
         }
         if record_stats != FALSE {
             self.world
@@ -2666,10 +2782,19 @@ impl SimApi for SimContext {
         {
             return;
         }
+        let old_team = obj.team_id;
         obj.set_undetected_defector(Bool::from(detection_frames > 0));
         obj.team_id = new_team;
         let ai_slot = obj.ai_slot;
+        let beh_slots: Vec<ModuleSlot> = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
         self.trigger_defection(owner, detection_frames, with_fx);
+        for ms in beh_slots {
+            if self.world.modules.is_alive(ms) {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    m.on_capture(sim, ctx, old_team, new_team);
+                });
+            }
+        }
         if let Some(ai_ms) = ai_slot {
             let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
                 if let Some(ai) = m.as_ai_mut() {
@@ -2855,20 +2980,27 @@ impl SimApi for SimContext {
     }
 
     fn add_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
-        self.world
-            .player_cost_modifiers
-            .entry(team_id)
-            .or_default()
-            .push((kindof.clone(), percent));
+        let list = self.world.player_cost_modifiers.entry(team_id).or_default();
+        if let Some((_, _, refs)) = list
+            .iter_mut()
+            .find(|(k, p, _)| k == kindof && p.to_bits() == percent.to_bits())
+        {
+            *refs += 1;
+            return;
+        }
+        list.push((kindof.clone(), percent, 1));
     }
 
     fn remove_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
         if let Some(list) = self.world.player_cost_modifiers.get_mut(&team_id) {
             if let Some(pos) = list
                 .iter()
-                .position(|(k, p)| k == kindof && p.to_bits() == percent.to_bits())
+                .position(|(k, p, _)| k == kindof && p.to_bits() == percent.to_bits())
             {
-                list.remove(pos);
+                list[pos].2 -= 1;
+                if list[pos].2 <= 0 {
+                    list.remove(pos);
+                }
             }
         }
     }
@@ -3137,11 +3269,45 @@ impl SimApi for SimContext {
         }
     }
 
+    fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
+        let info = self.energy_object_info(owner);
+        let now = self.world.frame;
+        self.world
+            .player_energy
+            .entry(team_id)
+            .or_default()
+            .add_power_bonus(info, now, &mut NoopEnergyCallbacks);
+    }
+
+    fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
+        let info = self.energy_object_info(owner);
+        let now = self.world.frame;
+        self.world
+            .player_energy
+            .entry(team_id)
+            .or_default()
+            .remove_power_bonus(info, now, &mut NoopEnergyCallbacks);
+    }
+
+    fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool) {
+        let now = self.world.frame;
+        self.world
+            .player_energy
+            .entry(team_id)
+            .or_default()
+            .adjust_power(delta, adding, now, &mut NoopEnergyCallbacks);
+    }
+
     fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt) {
         let until = self.world.frame.saturating_add(frames);
         self.world
             .player_power_sabotaged_until
             .insert(team_id, until);
+        self.world
+            .player_energy
+            .entry(team_id)
+            .or_default()
+            .set_power_sabotaged_till_frame(until);
     }
 
     fn pause_special_power(
@@ -3164,6 +3330,59 @@ impl SimApi for SimContext {
                     sp.pause_countdown(sim, ctx, pause);
                 }
             });
+        }
+    }
+
+    fn unpause_special_power(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        let now = self.world.frame;
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::SPECIAL_POWER))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let (match_ok, sidecar_starts_ready) = if let Some(p) = self.world.modules.payload(ms) {
+                let ctx = self.world.modules.meta(ms).context(ms);
+                let ok = p
+                    .as_special_power()
+                    .is_some_and(|sp| sp.is_module_for_power(self, ctx, template_id) != FALSE);
+                (ok, FALSE)
+            } else {
+                match self.world.modules.sidecar(ms) {
+                    ModuleSidecar::SpecialPower {
+                        template_id: tid,
+                        starts_ready,
+                        ..
+                    } if tid == template_id => (true, starts_ready),
+                    _ => (false, FALSE),
+                }
+            };
+            if match_ok {
+                if self.world.modules.is_executing(ms) {
+                    let _ = self
+                        .world
+                        .modules
+                        .push_deferred_op(ms, DeferredSelfOp::SpecialPowerPause { pause: FALSE });
+                    if sidecar_starts_ready != FALSE {
+                        let _ = self.world.modules.push_deferred_op(
+                            ms,
+                            DeferredSelfOp::SpecialPowerSetReadyFrame(now),
+                        );
+                    }
+                } else {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        if let Some(sp) = m.as_special_power_mut() {
+                            sp.pause_countdown(sim, ctx, FALSE);
+                            if sp.starts_ready(sim, ctx) != FALSE {
+                                let cur = sim.frame();
+                                sp.set_ready_frame(sim, ctx, cur);
+                            }
+                        }
+                    });
+                }
+            }
         }
     }
 
@@ -3443,6 +3662,53 @@ impl SimApi for SimContext {
         }
     }
 
+    fn capture_object(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        let Some((old_team, beh_slots)) = self.world.objects.get_mut(owner).and_then(|obj| {
+            if obj.team_id == new_team {
+                return None;
+            }
+            let old = obj.team_id;
+            obj.team_id = new_team;
+            let slots: Vec<ModuleSlot> = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
+            Some((old, slots))
+        }) else {
+            return;
+        };
+        *self.world.player_captured_objects.entry(new_team).or_insert(0) += 1;
+        for ms in beh_slots {
+            if self.world.modules.is_alive(ms) {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    m.on_capture(sim, ctx, old_team, new_team);
+                });
+            }
+        }
+    }
+
+    fn update_upgrade_modules(&mut self, owner: ObjectSlot) {
+        let Some((team_id, obj_mask, under_const, destroyed)) = self.world.objects.get(owner).map(|o| {
+            (
+                o.team_id,
+                o.upgrades_completed.clone(),
+                o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE,
+                o.is_destroyed(),
+            )
+        }) else {
+            return;
+        };
+        if under_const || destroyed {
+            return;
+        }
+        let empty_mask = UpgradeMaskType::new();
+        let mut mask_to_check = self
+            .world
+            .player_upgrades
+            .get(&team_id)
+            .cloned()
+            .unwrap_or_default();
+        mask_to_check.clear_and_set(&empty_mask, &obj_mask);
+        self.dispatch_attempt_upgrade(owner, &mask_to_check);
+    }
+
     fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
         let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
             o.behaviors
@@ -3454,7 +3720,9 @@ impl SimApi for SimContext {
         for ms in slots {
             let _ = self.dispatch_module(ms, |m, sim, ctx| {
                 if let Some(u) = m.as_upgrade_mut() {
-                    let _ = u.attempt_upgrade(sim, ctx, mask);
+                    if u.is_already_upgraded() == FALSE {
+                        let _ = u.attempt_upgrade(sim, ctx, mask);
+                    }
                 }
             });
         }
@@ -3674,6 +3942,18 @@ impl SimView for MockSimApi {
 
     fn special_power_uses_delay(&self) -> Bool {
         self.ctx.special_power_uses_delay()
+    }
+
+    fn player_energy_production(&self, team_id: TeamId) -> Int {
+        self.ctx.player_energy_production(team_id)
+    }
+
+    fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int) {
+        self.ctx.player_radar_counts(team_id)
+    }
+
+    fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real {
+        self.ctx.production_cost_change(team_id, kindof)
     }
 }
 
@@ -4070,6 +4350,18 @@ impl SimApi for MockSimApi {
         self.ctx.extend_power_plant(owner);
     }
 
+    fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
+        self.ctx.add_power_bonus(team_id, owner);
+    }
+
+    fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
+        self.ctx.remove_power_bonus(team_id, owner);
+    }
+
+    fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool) {
+        self.ctx.adjust_player_power(team_id, delta, adding);
+    }
+
     fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt) {
         self.ctx.sabotage_power(team_id, frames);
     }
@@ -4081,6 +4373,10 @@ impl SimApi for MockSimApi {
         pause: Bool,
     ) {
         self.ctx.pause_special_power(owner, template_id, pause);
+    }
+
+    fn unpause_special_power(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        self.ctx.unpause_special_power(owner, template_id);
     }
 
     fn reset_special_power_timer(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
@@ -4222,6 +4518,14 @@ impl SimApi for MockSimApi {
         normal: Option<&Coord3D>,
     ) {
         self.ctx.dispatch_on_collide(owner, other, loc, normal);
+    }
+
+    fn capture_object(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        self.ctx.capture_object(owner, new_team);
+    }
+
+    fn update_upgrade_modules(&mut self, owner: ObjectSlot) {
+        self.ctx.update_upgrade_modules(owner);
     }
 
     fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {

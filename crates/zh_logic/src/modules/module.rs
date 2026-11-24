@@ -22,7 +22,7 @@ use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
 use crate::sim::{SimApi, SimView};
 use zh_common::math::Coord3D;
 use zh_common::types::{
-    Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UpdateSleepTime, VeterancyLevel,
+    Bool, Int, NameKeyType, ObjectId, Real, TeamId, UnsignedInt, UpdateSleepTime, VeterancyLevel,
     XferVersion, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
@@ -242,7 +242,14 @@ pub trait BehaviorModule: Send {
 
     fn on_object_created(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_delete(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
-    fn on_capture(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _old: Int, _new: Int) {}
+    fn on_capture(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _old_team: TeamId,
+        _new_team: TeamId,
+    ) {
+    }
     fn on_disabled_edge(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _disabled: Bool) {}
 
     /// Applies a re-entrantly queued [`DeferredSelfOp`] immediately before arena restoration.

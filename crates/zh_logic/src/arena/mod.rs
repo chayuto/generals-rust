@@ -186,6 +186,7 @@ pub enum ModuleSidecar {
         paused_count: Int,
         paused_on_frame: UnsignedInt,
         paused_percent: Real,
+        starts_ready: Bool,
     },
 }
 
