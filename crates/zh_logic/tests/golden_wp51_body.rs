@@ -122,7 +122,12 @@ impl SlowDeathFacet for TestSlowDeath {
         TRUE
     }
 
-    fn get_probability_modifier(&self, _dmg: &DamageInfo) -> Int {
+    fn get_probability_modifier(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _dmg: &DamageInfo,
+    ) -> Int {
         self.prob_mod
     }
 

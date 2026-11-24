@@ -251,7 +251,10 @@ pub enum DeferredSelfOp {
     UpgradeResetKey(NameKeyType),
     AiSetIdle,
     ContainAdd(ObjectSlot),
-    ContainRemove(ObjectSlot),
+    ContainRemove {
+        obj: ObjectSlot,
+        expose_stealthed: Bool,
+    },
     ContainRemoveAll {
         expose_stealthed: Bool,
     },

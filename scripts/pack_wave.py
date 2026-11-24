@@ -54,6 +54,7 @@ FACET_TRAIT_MAP: Dict[str, str] = {
     "overcharge": "OverchargeFacet",
     "rebuild_hole": "RebuildHoleFacet",
     "transport_passenger": "TransportPassengerFacet",
+    "slaved_update": "SlavedUpdateFacet",
 }
 
 

@@ -621,6 +621,9 @@ pub trait BehaviorModule: Send {
     fn as_transport_passenger_mut(&mut self) -> Option<&mut dyn TransportPassengerFacet> {
         None
     }
+    fn as_slaved_update_mut(&mut self) -> Option<&mut dyn SlavedUpdateFacet> {
+        None
+    }
 }
 
 /// Sleepy-update facet (`UpdateModuleInterface`).
@@ -1176,7 +1179,12 @@ pub trait SlowDeathFacet {
         ctx: ModuleContext,
         dmg: &DamageInfo,
     ) -> Bool;
-    fn get_probability_modifier(&self, dmg: &DamageInfo) -> Int;
+    fn get_probability_modifier(
+        &self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        dmg: &DamageInfo,
+    ) -> Int;
     fn begin_slow_death(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &DamageInfo);
     fn is_slow_death_in_progress(&self) -> Bool {
         FALSE
@@ -1544,6 +1552,21 @@ pub trait AiUpdateFacet {
     fn is_idle(&self) -> Bool {
         TRUE
     }
+    fn is_ai_in_dead_state(&self) -> Bool {
+        FALSE
+    }
+    fn mark_as_dead(&mut self) {}
+    fn get_enter_target(&self) -> Option<ObjectSlot> {
+        None
+    }
+    fn ai_exit(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _container: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
     fn set_locomotor_goal_none(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn destroy_path(&mut self) {}
 }
@@ -1557,6 +1580,14 @@ pub trait PhysicsFacet {
     fn is_airborne(&self) -> Bool {
         FALSE
     }
+    fn set_allow_to_fall(&mut self, _allow: Bool) {}
+    fn set_extra_bounciness(&mut self, _bounciness: Real) {}
+    fn set_extra_friction(&mut self, _friction: Real) {}
+    fn set_allow_bouncing(&mut self, _allow: Bool) {}
+    fn set_angles(&mut self, _yaw: Real, _pitch: Real, _roll: Real) {}
+    fn get_last_collidee(&self) -> ObjectId {
+        ObjectId::INVALID
+    }
 }
 
 /// Stealth & disguise facet (`StealthUpdate`).
@@ -1565,5 +1596,17 @@ pub trait StealthFacet {
         FALSE
     }
     fn mark_as_detected(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _frames: UnsignedInt) {
+    }
+    fn receive_grant(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+}
+
+/// Slaved update facet (`SlavedUpdateInterface`).
+pub trait SlavedUpdateFacet {
+    fn on_slaver_die(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _dmg: Option<&DamageInfo>,
+    ) {
     }
 }

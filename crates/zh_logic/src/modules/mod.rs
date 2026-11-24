@@ -20,9 +20,10 @@ pub use module::{
     ExitDoorType, ExitFacet, HelperFacet, LandMineFacet, MaxHealthChangeType, ModuleData,
     ModuleSnapshotHeader, ModuleType, ObjectEnterExitType, OverchargeFacet, ParkingPlaceFacet,
     ParkingPlaceInfo, PhysicsFacet, ProjectileFacet, RebuildHoleFacet, RunwayReservationType,
-    ScaffoldTargetMotion, SlowDeathFacet, SlowDeathPhaseType, SpawnBehaviorFacet,
-    SpecialPowerFacet, StealthFacet, StubModuleData, TransportPassengerFacet, UpdateFacet,
-    UpgradeFacet, INVALID_BODY_TIMESTAMP, MAX_HEALTH_CHANGE_NAMES,
+    ScaffoldTargetMotion, SlavedUpdateFacet, SlowDeathFacet, SlowDeathPhaseType,
+    SpawnBehaviorFacet, SpecialPowerFacet, StealthFacet, StubModuleData,
+    TransportPassengerFacet, UpdateFacet, UpgradeFacet, INVALID_BODY_TIMESTAMP,
+    MAX_HEALTH_CHANGE_NAMES,
 };
 pub use module_factory::{
     ModuleCreateFn, ModuleDataParseFn, ModuleDataStore, ModuleDescriptor, ModuleParseContext,

@@ -21,8 +21,8 @@ use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::{
-    BehaviorModule, BridgeTowerType, MaxHealthChangeType, ModuleData, ModuleDataStore,
-    ModuleRegistry, ModuleType, ParkingPlaceInfo,
+    BehaviorModule, BridgeTowerType, CommandSourceType, MaxHealthChangeType, ModuleData,
+    ModuleDataStore, ModuleRegistry, ModuleType, ParkingPlaceInfo,
 };
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
@@ -59,8 +59,8 @@ use zh_common::math::geometry::GeometryInfo;
 use zh_common::math::Coord3D;
 use zh_common::random_value::PrngState;
 use zh_common::types::{
-    Bool, Int, NameKeyType, ObjectId, Real, Relationship, TeamId, UnsignedInt, UpdateSleepTime,
-    VeterancyLevel, XferVersion, FALSE, TRUE,
+    Bool, Int, NameKeyType, ObjectId, Real, Relationship, TeamId, UnsignedInt, UnsignedShort,
+    UpdateSleepTime, VeterancyLevel, XferVersion, FALSE, TRUE,
 };
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
@@ -546,6 +546,7 @@ pub struct ObjectRecord {
     pub overcharge_slot: Option<ModuleSlot>,
     pub land_mine_slot: Option<ModuleSlot>,
     pub cave_slot: Option<ModuleSlot>,
+    pub slaved_slot: Option<ModuleSlot>,
     pub smc_helper_slot: Option<ModuleSlot>,
     pub status_damage_helper_slot: Option<ModuleSlot>,
     pub subdual_damage_helper_slot: Option<ModuleSlot>,
@@ -562,6 +563,13 @@ pub struct ObjectRecord {
     pub sub_objects_shown: BTreeSet<String>,
     pub sub_objects_hidden: BTreeSet<String>,
     pub ai_goal_object: Option<ObjectSlot>,
+    pub ai_dead: Bool,
+    pub ai_enter_target: Option<ObjectSlot>,
+    pub physics_allow_to_fall: Bool,
+    pub physics_allow_bouncing: Bool,
+    pub physics_extra_bounciness: Real,
+    pub physics_extra_friction: Real,
+    pub physics_last_collidee: ObjectId,
 }
 
 impl ObjectRecord {
@@ -613,6 +621,7 @@ impl ObjectRecord {
             overcharge_slot: None,
             land_mine_slot: None,
             cave_slot: None,
+            slaved_slot: None,
             smc_helper_slot: None,
             status_damage_helper_slot: None,
             subdual_damage_helper_slot: None,
@@ -629,6 +638,13 @@ impl ObjectRecord {
             sub_objects_shown: BTreeSet::new(),
             sub_objects_hidden: BTreeSet::new(),
             ai_goal_object: None,
+            ai_dead: FALSE,
+            ai_enter_target: None,
+            physics_allow_to_fall: FALSE,
+            physics_allow_bouncing: FALSE,
+            physics_extra_bounciness: 0.0,
+            physics_extra_friction: 0.0,
+            physics_last_collidee: ObjectId::INVALID,
         }
     }
 
@@ -881,6 +897,14 @@ pub trait SimView {
     fn cave_can_switch_index(&self, old_index: Int, new_index: Int) -> Bool;
     fn bridge_is_passable(&self, bridge_id: ObjectId) -> Bool;
     fn neutral_team_id(&self) -> TeamId;
+    fn player_index(&self, team_id: TeamId) -> Int;
+    fn player_mask(&self, team_id: TeamId) -> UnsignedShort;
+    fn ai_is_in_dead_state(&self, owner: ObjectSlot) -> Bool;
+    fn object_ai_enter_target(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
+    fn object_height_above_terrain(&self, owner: ObjectSlot) -> Real;
+    fn slow_death_scale(&self) -> Real;
+    fn hulk_max_lifetime_override(&self) -> Int;
+    fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -1201,6 +1225,31 @@ pub trait SimApi: SimView {
     );
     fn record_mine_detonation(&mut self, mine_id: ObjectId, trigger_id: ObjectId);
     fn order_passenger(&mut self, passenger_id: ObjectId, order: &str);
+    fn ai_mark_as_dead(&mut self, owner: ObjectSlot);
+    fn deselect_object(
+        &mut self,
+        owner: ObjectSlot,
+        player_mask: UnsignedShort,
+        affect_drag_selection: Bool,
+    );
+    fn trigger_slow_death_with_caller(
+        &mut self,
+        owner: ObjectSlot,
+        caller_slot: ModuleSlot,
+        caller_applicable: Bool,
+        caller_prob: Int,
+        dmg: &DamageInfo,
+    ) -> Bool;
+    fn apply_fling_physics(&mut self, owner: ObjectSlot, force: &Coord3D, orientation: Real);
+    fn notify_slaver_die(&mut self, owner: ObjectSlot);
+    fn mark_stealth_detected(&mut self, owner: ObjectSlot, frames: UnsignedInt);
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot);
+    fn order_ai_exit(
+        &mut self,
+        rider: ObjectSlot,
+        container: ObjectSlot,
+        cmd_source: CommandSourceType,
+    );
     fn client(&mut self) -> &mut dyn ClientSink;
 }
 
@@ -1270,6 +1319,12 @@ pub struct SimWorld {
     pub parking_reservations: BTreeMap<ObjectId, ObjectId>,
     pub spawn_death_notifications: Vec<(ObjectId, ObjectId)>,
     pub passenger_orders: Vec<(ObjectId, String)>,
+    pub slow_death_scale: Real,
+    pub hulk_max_lifetime_override: Int,
+    pub deselected_objects: Vec<(ObjectId, UnsignedShort, Bool)>,
+    pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
+    pub slaved_die_notifications: Vec<ObjectId>,
+    pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
 }
 
 impl Default for SimWorld {
@@ -1345,6 +1400,12 @@ impl SimWorld {
             parking_reservations: BTreeMap::new(),
             spawn_death_notifications: Vec::new(),
             passenger_orders: Vec::new(),
+            slow_death_scale: 1.0,
+            hulk_max_lifetime_override: -1,
+            deselected_objects: Vec::new(),
+            stealth_detected_events: Vec::new(),
+            slaved_die_notifications: Vec::new(),
+            ai_exit_orders: Vec::new(),
         }
     }
 
@@ -1429,6 +1490,9 @@ impl SimWorld {
             }
             if facet_mask.contains(FacetMask::CAVE_INTERFACE) && obj.cave_slot.is_none() {
                 obj.cave_slot = Some(mod_slot);
+            }
+            if facet_mask.contains(FacetMask::SLAVED_UPDATE) && obj.slaved_slot.is_none() {
+                obj.slaved_slot = Some(mod_slot);
             }
         }
 
@@ -1915,12 +1979,22 @@ impl SimContext {
             );
         }
 
-        self.world.objects.link_into_world(slot);
         let behaviors: Vec<(ModuleSlot, FacetMask)> = self
             .world
             .objects
             .get(slot)
             .map_or_else(Vec::new, |o| o.behaviors.clone());
+        // Run `on_object_created` while unlinked (matching C++ `Object::Object`) so
+        // constructor-equivalent `set_wake_frame` calls set `next_call_frame` prior to
+        // `register_update_module`.
+        for &(ms, _) in &behaviors {
+            if self.world.modules.is_alive(ms) {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    m.on_object_created(sim, ctx);
+                });
+            }
+        }
+        self.world.objects.link_into_world(slot);
         for &(ms, mask) in &behaviors {
             if mask.contains(FacetMask::UPDATE) {
                 self.world.sleepy_updates.register_update_module(
@@ -1928,13 +2002,6 @@ impl SimContext {
                     ms,
                     self.world.frame,
                 );
-            }
-        }
-        for &(ms, _) in &behaviors {
-            if self.world.modules.is_alive(ms) {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    m.on_object_created(sim, ctx);
-                });
             }
         }
         for &(ms, mask) in &behaviors {
@@ -2020,6 +2087,62 @@ impl SimContext {
         if power > 0 {
             self.adjust_player_power(team_id, power, Bool::from(becoming_disabled == FALSE));
         }
+    }
+
+    fn select_and_trigger_slow_death(
+        &mut self,
+        owner: ObjectSlot,
+        caller_slot: Option<ModuleSlot>,
+        caller_applicable: Bool,
+        caller_prob: Int,
+        dmg: &DamageInfo,
+    ) -> Bool {
+        let beh_slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::SLOW_DEATH))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        let mut total: Int = 0;
+        let mut applicable = Vec::new();
+        for &ms in &beh_slots {
+            if caller_slot == Some(ms) {
+                if caller_applicable != FALSE {
+                    total = total.wrapping_add(caller_prob);
+                    applicable.push((ms, caller_prob));
+                }
+            } else if let Ok(Some(w)) = self.dispatch_module(ms, |m, sim, ctx| {
+                let sd = m.as_slow_death()?;
+                if sd.is_die_applicable(sim, ctx, dmg) != FALSE {
+                    Some(sd.get_probability_modifier(sim, ctx, dmg))
+                } else {
+                    None
+                }
+            }) {
+                total = total.wrapping_add(w);
+                applicable.push((ms, w));
+            }
+        }
+        if total <= 0 {
+            return FALSE;
+        }
+        let mut roll = self.rng_logic_int(1, total);
+        for (ms, w) in applicable {
+            roll = roll.wrapping_sub(w);
+            if roll <= 0 {
+                if caller_slot == Some(ms) {
+                    return TRUE;
+                }
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    if let Some(sd) = m.as_slow_death_mut() {
+                        sd.begin_slow_death(sim, ctx, dmg);
+                    }
+                });
+                return FALSE;
+            }
+        }
+        FALSE
     }
 }
 
@@ -2641,6 +2764,71 @@ impl SimView for SimContext {
 
     fn neutral_team_id(&self) -> TeamId {
         self.world.neutral_team_id
+    }
+
+    fn player_index(&self, team_id: TeamId) -> Int {
+        self.player_index_for_team(team_id)
+    }
+
+    fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
+        let idx = self.player_index_for_team(team_id);
+        if (0..16).contains(&idx) {
+            1u16 << (idx as u32)
+        } else {
+            0
+        }
+    }
+
+    fn ai_is_in_dead_state(&self, owner: ObjectSlot) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return FALSE;
+        };
+        if obj.ai_slot.is_none() {
+            return FALSE;
+        }
+        if let Some(ai_ms) = obj.ai_slot {
+            if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|p| p.as_ai()) {
+                if ai.is_ai_in_dead_state() != FALSE {
+                    return TRUE;
+                }
+            }
+        }
+        obj.ai_dead
+    }
+
+    fn object_ai_enter_target(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
+        let obj = self.world.objects.get(owner)?;
+        if let Some(ai_ms) = obj.ai_slot {
+            if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|p| p.as_ai()) {
+                if let Some(tgt) = ai.get_enter_target() {
+                    return Some(tgt);
+                }
+            }
+        }
+        obj.ai_enter_target
+    }
+
+    fn object_height_above_terrain(&self, owner: ObjectSlot) -> Real {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return 0.0;
+        };
+        let pos = obj.thing.get_position();
+        pos.z - self.terrain.get_ground_height(pos.x, pos.y, None)
+    }
+
+    fn slow_death_scale(&self) -> Real {
+        self.world.slow_death_scale
+    }
+
+    fn hulk_max_lifetime_override(&self) -> Int {
+        self.world.hulk_max_lifetime_override
+    }
+
+    fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(ObjectId::INVALID, |o| o.physics_last_collidee)
     }
 }
 
@@ -3395,43 +3583,7 @@ impl SimApi for SimContext {
     }
 
     fn trigger_slow_death(&mut self, owner: ObjectSlot, dmg: &DamageInfo) {
-        let beh_slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
-            o.behaviors
-                .iter()
-                .filter(|(_, m)| m.contains(FacetMask::SLOW_DEATH))
-                .map(|&(s, _)| s)
-                .collect()
-        });
-        let mut total: Int = 0;
-        let mut applicable = Vec::new();
-        for &ms in &beh_slots {
-            if let Ok(Some(w)) = self.dispatch_module(ms, |m, sim, ctx| {
-                let sd = m.as_slow_death()?;
-                if sd.is_die_applicable(sim, ctx, dmg) != FALSE {
-                    Some(sd.get_probability_modifier(dmg))
-                } else {
-                    None
-                }
-            }) {
-                total = total.wrapping_add(w);
-                applicable.push((ms, w));
-            }
-        }
-        if total <= 0 {
-            return;
-        }
-        let mut roll = self.rng_logic_int(1, total);
-        for (ms, w) in applicable {
-            roll = roll.wrapping_sub(w);
-            if roll <= 0 {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    if let Some(sd) = m.as_slow_death_mut() {
-                        sd.begin_slow_death(sim, ctx, dmg);
-                    }
-                });
-                return;
-            }
-        }
+        let _ = self.select_and_trigger_slow_death(owner, None, FALSE, 0, dmg);
     }
 
     fn add_player_money(&mut self, team_id: TeamId, amount: Int) -> Int {
@@ -4388,10 +4540,13 @@ impl SimApi for SimContext {
             return;
         };
         if self.world.modules.is_executing(cs) {
-            let _ = self
-                .world
-                .modules
-                .push_deferred_op(cs, DeferredSelfOp::ContainRemove(passenger));
+            let _ = self.world.modules.push_deferred_op(
+                cs,
+                DeferredSelfOp::ContainRemove {
+                    obj: passenger,
+                    expose_stealthed,
+                },
+            );
             return;
         }
         let _ = self.dispatch_module(cs, |m, sim, ctx| {
@@ -4719,6 +4874,168 @@ impl SimApi for SimContext {
             .push((passenger_id, order.to_owned()));
     }
 
+    fn ai_mark_as_dead(&mut self, owner: ObjectSlot) {
+        let ai_slot = match self.world.objects.get_mut(owner) {
+            Some(obj) if obj.ai_slot.is_some() => {
+                obj.ai_dead = TRUE;
+                obj.ai_slot
+            }
+            _ => return,
+        };
+        if let Some(ms) = ai_slot {
+            if !self.world.modules.is_executing(ms) {
+                let _ = self.dispatch_module(ms, |m, _, _| {
+                    if let Some(ai) = m.as_ai_mut() {
+                        ai.mark_as_dead();
+                    }
+                });
+            }
+        }
+    }
+
+    fn deselect_object(
+        &mut self,
+        owner: ObjectSlot,
+        player_mask: UnsignedShort,
+        affect_drag_selection: Bool,
+    ) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world
+                .deselected_objects
+                .push((id, player_mask, affect_drag_selection));
+        }
+    }
+
+    fn trigger_slow_death_with_caller(
+        &mut self,
+        owner: ObjectSlot,
+        caller_slot: ModuleSlot,
+        caller_applicable: Bool,
+        caller_prob: Int,
+        dmg: &DamageInfo,
+    ) -> Bool {
+        self.select_and_trigger_slow_death(
+            owner,
+            Some(caller_slot),
+            caller_applicable,
+            caller_prob,
+            dmg,
+        )
+    }
+
+    fn apply_fling_physics(&mut self, owner: ObjectSlot, force: &Coord3D, orientation: Real) {
+        let friction = -3.0_f32 * (1.0_f32 / 30.0_f32);
+        let ps = match self.world.objects.get_mut(owner) {
+            Some(obj) => {
+                obj.physics_allow_to_fall = TRUE;
+                obj.physics_allow_bouncing = TRUE;
+                obj.physics_extra_bounciness = -1.0;
+                obj.physics_extra_friction = friction;
+                obj.physics_slot
+            }
+            None => return,
+        };
+        if let Some(ps_slot) = ps {
+            if !self.world.modules.is_executing(ps_slot) {
+                let _ = self.dispatch_module(ps_slot, |m, sim, ctx| {
+                    if let Some(p) = m.as_physics_mut() {
+                        p.set_allow_to_fall(TRUE);
+                        p.apply_force(sim, ctx, force);
+                        p.set_extra_bounciness(-1.0);
+                        p.set_extra_friction(friction);
+                        p.set_allow_bouncing(TRUE);
+                        p.set_angles(orientation, 0.0, 0.0);
+                    }
+                });
+            }
+        }
+    }
+
+    fn notify_slaver_die(&mut self, owner: ObjectSlot) {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return;
+        };
+        let obj_id = obj.id;
+        let slaved_slot = obj.slaved_slot;
+        self.world.slaved_die_notifications.push(obj_id);
+        if let Some(ss) = slaved_slot {
+            if !self.world.modules.is_executing(ss) {
+                let _ = self.dispatch_module(ss, |m, sim, ctx| {
+                    if let Some(su) = m.as_slaved_update_mut() {
+                        su.on_slaver_die(sim, ctx, None);
+                    }
+                });
+            }
+        }
+    }
+
+    fn mark_stealth_detected(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return;
+        };
+        let obj_id = obj.id;
+        let stealth_slot = obj.stealth_slot;
+        self.world.stealth_detected_events.push((obj_id, frames));
+        if let Some(ss) = stealth_slot {
+            if !self.world.modules.is_executing(ss) {
+                let _ = self.dispatch_module(ss, |m, sim, ctx| {
+                    if let Some(st) = m.as_stealth_mut() {
+                        st.mark_as_detected(sim, ctx, frames);
+                    }
+                });
+            }
+        }
+    }
+
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot) {
+        let Some((obj_id, stealth_slot)) = self
+            .world
+            .objects
+            .get(owner)
+            .map(|o| (o.id, o.stealth_slot))
+        else {
+            return;
+        };
+        let Some(ss) = stealth_slot else {
+            return;
+        };
+        self.world.stealth_granted.insert(obj_id);
+        self.set_status(owner, ObjectStatusType::CanStealth);
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, ctx| {
+                if let Some(st) = m.as_stealth_mut() {
+                    st.receive_grant(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn order_ai_exit(
+        &mut self,
+        rider: ObjectSlot,
+        container: ObjectSlot,
+        cmd_source: CommandSourceType,
+    ) {
+        let rider_id = self.world.objects.id_of(rider).unwrap_or(ObjectId::INVALID);
+        let container_id = self
+            .world
+            .objects
+            .id_of(container)
+            .unwrap_or(ObjectId::INVALID);
+        self.world
+            .ai_exit_orders
+            .push((rider_id, container_id, cmd_source));
+        if let Some(ai_ms) = self.world.objects.get(rider).and_then(|o| o.ai_slot) {
+            if !self.world.modules.is_executing(ai_ms) {
+                let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                    if let Some(ai) = m.as_ai_mut() {
+                        ai.ai_exit(sim, ctx, container, cmd_source);
+                    }
+                });
+            }
+        }
+    }
+
     fn client(&mut self) -> &mut dyn ClientSink {
         self.client.as_mut()
     }
@@ -4994,6 +5311,38 @@ impl SimView for MockSimApi {
 
     fn neutral_team_id(&self) -> TeamId {
         self.ctx.neutral_team_id()
+    }
+
+    fn player_index(&self, team_id: TeamId) -> Int {
+        self.ctx.player_index(team_id)
+    }
+
+    fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
+        self.ctx.player_mask(team_id)
+    }
+
+    fn ai_is_in_dead_state(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.ai_is_in_dead_state(owner)
+    }
+
+    fn object_ai_enter_target(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
+        self.ctx.object_ai_enter_target(owner)
+    }
+
+    fn object_height_above_terrain(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_height_above_terrain(owner)
+    }
+
+    fn slow_death_scale(&self) -> Real {
+        self.ctx.slow_death_scale()
+    }
+
+    fn hulk_max_lifetime_override(&self) -> Int {
+        self.ctx.hulk_max_lifetime_override()
+    }
+
+    fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId {
+        self.ctx.physics_last_collidee(owner)
     }
 }
 
@@ -5740,6 +6089,62 @@ impl SimApi for MockSimApi {
 
     fn order_passenger(&mut self, passenger_id: ObjectId, order: &str) {
         self.ctx.order_passenger(passenger_id, order);
+    }
+
+    fn ai_mark_as_dead(&mut self, owner: ObjectSlot) {
+        self.ctx.ai_mark_as_dead(owner);
+    }
+
+    fn deselect_object(
+        &mut self,
+        owner: ObjectSlot,
+        player_mask: UnsignedShort,
+        affect_drag_selection: Bool,
+    ) {
+        self.ctx
+            .deselect_object(owner, player_mask, affect_drag_selection);
+    }
+
+    fn trigger_slow_death_with_caller(
+        &mut self,
+        owner: ObjectSlot,
+        caller_slot: ModuleSlot,
+        caller_applicable: Bool,
+        caller_prob: Int,
+        dmg: &DamageInfo,
+    ) -> Bool {
+        self.ctx.trigger_slow_death_with_caller(
+            owner,
+            caller_slot,
+            caller_applicable,
+            caller_prob,
+            dmg,
+        )
+    }
+
+    fn apply_fling_physics(&mut self, owner: ObjectSlot, force: &Coord3D, orientation: Real) {
+        self.ctx.apply_fling_physics(owner, force, orientation);
+    }
+
+    fn notify_slaver_die(&mut self, owner: ObjectSlot) {
+        self.ctx.notify_slaver_die(owner);
+    }
+
+    fn mark_stealth_detected(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        self.ctx.mark_stealth_detected(owner, frames);
+    }
+
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot) {
+        self.ctx.receive_stealth_grant(owner);
+    }
+
+    fn order_ai_exit(
+        &mut self,
+        rider: ObjectSlot,
+        container: ObjectSlot,
+        cmd_source: CommandSourceType,
+    ) {
+        self.ctx.order_ai_exit(rider, container, cmd_source);
     }
 
     fn client(&mut self) -> &mut dyn ClientSink {
