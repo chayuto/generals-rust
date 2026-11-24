@@ -11,8 +11,10 @@ use crate::modules::module::{BehaviorModule, ModuleData, ModuleType, StubModuleD
 use crate::object::thing_template::ModuleMaskLookup;
 use crate::object::weapon::WeaponStore;
 use crate::rules::science::ScienceStore;
+use crate::rules::special_power::SpecialPowerStore;
 use crate::rules::upgrade::UpgradeCenter;
 use crate::scheduler::SleepyUpdatePhase;
+use crate::spatial::crate_system::CrateSystem;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::types::{Int, NameKeyType, XferVersion};
@@ -29,6 +31,8 @@ pub struct ModuleParseContext<'a> {
     pub damage_fx_names: &'a BTreeSet<String>,
     pub ocl_names: &'a BTreeSet<String>,
     pub particle_system_names: &'a BTreeSet<String>,
+    pub special_power_store: &'a SpecialPowerStore,
+    pub crate_system: &'a CrateSystem,
 }
 
 /// Parser callback converting an INI module block (`Module ... End`) into typed [`ModuleData`].
@@ -104,7 +108,7 @@ pub const BUILTIN_ZH_MODULES: [BuiltinModuleEntry; 198] = [
     BuiltinModuleEntry { name: "DamDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
     BuiltinModuleEntry { name: "CreateCrateDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
     BuiltinModuleEntry { name: "CreateObjectDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
-    BuiltinModuleEntry { name: "EjectPilotDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
+    BuiltinModuleEntry { name: "EjectPilotDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002 | FacetMask::EJECT_PILOT_DIE.0), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
     BuiltinModuleEntry { name: "SpecialPowerCompletionDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
     BuiltinModuleEntry { name: "RebuildHoleExposeDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },
     BuiltinModuleEntry { name: "UpgradeDie", module_type: ModuleType::Behavior, facet_mask: FacetMask(0x002), update_phase: SleepyUpdatePhase::Normal, is_ai_module: false },

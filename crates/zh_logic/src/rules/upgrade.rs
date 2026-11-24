@@ -468,6 +468,17 @@ impl UpgradeCenter {
         self.find_upgrade_by_key(key)
     }
 
+    /// Read-only lookup by internal ASCII name without interning unknown names.
+    pub fn lookup_upgrade(
+        &self,
+        name: &str,
+        name_keys: &NameKeyGenerator,
+    ) -> Option<&UpgradeTemplate> {
+        name_keys
+            .lookup_key(name)
+            .and_then(|key| self.find_upgrade_by_key(key))
+    }
+
     /// Finds the veterancy upgrade template corresponding to `level`.
     pub fn find_veterancy_upgrade(
         &self,

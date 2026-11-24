@@ -551,6 +551,14 @@ impl BehaviorModule for ActiveBody {
                     self.back_crushed = b;
                 }
             }
+            DeferredSelfOp::SetArmorSetFlag { flag, set } => {
+                if set != FALSE {
+                    self.set_armor_set_flag(flag);
+                } else {
+                    self.clear_armor_set_flag(flag);
+                }
+                self.sync_sidecar_to_sim(sim, ctx);
+            }
             _ => {}
         }
     }

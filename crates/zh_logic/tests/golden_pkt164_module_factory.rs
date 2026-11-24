@@ -593,6 +593,8 @@ End
             upgrade_center: None,
             ocl_names: None,
             particle_system_names: None,
+            special_power_store: None,
+            crate_system: None,
         };
         factory.load_from_ini(&mut reader, &mut ctx).expect("parse TestTank");
     }
@@ -657,6 +659,8 @@ End
             upgrade_center: None,
             ocl_names: None,
             particle_system_names: None,
+            special_power_store: None,
+            crate_system: None,
         };
         assert_eq!(factory.load_from_ini(&mut reader, &mut ctx), Err(IniError::InvalidData));
     }
@@ -685,6 +689,8 @@ End
             upgrade_center: None,
             ocl_names: None,
             particle_system_names: None,
+            special_power_store: None,
+            crate_system: None,
         };
         assert_eq!(factory.load_from_ini(&mut reader, &mut ctx), Err(IniError::InvalidData));
     }
@@ -718,6 +724,8 @@ End
             upgrade_center: None,
             ocl_names: None,
             particle_system_names: None,
+            special_power_store: None,
+            crate_system: None,
         };
         assert_eq!(factory.load_from_ini(&mut reader, &mut ctx), Err(IniError::InvalidData));
     }
@@ -753,6 +761,8 @@ End
             upgrade_center: None,
             ocl_names: None,
             particle_system_names: None,
+            special_power_store: None,
+            crate_system: None,
         };
         factory
             .load_from_ini(&mut reader, &mut ctx)

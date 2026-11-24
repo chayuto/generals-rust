@@ -16,10 +16,11 @@ use crate::combat::armor::{Armor, ArmorStore};
 use crate::combat::damage::DamageInfo;
 use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::LocomotorStore;
+use crate::combat::locomotor_set::LocomotorSetType;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::{
-    BehaviorModule, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
+    BehaviorModule, MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
 };
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
@@ -33,19 +34,24 @@ use crate::object::weapon_set::{
 };
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::rules::combat_types::{
-    is_subdual_damage, ArmorSetFlags, DamageType, ARMORSET_COUNT,
+    is_subdual_damage, ArmorSetFlags, ArmorSetType, DamageType, WeaponSetFlags, WeaponSetType,
+    ARMORSET_COUNT,
 };
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType, DISABLED_COUNT};
+use crate::rules::kind_of::{KindOfMaskType, KindOfType};
 use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
 use crate::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
 use crate::rules::science::{ScienceStore, ScienceType};
 use crate::rules::special_power::SpecialPowerStore;
+use crate::rules::special_power_types::SpecialPowerType;
 use crate::rules::upgrade::{UpgradeCenter, UpgradeMaskType, UpgradeType};
 use crate::scheduler::{
     should_process_disabled_update, ScheduleStore, SleepyUpdateHeap, SleepyUpdatePhase,
 };
+use crate::spatial::crate_system::CrateSystem;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
+use zh_common::math::div_safe_f32;
 use zh_common::math::geometry::GeometryInfo;
 use zh_common::math::Coord3D;
 use zh_common::random_value::PrngState;
@@ -200,6 +206,7 @@ pub struct RulesRegistry {
     pub upgrade_center: UpgradeCenter,
     pub damage_fx_store: DamageFXStore,
     pub special_power_store: SpecialPowerStore,
+    pub crate_system: CrateSystem,
     pub global_data: GlobalData,
     pub fx_list_names: BTreeSet<String>,
     pub damage_fx_names: BTreeSet<String>,
@@ -224,11 +231,20 @@ impl RulesRegistry {
         crate::modules::create::register_create_modules(&mut module_registry, &mut name_keys);
         crate::modules::damage::register_damage_modules(&mut module_registry, &mut name_keys);
         crate::modules::destroy::register_destroy_modules(&mut module_registry, &mut name_keys);
+        crate::modules::die::register_die_modules(&mut module_registry, &mut name_keys);
+        crate::modules::upgrade::register_upgrade_modules(&mut module_registry, &mut name_keys);
+        crate::modules::special_power::register_special_power_modules(
+            &mut module_registry,
+            &mut name_keys,
+        );
+        crate::modules::collide::register_collide_modules(&mut module_registry, &mut name_keys);
 
         let mut science_store = ScienceStore::new();
         science_store.init();
         let mut upgrade_center = UpgradeCenter::new();
         upgrade_center.init(&mut name_keys);
+        let mut crate_system = CrateSystem::new();
+        crate_system.init();
         Self {
             name_keys,
             thing_factory: ThingFactory::new(),
@@ -241,6 +257,7 @@ impl RulesRegistry {
             upgrade_center,
             damage_fx_store: DamageFXStore::new(),
             special_power_store: SpecialPowerStore::new(),
+            crate_system,
             global_data: GlobalData::new(),
             fx_list_names: BTreeSet::new(),
             damage_fx_names: BTreeSet::new(),
@@ -273,6 +290,8 @@ impl RulesRegistry {
             upgrade_center: Some(&self.upgrade_center),
             ocl_names: Some(&self.ocl_names),
             particle_system_names: Some(&self.particle_system_names),
+            special_power_store: Some(&self.special_power_store),
+            crate_system: Some(&self.crate_system),
         };
         self.thing_factory.load_from_ini(ini, &mut ctx)
     }
@@ -286,6 +305,7 @@ impl RulesRegistry {
     pub fn reset(&mut self) {
         self.thing_factory.reset();
         self.module_data_store.reset();
+        self.crate_system.reset();
     }
 
     /// Constructs a standalone [`ModuleParseContext`] for direct module INI parser invocation.
@@ -300,6 +320,8 @@ impl RulesRegistry {
             damage_fx_names: &self.damage_fx_names,
             ocl_names: &self.ocl_names,
             particle_system_names: &self.particle_system_names,
+            special_power_store: &self.special_power_store,
+            crate_system: &self.crate_system,
         }
     }
 }
@@ -343,6 +365,14 @@ pub struct ObjectRecord {
     pub weapon_status_helper_slot: Option<ModuleSlot>,
     pub firing_tracker_slot: Option<ModuleSlot>,
     pub temp_weapon_bonus_helper_slot: Option<ModuleSlot>,
+    pub command_set_override: String,
+    pub weapon_set_flags: WeaponSetFlags,
+    pub cur_locomotor_set: LocomotorSetType,
+    pub shroud_clearing_range_override: Real,
+    pub passengers_allowed_to_fire: Bool,
+    pub sub_objects_shown: BTreeSet<String>,
+    pub sub_objects_hidden: BTreeSet<String>,
+    pub ai_goal_object: Option<ObjectSlot>,
 }
 
 impl ObjectRecord {
@@ -389,6 +419,14 @@ impl ObjectRecord {
             weapon_status_helper_slot: None,
             firing_tracker_slot: None,
             temp_weapon_bonus_helper_slot: None,
+            command_set_override: String::new(),
+            weapon_set_flags: WeaponSetFlags::new(),
+            cur_locomotor_set: LocomotorSetType::Normal,
+            shroud_clearing_range_override: -1.0,
+            passengers_allowed_to_fire: FALSE,
+            sub_objects_shown: BTreeSet::new(),
+            sub_objects_hidden: BTreeSet::new(),
+            ai_goal_object: None,
         }
     }
 
@@ -588,6 +626,35 @@ pub trait SimView {
     ) -> Real;
     fn ai_enable_repulsors(&self) -> Bool;
     fn has_module_by_name_key(&self, owner: ObjectSlot, mod_name_key: NameKeyType) -> bool;
+
+    fn player_money(&self, team_id: TeamId) -> UnsignedInt;
+    fn player_is_human(&self, team_id: TeamId) -> Bool;
+    fn is_neutral_controlled(&self, owner: ObjectSlot) -> Bool;
+    fn object_is_kind_of(&self, owner: ObjectSlot, kindof: KindOfType) -> Bool;
+    fn object_is_kind_of_multi(
+        &self,
+        owner: ObjectSlot,
+        must_be_set: &KindOfMaskType,
+        must_be_clear: &KindOfMaskType,
+    ) -> Bool;
+    fn object_veterancy_level(&self, owner: ObjectSlot) -> VeterancyLevel;
+    fn object_health_ratio(&self, owner: ObjectSlot) -> Real;
+    fn object_max_health(&self, owner: ObjectSlot) -> Real;
+    fn object_has_upgrade(&self, owner: ObjectSlot, mask: &UpgradeMaskType) -> Bool;
+    fn object_can_crush(&self, crusher: ObjectSlot, victim: ObjectSlot) -> Bool;
+    fn object_is_above_terrain(&self, owner: ObjectSlot) -> Bool;
+    fn object_has_ai(&self, owner: ObjectSlot) -> Bool;
+    fn object_ai_goal_object(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
+    fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    fn find_special_power_module(
+        &self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+    ) -> Option<ModuleSlot>;
+    fn shared_special_power_ready_frame(&self, team_id: TeamId, template_id: UnsignedInt) -> UnsignedInt;
+    fn player_captured_object_count(&self, team_id: TeamId) -> Int;
+    fn special_power_uses_delay(&self) -> Bool;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -732,6 +799,110 @@ pub trait SimApi: SimView {
     fn trigger_weapon_status(&mut self, owner: ObjectSlot);
     fn trigger_repulsor(&mut self, owner: ObjectSlot, until_frame: UnsignedInt);
     fn trigger_slow_death(&mut self, owner: ObjectSlot, dmg: &DamageInfo);
+
+    fn add_player_money(&mut self, team_id: TeamId, amount: Int) -> Int;
+    fn withdraw_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) -> UnsignedInt;
+    fn grant_player_science(&mut self, team_id: TeamId, science: ScienceType) -> Bool;
+    fn add_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real);
+    fn remove_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real);
+    fn remove_upgrade(&mut self, owner: ObjectSlot, upgrade_name: &str);
+    fn set_armor_set_flag(&mut self, owner: ObjectSlot, flag: ArmorSetType, set: Bool);
+    fn set_weapon_set_flag(&mut self, owner: ObjectSlot, flag: WeaponSetType, set: Bool);
+    fn set_max_health(
+        &mut self,
+        owner: ObjectSlot,
+        new_max: Real,
+        change_type: MaxHealthChangeType,
+    );
+    fn set_experience_scalar(&mut self, owner: ObjectSlot, scalar: Real);
+    fn add_experience_scalar(&mut self, owner: ObjectSlot, delta: Real);
+    fn set_command_set(&mut self, owner: ObjectSlot, command_set: &str);
+    fn set_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType);
+    fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real);
+    fn grant_stealth(&mut self, owner: ObjectSlot);
+    fn set_passengers_allowed_to_fire(&mut self, owner: ObjectSlot, allowed: Bool);
+    fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool);
+    fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool);
+    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt);
+    fn extend_power_plant(&mut self, owner: ObjectSlot);
+    fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt);
+    fn pause_special_power(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        pause: Bool,
+    );
+    fn reset_special_power_timer(&mut self, owner: ObjectSlot, template_id: UnsignedInt);
+    fn express_shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+        frame: UnsignedInt,
+    );
+    fn reset_shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt;
+    fn notify_special_power_triggered(
+        &mut self,
+        team_id: TeamId,
+        power_name: &str,
+        obj_id: ObjectId,
+    );
+    fn notify_special_power_complete(&mut self, obj_id: ObjectId, sp_type: SpecialPowerType);
+    fn update_public_timer(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        ready_frame: UnsignedInt,
+        add: Bool,
+    );
+    fn reveal_shroud(&mut self, team_id: TeamId, pos: &Coord3D, range: Real, duration: UnsignedInt);
+    fn remove_shroud(&mut self, team_id: TeamId);
+    fn reveal_map_for_player(&mut self, team_id: TeamId);
+    fn fire_weapon_template(
+        &mut self,
+        owner: ObjectSlot,
+        weapon_name: &str,
+        target: Option<ObjectSlot>,
+        target_pos: &Coord3D,
+    );
+    fn create_crate_at(
+        &mut self,
+        crate_tmpl_name: &str,
+        killer: Option<ObjectSlot>,
+        victim: ObjectSlot,
+    );
+    fn replace_object(&mut self, owner: ObjectSlot, new_tmpl_name: &str) -> Option<ObjectSlot>;
+    fn convert_to_car_bomb(&mut self, target: ObjectSlot, crate_owner: ObjectSlot);
+    fn hijack_vehicle(&mut self, target: ObjectSlot, hijacker: ObjectSlot);
+    fn apply_cash_bounty_percent(&mut self, team_id: TeamId, percent: Real);
+    fn trigger_dam_break(&mut self, owner: ObjectSlot);
+    fn notify_rebuild_hole_exposed(
+        &mut self,
+        dead_obj: ObjectSlot,
+        hole_obj: ObjectSlot,
+        hole_max_health: Real,
+    );
+    fn trigger_special_ability(
+        &mut self,
+        owner: ObjectSlot,
+        target: Option<ObjectSlot>,
+        loc: Option<&Coord3D>,
+    );
+    fn trigger_cleanup_area(&mut self, owner: ObjectSlot, loc: &Coord3D);
+    fn trigger_baikonur_launch(&mut self, owner: ObjectSlot);
+    fn update_sub_objects(&mut self, owner: ObjectSlot, shown: &[String], hidden: &[String]);
+    fn dispatch_on_collide(
+        &mut self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+        loc: Option<&Coord3D>,
+        normal: Option<&Coord3D>,
+    );
+    fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
+    fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType);
     fn client(&mut self) -> &mut dyn ClientSink;
 }
 
@@ -758,6 +929,34 @@ pub struct SimWorld {
     pub spawned_ocls: Vec<(String, ObjectId, Coord3D, Coord3D)>,
     pub triggered_fx_lists: Vec<(String, Coord3D)>,
     pub triggered_damage_fx: Vec<(String, DamageType, Real, ObjectId, ObjectId)>,
+    pub player_money: BTreeMap<TeamId, UnsignedInt>,
+    pub player_is_human: BTreeMap<TeamId, Bool>,
+    pub team_is_neutral: BTreeMap<TeamId, Bool>,
+    pub player_cost_modifiers: BTreeMap<TeamId, Vec<(KindOfMaskType, Real)>>,
+    pub player_radars: BTreeMap<TeamId, (Int, Int)>,
+    pub player_radar_disabled_until: BTreeMap<TeamId, UnsignedInt>,
+    pub player_power_sabotaged_until: BTreeMap<TeamId, UnsignedInt>,
+    pub player_bounty_percent: BTreeMap<TeamId, Real>,
+    pub player_captured_objects: BTreeMap<TeamId, Int>,
+    pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
+    pub special_power_uses_delay: Bool,
+    pub power_plant_extended: BTreeSet<ObjectId>,
+    pub car_bombed_objects: Vec<(ObjectId, ObjectId)>,
+    pub hijacked_objects: Vec<(ObjectId, ObjectId)>,
+    pub dam_break_events: Vec<ObjectId>,
+    pub rebuild_hole_events: Vec<(ObjectId, ObjectId, Real)>,
+    pub special_power_triggered_events: Vec<(TeamId, String, ObjectId)>,
+    pub special_power_completed_events: Vec<(ObjectId, SpecialPowerType)>,
+    pub public_timer_events: Vec<(ObjectId, UnsignedInt, UnsignedInt, Bool)>,
+    pub shroud_reveals: Vec<(TeamId, Coord3D, Real, UnsignedInt)>,
+    pub shroud_removals: Vec<TeamId>,
+    pub map_reveals: Vec<TeamId>,
+    pub weapon_fires: Vec<(ObjectId, String, Option<ObjectId>, Coord3D)>,
+    pub crate_spawns: Vec<(String, ObjectId, Option<ObjectId>)>,
+    pub special_ability_events: Vec<(ObjectId, Option<ObjectId>, Option<Coord3D>)>,
+    pub cleanup_area_events: Vec<(ObjectId, Coord3D)>,
+    pub baikonur_launch_events: Vec<ObjectId>,
+    pub stealth_granted: BTreeSet<ObjectId>,
 }
 
 impl Default for SimWorld {
@@ -790,6 +989,34 @@ impl SimWorld {
             spawned_ocls: Vec::new(),
             triggered_fx_lists: Vec::new(),
             triggered_damage_fx: Vec::new(),
+            player_money: BTreeMap::new(),
+            player_is_human: BTreeMap::new(),
+            team_is_neutral: BTreeMap::new(),
+            player_cost_modifiers: BTreeMap::new(),
+            player_radars: BTreeMap::new(),
+            player_radar_disabled_until: BTreeMap::new(),
+            player_power_sabotaged_until: BTreeMap::new(),
+            player_bounty_percent: BTreeMap::new(),
+            player_captured_objects: BTreeMap::new(),
+            shared_special_power_ready_frames: BTreeMap::new(),
+            special_power_uses_delay: TRUE,
+            power_plant_extended: BTreeSet::new(),
+            car_bombed_objects: Vec::new(),
+            hijacked_objects: Vec::new(),
+            dam_break_events: Vec::new(),
+            rebuild_hole_events: Vec::new(),
+            special_power_triggered_events: Vec::new(),
+            special_power_completed_events: Vec::new(),
+            public_timer_events: Vec::new(),
+            shroud_reveals: Vec::new(),
+            shroud_removals: Vec::new(),
+            map_reveals: Vec::new(),
+            weapon_fires: Vec::new(),
+            crate_spawns: Vec::new(),
+            special_ability_events: Vec::new(),
+            cleanup_area_events: Vec::new(),
+            baikonur_launch_events: Vec::new(),
+            stealth_granted: BTreeSet::new(),
         }
     }
 
@@ -1593,6 +1820,237 @@ impl SimView for SimContext {
                 .is_some_and(|p| p.module_name_key() == mod_name_key)
         })
     }
+
+    fn player_money(&self, team_id: TeamId) -> UnsignedInt {
+        self.world.player_money.get(&team_id).copied().unwrap_or(0)
+    }
+
+    fn player_is_human(&self, team_id: TeamId) -> Bool {
+        self.world
+            .player_is_human
+            .get(&team_id)
+            .copied()
+            .unwrap_or(FALSE)
+    }
+
+    fn is_neutral_controlled(&self, owner: ObjectSlot) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return TRUE;
+        };
+        if let Some(&neutral) = self.world.team_is_neutral.get(&obj.team_id) {
+            return neutral;
+        }
+        Bool::from(obj.team_id.0 <= 0)
+    }
+
+    fn object_is_kind_of(&self, owner: ObjectSlot, kindof: KindOfType) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return FALSE;
+        };
+        obj.thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+            .map_or(FALSE, |t| t.is_kind_of(kindof))
+    }
+
+    fn object_is_kind_of_multi(
+        &self,
+        owner: ObjectSlot,
+        must_be_set: &KindOfMaskType,
+        must_be_clear: &KindOfMaskType,
+    ) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return FALSE;
+        };
+        obj.thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+            .map_or(FALSE, |t| t.is_kind_of_multi(must_be_set, must_be_clear))
+    }
+
+    fn object_veterancy_level(&self, owner: ObjectSlot) -> VeterancyLevel {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(VeterancyLevel::Regular, |o| {
+                o.experience_tracker.get_veterancy_level()
+            })
+    }
+
+    fn object_health_ratio(&self, owner: ObjectSlot) -> Real {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return 0.0;
+        };
+        if let Some(b) = self.world.modules.payload(bs).and_then(|p| p.as_body()) {
+            return div_safe_f32(b.get_health(), b.get_max_health());
+        }
+        match self.world.modules.sidecar(bs) {
+            ModuleSidecar::Body {
+                health, max_health, ..
+            } => div_safe_f32(health, max_health),
+            _ => 0.0,
+        }
+    }
+
+    fn object_max_health(&self, owner: ObjectSlot) -> Real {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return 0.0;
+        };
+        if let Some(b) = self.world.modules.payload(bs).and_then(|p| p.as_body()) {
+            return b.get_max_health();
+        }
+        match self.world.modules.sidecar(bs) {
+            ModuleSidecar::Body { max_health, .. } => max_health,
+            _ => 0.0,
+        }
+    }
+
+    fn object_has_upgrade(&self, owner: ObjectSlot, mask: &UpgradeMaskType) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(FALSE, |o| o.upgrades_completed.test_for_any(mask))
+    }
+
+    fn object_can_crush(&self, crusher: ObjectSlot, victim: ObjectSlot) -> Bool {
+        let Some(oc) = self.world.objects.get(crusher) else {
+            return FALSE;
+        };
+        let Some(ov) = self.world.objects.get(victim) else {
+            return FALSE;
+        };
+        let Some(tc) = oc
+            .thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+        else {
+            return FALSE;
+        };
+        let Some(tv) = ov
+            .thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+        else {
+            return FALSE;
+        };
+        let crusher_lvl = tc.get_crusher_level();
+        let crushable_lvl = tv.get_crushable_level();
+        Bool::from(crusher_lvl > 1 && crusher_lvl > crushable_lvl)
+    }
+
+    fn object_is_above_terrain(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(FALSE, |o| o.thing.is_above_terrain(self.terrain.as_ref()))
+    }
+
+    fn object_has_ai(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(FALSE, |o| Bool::from(o.ai_slot.is_some()))
+    }
+
+    fn object_ai_goal_object(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_goal_object)
+    }
+
+    fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        let r2 = radius * radius;
+        self.world
+            .objects
+            .world_iter()
+            .filter(|&slot| {
+                self.world.objects.get(slot).is_some_and(|obj| {
+                    if obj.is_destroyed() {
+                        return false;
+                    }
+                    let pos = obj.thing.get_position();
+                    let dx = pos.x - center.x;
+                    let dy = pos.y - center.y;
+                    (dx * dx + dy * dy) <= r2
+                })
+            })
+            .collect()
+    }
+
+    fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        self.world
+            .objects
+            .world_iter()
+            .filter(|&slot| {
+                self.world.objects.get(slot).is_some_and(|obj| {
+                    if obj.is_destroyed() {
+                        return false;
+                    }
+                    let pos = obj.thing.get_position();
+                    let dx = pos.x - center.x;
+                    let dy = pos.y - center.y;
+                    let eff = radius + obj.geometry.get_bounding_circle_radius();
+                    (dx * dx + dy * dy) <= (eff * eff)
+                })
+            })
+            .collect()
+    }
+
+    fn find_special_power_module(
+        &self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+    ) -> Option<ModuleSlot> {
+        let obj = self.world.objects.get(owner)?;
+        for &(ms, mask) in &obj.behaviors {
+            if !mask.contains(FacetMask::SPECIAL_POWER) {
+                continue;
+            }
+            if let Some(p) = self.world.modules.payload(ms) {
+                if let Some(sp) = p.as_special_power() {
+                    let ctx = self.world.modules.meta(ms).context(ms);
+                    if sp.is_module_for_power(self, ctx, template_id) != FALSE {
+                        return Some(ms);
+                    }
+                }
+            } else if self.world.modules.is_executing(ms) {
+                if let ModuleSidecar::SpecialPower {
+                    template_id: tid, ..
+                } = self.world.modules.sidecar(ms)
+                {
+                    if tid == template_id {
+                        return Some(ms);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn shared_special_power_ready_frame(
+        &self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt {
+        self.world
+            .shared_special_power_ready_frames
+            .get(&(team_id, template_id))
+            .copied()
+            .unwrap_or(self.world.frame)
+    }
+
+    fn player_captured_object_count(&self, team_id: TeamId) -> Int {
+        self.world
+            .player_captured_objects
+            .get(&team_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn special_power_uses_delay(&self) -> Bool {
+        self.world.special_power_uses_delay
+    }
 }
 
 impl SimApi for SimContext {
@@ -1924,25 +2382,26 @@ impl SimApi for SimContext {
                 .entry(team_id)
                 .or_default()
                 .clear_and_set(&empty_mask, &upgrade_mask);
+            let player_slots: Vec<ObjectSlot> = self
+                .world
+                .objects
+                .world_iter()
+                .filter(|&slot| {
+                    self.world
+                        .objects
+                        .get(slot)
+                        .is_some_and(|o| !o.is_destroyed() && o.team_id == team_id)
+                })
+                .collect();
+            for pslot in player_slots {
+                self.dispatch_attempt_upgrade(pslot, &upgrade_mask);
+            }
         } else {
-            let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
-                o.behaviors
-                    .iter()
-                    .filter(|(_, m)| m.contains(FacetMask::UPGRADE))
-                    .map(|&(s, _)| s)
-                    .collect()
-            });
             if let Some(obj) = self.world.objects.get_mut(owner) {
                 obj.upgrades_completed
                     .clear_and_set(&empty_mask, &upgrade_mask);
             }
-            for ms in slots {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    if let Some(u) = m.as_upgrade_mut() {
-                        let _ = u.attempt_upgrade(sim, ctx, &upgrade_mask);
-                    }
-                });
-            }
+            self.dispatch_attempt_upgrade(owner, &upgrade_mask);
         }
         if record_stats != FALSE {
             self.world
@@ -2370,6 +2829,654 @@ impl SimApi for SimContext {
         }
     }
 
+    fn add_player_money(&mut self, team_id: TeamId, amount: Int) -> Int {
+        let entry = self.world.player_money.entry(team_id).or_insert(0);
+        let cur = *entry as i64;
+        let next = (cur + amount as i64).max(0).min(u32::MAX as i64);
+        *entry = next as UnsignedInt;
+        (next - cur) as Int
+    }
+
+    fn withdraw_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) -> UnsignedInt {
+        let entry = self.world.player_money.entry(team_id).or_insert(0);
+        let withdrawn = (*entry).min(amount);
+        *entry -= withdrawn;
+        withdrawn
+    }
+
+    fn grant_player_science(&mut self, team_id: TeamId, science: ScienceType) -> Bool {
+        let inserted = self
+            .world
+            .player_sciences
+            .entry(team_id)
+            .or_default()
+            .insert(science);
+        Bool::from(inserted)
+    }
+
+    fn add_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
+        self.world
+            .player_cost_modifiers
+            .entry(team_id)
+            .or_default()
+            .push((kindof.clone(), percent));
+    }
+
+    fn remove_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
+        if let Some(list) = self.world.player_cost_modifiers.get_mut(&team_id) {
+            if let Some(pos) = list
+                .iter()
+                .position(|(k, p)| k == kindof && p.to_bits() == percent.to_bits())
+            {
+                list.remove(pos);
+            }
+        }
+    }
+
+    fn remove_upgrade(&mut self, owner: ObjectSlot, upgrade_name: &str) {
+        let Some((upgrade_key, upgrade_mask)) = self
+            .rules
+            .upgrade_center
+            .find_upgrade(upgrade_name, &mut self.rules.name_keys)
+            .map(|ut| (ut.upgrade_name_key(), ut.upgrade_mask().clone()))
+        else {
+            return;
+        };
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            let empty_set = UpgradeMaskType::new();
+            obj.upgrades_completed.clear_and_set(&upgrade_mask, &empty_set);
+        } else {
+            return;
+        }
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::UPGRADE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            if self.world.modules.is_executing(ms) {
+                let _ = self
+                    .world
+                    .modules
+                    .push_deferred_op(ms, DeferredSelfOp::UpgradeResetKey(upgrade_key));
+            } else {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    if let Some(u) = m.as_upgrade_mut() {
+                        let _ = u.reset_upgrade(sim, ctx, &upgrade_mask);
+                    }
+                });
+            }
+        }
+    }
+
+    fn set_armor_set_flag(&mut self, owner: ObjectSlot, flag: ArmorSetType, set: Bool) {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(bs) {
+            if let ModuleSidecar::Body {
+                health,
+                max_health,
+                prev_health,
+                initial_health,
+                damage_scalar,
+                damage_state,
+                front_crushed,
+                back_crushed,
+                indestructible,
+                current_subdual_damage,
+                subdued,
+                last_damage_ts,
+                last_healing_ts,
+                mut armor_set_bits,
+            } = self.world.modules.sidecar(bs)
+            {
+                let bit = flag.as_i32();
+                if (0..8).contains(&bit) {
+                    if set != FALSE {
+                        armor_set_bits |= 1u8 << bit;
+                    } else {
+                        armor_set_bits &= !(1u8 << bit);
+                    }
+                }
+                self.world.modules.set_sidecar(
+                    bs,
+                    ModuleSidecar::Body {
+                        health,
+                        max_health,
+                        prev_health,
+                        initial_health,
+                        damage_scalar,
+                        damage_state,
+                        front_crushed,
+                        back_crushed,
+                        indestructible,
+                        current_subdual_damage,
+                        subdued,
+                        last_damage_ts,
+                        last_healing_ts,
+                        armor_set_bits,
+                    },
+                );
+            }
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(bs, DeferredSelfOp::SetArmorSetFlag { flag, set });
+            return;
+        }
+        let _ = self.dispatch_module(bs, |m, _, _| {
+            if let Some(b) = m.as_body_mut() {
+                if set != FALSE {
+                    b.set_armor_set_flag(flag);
+                } else {
+                    b.clear_armor_set_flag(flag);
+                }
+            }
+        });
+    }
+
+    fn set_weapon_set_flag(&mut self, owner: ObjectSlot, flag: WeaponSetType, set: Bool) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.weapon_set_flags.set(flag.as_i32(), i32::from(set != FALSE));
+        }
+    }
+
+    fn set_max_health(
+        &mut self,
+        owner: ObjectSlot,
+        new_max: Real,
+        change_type: MaxHealthChangeType,
+    ) {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(bs) {
+            if let ModuleSidecar::Body {
+                mut health,
+                max_health: prev_max,
+                prev_health: _,
+                initial_health: _,
+                damage_scalar,
+                damage_state,
+                front_crushed,
+                back_crushed,
+                indestructible,
+                current_subdual_damage,
+                subdued,
+                last_damage_ts,
+                last_healing_ts,
+                armor_set_bits,
+            } = self.world.modules.sidecar(bs)
+            {
+                let prev_health = health;
+                match change_type {
+                    MaxHealthChangeType::PreserveRatio => {
+                        let ratio = div_safe_f32(health, prev_max);
+                        health = new_max * ratio;
+                    }
+                    MaxHealthChangeType::AddCurrentHealthToo => {
+                        health += new_max - prev_max;
+                    }
+                    MaxHealthChangeType::SameCurrentHealth => {}
+                    MaxHealthChangeType::FullyHeal => {
+                        health = new_max;
+                    }
+                }
+                if health > new_max {
+                    health = new_max;
+                }
+                if health < 0.0 {
+                    health = 0.0;
+                }
+                self.world.modules.set_sidecar(
+                    bs,
+                    ModuleSidecar::Body {
+                        health,
+                        max_health: new_max,
+                        prev_health,
+                        initial_health: new_max,
+                        damage_scalar,
+                        damage_state,
+                        front_crushed,
+                        back_crushed,
+                        indestructible,
+                        current_subdual_damage,
+                        subdued,
+                        last_damage_ts,
+                        last_healing_ts,
+                        armor_set_bits,
+                    },
+                );
+            }
+            let _ = self.world.modules.push_deferred_op(
+                bs,
+                DeferredSelfOp::SetMaxHealth {
+                    new_max,
+                    change_type: change_type.as_i32() as u8,
+                },
+            );
+            return;
+        }
+        let _ = self.dispatch_module(bs, |m, sim, ctx| {
+            if let Some(b) = m.as_body_mut() {
+                b.set_max_health(sim, ctx, new_max, change_type);
+            }
+        });
+    }
+
+    fn set_experience_scalar(&mut self, owner: ObjectSlot, scalar: Real) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.experience_tracker.experience_scalar = scalar;
+        }
+    }
+
+    fn add_experience_scalar(&mut self, owner: ObjectSlot, delta: Real) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.experience_tracker.experience_scalar += delta;
+        }
+    }
+
+    fn set_command_set(&mut self, owner: ObjectSlot, command_set: &str) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.command_set_override = command_set.to_owned();
+        }
+    }
+
+    fn set_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.cur_locomotor_set = set_type;
+        }
+    }
+
+    fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.shroud_clearing_range_override = range;
+        }
+    }
+
+    fn grant_stealth(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.stealth_granted.insert(id);
+        }
+        self.set_status(owner, ObjectStatusType::CanStealth);
+    }
+
+    fn set_passengers_allowed_to_fire(&mut self, owner: ObjectSlot, allowed: Bool) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.passengers_allowed_to_fire = allowed;
+        }
+    }
+
+    fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
+        let entry = self.world.player_radars.entry(team_id).or_insert((0, 0));
+        entry.0 += 1;
+        if disable_proof != FALSE {
+            entry.1 += 1;
+        }
+    }
+
+    fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
+        let entry = self.world.player_radars.entry(team_id).or_insert((0, 0));
+        entry.0 = (entry.0 - 1).max(0);
+        if disable_proof != FALSE {
+            entry.1 = (entry.1 - 1).max(0);
+        }
+    }
+
+    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
+        let until = self.world.frame.saturating_add(frames);
+        self.world.player_radar_disabled_until.insert(team_id, until);
+    }
+
+    fn extend_power_plant(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.power_plant_extended.insert(id);
+        }
+    }
+
+    fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt) {
+        let until = self.world.frame.saturating_add(frames);
+        self.world
+            .player_power_sabotaged_until
+            .insert(team_id, until);
+    }
+
+    fn pause_special_power(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        pause: Bool,
+    ) {
+        let Some(ms) = self.find_special_power_module(owner, template_id) else {
+            return;
+        };
+        if self.world.modules.is_executing(ms) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(ms, DeferredSelfOp::SpecialPowerPause { pause });
+        } else {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(sp) = m.as_special_power_mut() {
+                    sp.pause_countdown(sim, ctx, pause);
+                }
+            });
+        }
+    }
+
+    fn reset_special_power_timer(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::SPECIAL_POWER))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let match_ok = if template_id == 0 {
+                true
+            } else if let Some(p) = self.world.modules.payload(ms) {
+                let ctx = self.world.modules.meta(ms).context(ms);
+                p.as_special_power()
+                    .is_some_and(|sp| sp.is_module_for_power(self, ctx, template_id) != FALSE)
+            } else {
+                matches!(
+                    self.world.modules.sidecar(ms),
+                    ModuleSidecar::SpecialPower { template_id: tid, .. } if tid == template_id
+                )
+            };
+            if match_ok {
+                if self.world.modules.is_executing(ms) {
+                    let _ = self.world.modules.push_deferred_op(
+                        ms,
+                        DeferredSelfOp::SpecialPowerSetReadyFrame(u32::MAX),
+                    );
+                } else {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        if let Some(sp) = m.as_special_power_mut() {
+                            sp.start_power_recharge(sim, ctx);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    fn express_shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+        frame: UnsignedInt,
+    ) {
+        self.world
+            .shared_special_power_ready_frames
+            .insert((team_id, template_id), frame);
+    }
+
+    fn reset_shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt {
+        let reload = self
+            .rules
+            .special_power_store
+            .find_special_power_template_by_id(template_id)
+            .map_or(0, |t| t.reload_time());
+        let ready = self.world.frame.saturating_add(reload);
+        self.world
+            .shared_special_power_ready_frames
+            .insert((team_id, template_id), ready);
+        ready
+    }
+
+    fn notify_special_power_triggered(
+        &mut self,
+        team_id: TeamId,
+        power_name: &str,
+        obj_id: ObjectId,
+    ) {
+        self.world
+            .special_power_triggered_events
+            .push((team_id, power_name.to_owned(), obj_id));
+    }
+
+    fn notify_special_power_complete(&mut self, obj_id: ObjectId, sp_type: SpecialPowerType) {
+        self.world
+            .special_power_completed_events
+            .push((obj_id, sp_type));
+    }
+
+    fn update_public_timer(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        ready_frame: UnsignedInt,
+        add: Bool,
+    ) {
+        if let Some(obj_id) = self.world.objects.id_of(owner) {
+            self.world
+                .public_timer_events
+                .push((obj_id, template_id, ready_frame, add));
+        }
+    }
+
+    fn reveal_shroud(&mut self, team_id: TeamId, pos: &Coord3D, range: Real, duration: UnsignedInt) {
+        self.world
+            .shroud_reveals
+            .push((team_id, *pos, range, duration));
+    }
+
+    fn remove_shroud(&mut self, team_id: TeamId) {
+        self.world.shroud_removals.push(team_id);
+    }
+
+    fn reveal_map_for_player(&mut self, team_id: TeamId) {
+        self.world.map_reveals.push(team_id);
+    }
+
+    fn fire_weapon_template(
+        &mut self,
+        owner: ObjectSlot,
+        weapon_name: &str,
+        target: Option<ObjectSlot>,
+        target_pos: &Coord3D,
+    ) {
+        let owner_id = self.world.objects.id_of(owner).unwrap_or(ObjectId::INVALID);
+        let target_id = target.and_then(|s| self.world.objects.id_of(s));
+        self.world
+            .weapon_fires
+            .push((owner_id, weapon_name.to_owned(), target_id, *target_pos));
+    }
+
+    fn create_crate_at(
+        &mut self,
+        crate_tmpl_name: &str,
+        killer: Option<ObjectSlot>,
+        victim: ObjectSlot,
+    ) {
+        let victim_id = self.world.objects.id_of(victim).unwrap_or(ObjectId::INVALID);
+        let killer_id = killer.and_then(|s| self.world.objects.id_of(s));
+        self.world
+            .crate_spawns
+            .push((crate_tmpl_name.to_owned(), victim_id, killer_id));
+    }
+
+    fn replace_object(&mut self, owner: ObjectSlot, new_tmpl_name: &str) -> Option<ObjectSlot> {
+        let new_tmpl_id = self.rules.thing_factory.find_template_id(new_tmpl_name)?;
+        let (team_id, mtx, pos, angle) = self.world.objects.get(owner).map(|o| {
+            (
+                o.team_id,
+                *o.thing.get_transform_matrix(),
+                *o.thing.get_position(),
+                o.thing.get_orientation(),
+            )
+        })?;
+        self.destroy_object_now(owner);
+        let new_slot = self.spawn_object(new_tmpl_id, team_id, pos, angle);
+        if let Some(new_obj) = self.world.objects.get_mut(new_slot) {
+            let mut dummy = crate::object::thing::NoopTransformReactor;
+            new_obj.thing.set_transform_matrix(&mtx, &mut dummy);
+        }
+        self.dispatch_on_build_complete(new_slot);
+        Some(new_slot)
+    }
+
+    fn convert_to_car_bomb(&mut self, target: ObjectSlot, crate_owner: ObjectSlot) {
+        let Some((new_team, owner_id)) = self
+            .world
+            .objects
+            .get(crate_owner)
+            .map(|o| (o.team_id, o.id))
+        else {
+            return;
+        };
+        let target_id = self.world.objects.id_of(target).unwrap_or(ObjectId::INVALID);
+        self.set_weapon_set_flag(target, WeaponSetType::Carbomb, TRUE);
+        self.set_status(target, ObjectStatusType::IsCarbomb);
+        self.defect_object(target, new_team, 0, FALSE);
+        self.world
+            .car_bombed_objects
+            .push((target_id, owner_id));
+    }
+
+    fn hijack_vehicle(&mut self, target: ObjectSlot, hijacker: ObjectSlot) {
+        let Some((new_team, hijacker_id)) = self
+            .world
+            .objects
+            .get(hijacker)
+            .map(|o| (o.team_id, o.id))
+        else {
+            return;
+        };
+        let target_id = self.world.objects.id_of(target).unwrap_or(ObjectId::INVALID);
+        self.set_weapon_set_flag(target, WeaponSetType::VehicleHijack, TRUE);
+        self.set_status(target, ObjectStatusType::Hijacked);
+        self.defect_object(target, new_team, 0, FALSE);
+        self.world.hijacked_objects.push((target_id, hijacker_id));
+    }
+
+    fn apply_cash_bounty_percent(&mut self, team_id: TeamId, percent: Real) {
+        self.world.player_bounty_percent.insert(team_id, percent);
+    }
+
+    fn trigger_dam_break(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.dam_break_events.push(id);
+        }
+    }
+
+    fn notify_rebuild_hole_exposed(
+        &mut self,
+        dead_obj: ObjectSlot,
+        hole_obj: ObjectSlot,
+        hole_max_health: Real,
+    ) {
+        let dead_id = self.world.objects.id_of(dead_obj).unwrap_or(ObjectId::INVALID);
+        let hole_id = self.world.objects.id_of(hole_obj).unwrap_or(ObjectId::INVALID);
+        self.world
+            .rebuild_hole_events
+            .push((dead_id, hole_id, hole_max_health));
+    }
+
+    fn trigger_special_ability(
+        &mut self,
+        owner: ObjectSlot,
+        target: Option<ObjectSlot>,
+        loc: Option<&Coord3D>,
+    ) {
+        let owner_id = self.world.objects.id_of(owner).unwrap_or(ObjectId::INVALID);
+        let target_id = target.and_then(|s| self.world.objects.id_of(s));
+        self.world
+            .special_ability_events
+            .push((owner_id, target_id, loc.copied()));
+    }
+
+    fn trigger_cleanup_area(&mut self, owner: ObjectSlot, loc: &Coord3D) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.cleanup_area_events.push((id, *loc));
+        }
+    }
+
+    fn trigger_baikonur_launch(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.baikonur_launch_events.push(id);
+        }
+    }
+
+    fn update_sub_objects(&mut self, owner: ObjectSlot, shown: &[String], hidden: &[String]) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            for s in shown {
+                obj.sub_objects_hidden.remove(s);
+                obj.sub_objects_shown.insert(s.clone());
+            }
+            for h in hidden {
+                obj.sub_objects_shown.remove(h);
+                obj.sub_objects_hidden.insert(h.clone());
+            }
+        }
+    }
+
+    fn dispatch_on_collide(
+        &mut self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+        loc: Option<&Coord3D>,
+        normal: Option<&Coord3D>,
+    ) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::COLLIDE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(c) = m.as_collide_mut() {
+                    c.on_collide(sim, ctx, other, loc, normal);
+                }
+            });
+        }
+    }
+
+    fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::UPGRADE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(u) = m.as_upgrade_mut() {
+                    let _ = u.attempt_upgrade(sim, ctx, mask);
+                }
+            });
+        }
+    }
+
+    fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::UPGRADE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(u) = m.as_upgrade_mut() {
+                    let _ = u.reset_upgrade(sim, ctx, mask);
+                }
+            });
+        }
+    }
+
     fn client(&mut self) -> &mut dyn ClientSink {
         self.client.as_mut()
     }
@@ -2476,6 +3583,97 @@ impl SimView for MockSimApi {
 
     fn has_module_by_name_key(&self, owner: ObjectSlot, mod_name_key: NameKeyType) -> bool {
         self.ctx.has_module_by_name_key(owner, mod_name_key)
+    }
+
+    fn player_money(&self, team_id: TeamId) -> UnsignedInt {
+        self.ctx.player_money(team_id)
+    }
+
+    fn player_is_human(&self, team_id: TeamId) -> Bool {
+        self.ctx.player_is_human(team_id)
+    }
+
+    fn is_neutral_controlled(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.is_neutral_controlled(owner)
+    }
+
+    fn object_is_kind_of(&self, owner: ObjectSlot, kindof: KindOfType) -> Bool {
+        self.ctx.object_is_kind_of(owner, kindof)
+    }
+
+    fn object_is_kind_of_multi(
+        &self,
+        owner: ObjectSlot,
+        must_be_set: &KindOfMaskType,
+        must_be_clear: &KindOfMaskType,
+    ) -> Bool {
+        self.ctx
+            .object_is_kind_of_multi(owner, must_be_set, must_be_clear)
+    }
+
+    fn object_veterancy_level(&self, owner: ObjectSlot) -> VeterancyLevel {
+        self.ctx.object_veterancy_level(owner)
+    }
+
+    fn object_health_ratio(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_health_ratio(owner)
+    }
+
+    fn object_max_health(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_max_health(owner)
+    }
+
+    fn object_has_upgrade(&self, owner: ObjectSlot, mask: &UpgradeMaskType) -> Bool {
+        self.ctx.object_has_upgrade(owner, mask)
+    }
+
+    fn object_can_crush(&self, crusher: ObjectSlot, victim: ObjectSlot) -> Bool {
+        self.ctx.object_can_crush(crusher, victim)
+    }
+
+    fn object_is_above_terrain(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_is_above_terrain(owner)
+    }
+
+    fn object_has_ai(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_has_ai(owner)
+    }
+
+    fn object_ai_goal_object(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
+        self.ctx.object_ai_goal_object(owner)
+    }
+
+    fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        self.ctx.find_objects_in_range(center, radius)
+    }
+
+    fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        self.ctx.find_objects_in_range_bounding(center, radius)
+    }
+
+    fn find_special_power_module(
+        &self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+    ) -> Option<ModuleSlot> {
+        self.ctx.find_special_power_module(owner, template_id)
+    }
+
+    fn shared_special_power_ready_frame(
+        &self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt {
+        self.ctx
+            .shared_special_power_ready_frame(team_id, template_id)
+    }
+
+    fn player_captured_object_count(&self, team_id: TeamId) -> Int {
+        self.ctx.player_captured_object_count(team_id)
+    }
+
+    fn special_power_uses_delay(&self) -> Bool {
+        self.ctx.special_power_uses_delay()
     }
 }
 
@@ -2785,6 +3983,253 @@ impl SimApi for MockSimApi {
 
     fn trigger_slow_death(&mut self, owner: ObjectSlot, dmg: &DamageInfo) {
         self.ctx.trigger_slow_death(owner, dmg);
+    }
+
+    fn add_player_money(&mut self, team_id: TeamId, amount: Int) -> Int {
+        self.ctx.add_player_money(team_id, amount)
+    }
+
+    fn withdraw_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) -> UnsignedInt {
+        self.ctx.withdraw_player_money(team_id, amount)
+    }
+
+    fn grant_player_science(&mut self, team_id: TeamId, science: ScienceType) -> Bool {
+        self.ctx.grant_player_science(team_id, science)
+    }
+
+    fn add_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
+        self.ctx.add_cost_modifier(team_id, kindof, percent);
+    }
+
+    fn remove_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
+        self.ctx.remove_cost_modifier(team_id, kindof, percent);
+    }
+
+    fn remove_upgrade(&mut self, owner: ObjectSlot, upgrade_name: &str) {
+        self.ctx.remove_upgrade(owner, upgrade_name);
+    }
+
+    fn set_armor_set_flag(&mut self, owner: ObjectSlot, flag: ArmorSetType, set: Bool) {
+        self.ctx.set_armor_set_flag(owner, flag, set);
+    }
+
+    fn set_weapon_set_flag(&mut self, owner: ObjectSlot, flag: WeaponSetType, set: Bool) {
+        self.ctx.set_weapon_set_flag(owner, flag, set);
+    }
+
+    fn set_max_health(
+        &mut self,
+        owner: ObjectSlot,
+        new_max: Real,
+        change_type: MaxHealthChangeType,
+    ) {
+        self.ctx.set_max_health(owner, new_max, change_type);
+    }
+
+    fn set_experience_scalar(&mut self, owner: ObjectSlot, scalar: Real) {
+        self.ctx.set_experience_scalar(owner, scalar);
+    }
+
+    fn add_experience_scalar(&mut self, owner: ObjectSlot, delta: Real) {
+        self.ctx.add_experience_scalar(owner, delta);
+    }
+
+    fn set_command_set(&mut self, owner: ObjectSlot, command_set: &str) {
+        self.ctx.set_command_set(owner, command_set);
+    }
+
+    fn set_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType) {
+        self.ctx.set_locomotor_set(owner, set_type);
+    }
+
+    fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real) {
+        self.ctx.set_shroud_clearing_range(owner, range);
+    }
+
+    fn grant_stealth(&mut self, owner: ObjectSlot) {
+        self.ctx.grant_stealth(owner);
+    }
+
+    fn set_passengers_allowed_to_fire(&mut self, owner: ObjectSlot, allowed: Bool) {
+        self.ctx.set_passengers_allowed_to_fire(owner, allowed);
+    }
+
+    fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
+        self.ctx.add_radar(team_id, disable_proof);
+    }
+
+    fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
+        self.ctx.remove_radar(team_id, disable_proof);
+    }
+
+    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
+        self.ctx.disable_radar(team_id, frames);
+    }
+
+    fn extend_power_plant(&mut self, owner: ObjectSlot) {
+        self.ctx.extend_power_plant(owner);
+    }
+
+    fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt) {
+        self.ctx.sabotage_power(team_id, frames);
+    }
+
+    fn pause_special_power(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        pause: Bool,
+    ) {
+        self.ctx.pause_special_power(owner, template_id, pause);
+    }
+
+    fn reset_special_power_timer(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        self.ctx.reset_special_power_timer(owner, template_id);
+    }
+
+    fn express_shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+        frame: UnsignedInt,
+    ) {
+        self.ctx
+            .express_shared_special_power_ready_frame(team_id, template_id, frame);
+    }
+
+    fn reset_shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt {
+        self.ctx
+            .reset_shared_special_power_ready_frame(team_id, template_id)
+    }
+
+    fn notify_special_power_triggered(
+        &mut self,
+        team_id: TeamId,
+        power_name: &str,
+        obj_id: ObjectId,
+    ) {
+        self.ctx
+            .notify_special_power_triggered(team_id, power_name, obj_id);
+    }
+
+    fn notify_special_power_complete(&mut self, obj_id: ObjectId, sp_type: SpecialPowerType) {
+        self.ctx.notify_special_power_complete(obj_id, sp_type);
+    }
+
+    fn update_public_timer(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        ready_frame: UnsignedInt,
+        add: Bool,
+    ) {
+        self.ctx
+            .update_public_timer(owner, template_id, ready_frame, add);
+    }
+
+    fn reveal_shroud(&mut self, team_id: TeamId, pos: &Coord3D, range: Real, duration: UnsignedInt) {
+        self.ctx.reveal_shroud(team_id, pos, range, duration);
+    }
+
+    fn remove_shroud(&mut self, team_id: TeamId) {
+        self.ctx.remove_shroud(team_id);
+    }
+
+    fn reveal_map_for_player(&mut self, team_id: TeamId) {
+        self.ctx.reveal_map_for_player(team_id);
+    }
+
+    fn fire_weapon_template(
+        &mut self,
+        owner: ObjectSlot,
+        weapon_name: &str,
+        target: Option<ObjectSlot>,
+        target_pos: &Coord3D,
+    ) {
+        self.ctx
+            .fire_weapon_template(owner, weapon_name, target, target_pos);
+    }
+
+    fn create_crate_at(
+        &mut self,
+        crate_tmpl_name: &str,
+        killer: Option<ObjectSlot>,
+        victim: ObjectSlot,
+    ) {
+        self.ctx.create_crate_at(crate_tmpl_name, killer, victim);
+    }
+
+    fn replace_object(&mut self, owner: ObjectSlot, new_tmpl_name: &str) -> Option<ObjectSlot> {
+        self.ctx.replace_object(owner, new_tmpl_name)
+    }
+
+    fn convert_to_car_bomb(&mut self, target: ObjectSlot, crate_owner: ObjectSlot) {
+        self.ctx.convert_to_car_bomb(target, crate_owner);
+    }
+
+    fn hijack_vehicle(&mut self, target: ObjectSlot, hijacker: ObjectSlot) {
+        self.ctx.hijack_vehicle(target, hijacker);
+    }
+
+    fn apply_cash_bounty_percent(&mut self, team_id: TeamId, percent: Real) {
+        self.ctx.apply_cash_bounty_percent(team_id, percent);
+    }
+
+    fn trigger_dam_break(&mut self, owner: ObjectSlot) {
+        self.ctx.trigger_dam_break(owner);
+    }
+
+    fn notify_rebuild_hole_exposed(
+        &mut self,
+        dead_obj: ObjectSlot,
+        hole_obj: ObjectSlot,
+        hole_max_health: Real,
+    ) {
+        self.ctx
+            .notify_rebuild_hole_exposed(dead_obj, hole_obj, hole_max_health);
+    }
+
+    fn trigger_special_ability(
+        &mut self,
+        owner: ObjectSlot,
+        target: Option<ObjectSlot>,
+        loc: Option<&Coord3D>,
+    ) {
+        self.ctx.trigger_special_ability(owner, target, loc);
+    }
+
+    fn trigger_cleanup_area(&mut self, owner: ObjectSlot, loc: &Coord3D) {
+        self.ctx.trigger_cleanup_area(owner, loc);
+    }
+
+    fn trigger_baikonur_launch(&mut self, owner: ObjectSlot) {
+        self.ctx.trigger_baikonur_launch(owner);
+    }
+
+    fn update_sub_objects(&mut self, owner: ObjectSlot, shown: &[String], hidden: &[String]) {
+        self.ctx.update_sub_objects(owner, shown, hidden);
+    }
+
+    fn dispatch_on_collide(
+        &mut self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+        loc: Option<&Coord3D>,
+        normal: Option<&Coord3D>,
+    ) {
+        self.ctx.dispatch_on_collide(owner, other, loc, normal);
+    }
+
+    fn dispatch_attempt_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
+        self.ctx.dispatch_attempt_upgrade(owner, mask);
+    }
+
+    fn dispatch_reset_upgrade(&mut self, owner: ObjectSlot, mask: &UpgradeMaskType) {
+        self.ctx.dispatch_reset_upgrade(owner, mask);
     }
 
     fn client(&mut self) -> &mut dyn ClientSink {

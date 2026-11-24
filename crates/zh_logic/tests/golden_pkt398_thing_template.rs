@@ -598,6 +598,8 @@ fn test_pkt398_1000_golden_vectors() {
                 upgrade_center: None,
                 ocl_names: None,
                 particle_system_names: None,
+                special_power_store: None,
+                crate_system: None,
             };
             let mut ini_reader =
                 IniReader::new("unit_init.ini", init_ini.as_bytes(), IniLoadType::Overwrite);
@@ -678,6 +680,8 @@ fn test_pkt398_1000_golden_vectors() {
                 upgrade_center: None,
                 ocl_names: None,
                 particle_system_names: None,
+                special_power_store: None,
+                crate_system: None,
             };
             let mut ovr_reader = IniReader::new(
                 "map_ovr.ini",

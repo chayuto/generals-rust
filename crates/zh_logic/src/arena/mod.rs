@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::rules::combat_types::ArmorSetType;
 use crate::scheduler::{ScheduleStore, SleepyUpdatePhase, UpdateModuleScheduleState};
 use zh_common::math::Coord3D;
 use zh_common::types::{Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UnsignedShort};
@@ -89,6 +90,7 @@ impl FacetMask {
     pub const LAND_MINE: Self = Self(1 << 28);
     pub const RAILED_TRANSPORT_DOCK: Self = Self(1 << 29);
     pub const TRANSPORT_PASSENGER: Self = Self(1 << 30);
+    pub const EJECT_PILOT_DIE: Self = Self(1 << 31);
 
     pub const PRIMARY_CPP_MASK: u64 = 0x0fff;
 
@@ -178,6 +180,13 @@ pub enum ModuleSidecar {
         idle: Bool,
         cur_locomotor_set: u8,
     },
+    SpecialPower {
+        template_id: UnsignedInt,
+        available_on_frame: UnsignedInt,
+        paused_count: Int,
+        paused_on_frame: UnsignedInt,
+        paused_percent: Real,
+    },
 }
 
 /// Deferred self-mutation queued when a synchronous re-entrant callback targets an
@@ -210,6 +219,15 @@ pub enum DeferredSelfOp {
         front: Option<Bool>,
         back: Option<Bool>,
     },
+    SetArmorSetFlag {
+        flag: ArmorSetType,
+        set: Bool,
+    },
+    SpecialPowerPause {
+        pause: Bool,
+    },
+    SpecialPowerSetReadyFrame(UnsignedInt),
+    UpgradeResetKey(NameKeyType),
     AiSetIdle,
     ContainRemove(ObjectSlot),
 }

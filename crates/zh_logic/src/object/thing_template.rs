@@ -19,7 +19,9 @@ use crate::rules::production_prerequisite::{
     PrereqPlayerView, ProductionPrerequisite, ThingTemplateRef, ThingTemplateRegistry,
 };
 use crate::rules::science::{ScienceStore, SCIENCE_INVALID};
+use crate::rules::special_power::SpecialPowerStore;
 use crate::rules::upgrade::UpgradeCenter;
+use crate::spatial::crate_system::CrateSystem;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{
     Color, IniError, IniLoadType, IniReader, LOGICFRAMES_PER_SECONDS_REAL, SEPS_DEFAULT,
@@ -424,6 +426,8 @@ pub struct ThingTemplateParseContext<'a> {
     pub upgrade_center: Option<&'a UpgradeCenter>,
     pub ocl_names: Option<&'a BTreeSet<String>>,
     pub particle_system_names: Option<&'a BTreeSet<String>>,
+    pub special_power_store: Option<&'a SpecialPowerStore>,
+    pub crate_system: Option<&'a CrateSystem>,
 }
 
 /// Cost/time/facility parameters provided by a `Player` to `ThingTemplate::calc_cost_to_build`
@@ -1549,6 +1553,8 @@ impl ThingTemplate {
             (Some(reg), Some(store)) => {
                 let empty_upgrades = UpgradeCenter::new();
                 let empty_names = BTreeSet::new();
+                let empty_sp = SpecialPowerStore::new();
+                let empty_cs = CrateSystem::new();
                 let mut parse_ctx = ModuleParseContext {
                     name_keys: ctx.name_keys,
                     science_store: ctx.science_store,
@@ -1559,6 +1565,8 @@ impl ThingTemplate {
                     damage_fx_names: ctx.damage_fx_names,
                     ocl_names: ctx.ocl_names.unwrap_or(&empty_names),
                     particle_system_names: ctx.particle_system_names.unwrap_or(&empty_names),
+                    special_power_store: ctx.special_power_store.unwrap_or(&empty_sp),
+                    crate_system: ctx.crate_system.unwrap_or(&empty_cs),
                 };
                 reg.parse_module_data(
                     ini,

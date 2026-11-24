@@ -1,13 +1,17 @@
 //! `WP-5.0`: Phase 5 `BehaviorModule` registry, traits, facet interfaces, and `ModuleFactory`
-//! (`PKT-163`, `PKT-164`) plus `WP-5.1` module category submodules.
+//! (`PKT-163`, `PKT-164`) plus `WP-5.1` and `WP-5.2` module category submodules.
 
 pub mod body;
+pub mod collide;
 pub mod create;
 pub mod damage;
 pub mod destroy;
+pub mod die;
 pub mod helper;
 pub mod module;
 pub mod module_factory;
+pub mod special_power;
+pub mod upgrade;
 
 pub use module::{
     AiUpdateFacet, BehaviorModule, BodyFacet, CollideFacet, ContainFacet, CreateFacet,

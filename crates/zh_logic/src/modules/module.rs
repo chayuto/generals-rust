@@ -15,6 +15,8 @@ pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
 use crate::rules::disabled_types::DisabledMaskType;
 use crate::rules::object_status_types::ObjectStatusType;
+use crate::rules::science::ScienceType;
+use crate::rules::special_power_types::SpecialPowerType;
 use crate::rules::upgrade::UpgradeMaskType;
 use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
 use crate::sim::{SimApi, SimView};
@@ -172,6 +174,65 @@ impl ModuleSnapshotHeader {
         Self::xfer_behavior_module_header(xfer)?;
         xfer.xfer_real(damage_scalar)
     }
+
+    /// Serializes `DieModule::xfer` (version `1` + `BehaviorModule::xfer`).
+    pub fn xfer_die_module_header(xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        Self::xfer_behavior_module_header(xfer)
+    }
+
+    /// Serializes `CollideModule::xfer` (version `1` + `BehaviorModule::xfer`).
+    pub fn xfer_collide_module_header(xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        Self::xfer_behavior_module_header(xfer)
+    }
+
+    /// Serializes `CrateCollide::xfer` (version `1` + `CollideModule::xfer`).
+    pub fn xfer_crate_collide_header(xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        Self::xfer_collide_module_header(xfer)
+    }
+
+    /// Serializes `UpgradeMux::upgradeMuxXfer` (version `1` + `m_upgradeExecuted`).
+    pub fn xfer_upgrade_mux(
+        xfer: &mut dyn Xfer,
+        upgrade_executed: &mut Bool,
+    ) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        xfer.xfer_bool(upgrade_executed)
+    }
+
+    /// Serializes `UpgradeModule::xfer` (version `1` + `BehaviorModule::xfer` + `UpgradeMux::upgradeMuxXfer`).
+    pub fn xfer_upgrade_module_header(
+        xfer: &mut dyn Xfer,
+        upgrade_executed: &mut Bool,
+    ) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        Self::xfer_behavior_module_header(xfer)?;
+        Self::xfer_upgrade_mux(xfer, upgrade_executed)
+    }
+
+    /// Serializes `SpecialPowerModule::xfer` (version `1` + `BehaviorModule::xfer` + timer state).
+    pub fn xfer_special_power_module_header(
+        xfer: &mut dyn Xfer,
+        available_on_frame: &mut UnsignedInt,
+        paused_count: &mut Int,
+        paused_on_frame: &mut UnsignedInt,
+        paused_percent: &mut Real,
+    ) -> Result<(), XferError> {
+        let mut version: XferVersion = 1;
+        xfer.xfer_version(&mut version, 1)?;
+        Self::xfer_behavior_module_header(xfer)?;
+        xfer.xfer_unsigned_int(available_on_frame)?;
+        xfer.xfer_int(paused_count)?;
+        xfer.xfer_unsigned_int(paused_on_frame)?;
+        xfer.xfer_real(paused_percent)
+    }
 }
 
 /// Primary simulation module trait (`BehaviorModule`) stored in `ModuleArena` and dispatched via
@@ -214,6 +275,9 @@ pub trait BehaviorModule: Send {
     fn as_body_mut(&mut self) -> Option<&mut dyn BodyFacet> {
         None
     }
+    fn as_die(&self) -> Option<&dyn DieFacet> {
+        None
+    }
     fn as_die_mut(&mut self) -> Option<&mut dyn DieFacet> {
         None
     }
@@ -221,6 +285,9 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_create_mut(&mut self) -> Option<&mut dyn CreateFacet> {
+        None
+    }
+    fn as_collide(&self) -> Option<&dyn CollideFacet> {
         None
     }
     fn as_collide_mut(&mut self) -> Option<&mut dyn CollideFacet> {
@@ -232,7 +299,13 @@ pub trait BehaviorModule: Send {
     fn as_contain_mut(&mut self) -> Option<&mut dyn ContainFacet> {
         None
     }
+    fn as_upgrade(&self) -> Option<&dyn UpgradeFacet> {
+        None
+    }
     fn as_upgrade_mut(&mut self) -> Option<&mut dyn UpgradeFacet> {
+        None
+    }
+    fn as_special_power(&self) -> Option<&dyn SpecialPowerFacet> {
         None
     }
     fn as_special_power_mut(&mut self) -> Option<&mut dyn SpecialPowerFacet> {
@@ -436,9 +509,18 @@ pub trait BodyFacet {
     fn set_constructor_object(&mut self, _constructor_id: ObjectId) {}
 }
 
-/// Death reaction facet (`DieModuleInterface`).
+/// Death reaction facet (`DieModuleInterface` + `EjectPilotDie` extension).
 pub trait DieFacet {
     fn on_die(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &DamageInfo);
+    fn is_die_applicable(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _dmg: &DamageInfo,
+    ) -> Bool {
+        TRUE
+    }
+    fn eject_pilot_dying(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
 }
 
 /// Damage reaction facet (`DamageModuleInterface`).
@@ -481,6 +563,21 @@ pub trait CollideFacet {
         _ctx: ModuleContext,
         _other: ObjectSlot,
     ) -> Bool {
+        FALSE
+    }
+    fn is_hijacked_vehicle_crate_collide(&self) -> Bool {
+        FALSE
+    }
+    fn is_sabotage_building_crate_collide(&self) -> Bool {
+        FALSE
+    }
+    fn is_car_bomb_crate_collide(&self) -> Bool {
+        FALSE
+    }
+    fn is_railroad(&self) -> Bool {
+        FALSE
+    }
+    fn is_salvage_crate_collide(&self) -> Bool {
         FALSE
     }
 }
@@ -527,25 +624,136 @@ pub trait UpgradeFacet {
         ctx: ModuleContext,
         key_mask: &UpgradeMaskType,
     ) -> Bool;
-    fn would_upgrade(&self, key_mask: &UpgradeMaskType) -> Bool;
+    fn would_upgrade(
+        &self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        key_mask: &UpgradeMaskType,
+    ) -> Bool;
     fn reset_upgrade(
         &mut self,
         sim: &mut dyn SimApi,
         ctx: ModuleContext,
         key_mask: &UpgradeMaskType,
     ) -> Bool;
+    fn test_upgrade_conditions(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _key_mask: &UpgradeMaskType,
+    ) -> Bool {
+        FALSE
+    }
+    fn get_upgrade_activation_masks(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _activation: &mut UpgradeMaskType,
+        _conflicting: &mut UpgradeMaskType,
+    ) {
+    }
+    fn perform_upgrade_fx(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn is_sub_objects_upgrade(&self) -> Bool {
+        FALSE
+    }
+    fn give_self_upgrade(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn force_refresh_upgrade(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
 }
 
 /// Special-power activation facet (`SpecialPowerModuleInterface`).
 pub trait SpecialPowerFacet {
-    fn is_ready(&self, sim: &dyn SimView) -> Bool;
-    fn get_ready_frame(&self) -> UnsignedInt;
-    fn set_ready_frame(&mut self, frame: UnsignedInt);
+    fn is_module_for_power(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _template_id: UnsignedInt,
+    ) -> Bool {
+        FALSE
+    }
+    fn is_ready(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool;
+    fn get_percent_ready(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Real {
+        0.0
+    }
+    fn get_ready_frame(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt;
+    fn get_raw_ready_frame(&self) -> UnsignedInt;
+    fn get_power_name(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> String {
+        String::new()
+    }
+    fn get_special_power_id(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
+        0
+    }
+    fn has_special_power(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _sp_type: SpecialPowerType,
+    ) -> Bool {
+        FALSE
+    }
+    fn get_required_science(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> ScienceType {
+        crate::rules::science::SCIENCE_INVALID
+    }
+    fn set_ready_frame(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        frame: UnsignedInt,
+    );
+    fn is_paused(&self) -> Bool {
+        FALSE
+    }
+    fn pause_countdown(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _pause: Bool) {}
+    fn starts_ready(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+        FALSE
+    }
+    fn is_script_only(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+        FALSE
+    }
+    fn get_reference_thing_template_name(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+    ) -> Option<String> {
+        None
+    }
     fn on_special_power_creation(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn start_power_recharge(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    fn mark_special_power_triggered(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _loc: Option<&Coord3D>,
+    ) {
+    }
     fn do_special_power(
         &mut self,
         _sim: &mut dyn SimApi,
         _ctx: ModuleContext,
+        _command_options: UnsignedInt,
+    ) {
+    }
+    fn do_special_power_at_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: ObjectSlot,
+        _command_options: UnsignedInt,
+    ) {
+    }
+    fn do_special_power_at_location(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _loc: &Coord3D,
+        _angle: Real,
+        _command_options: UnsignedInt,
+    ) {
+    }
+    fn do_special_power_using_waypoints(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _pts: &[Coord3D],
         _command_options: UnsignedInt,
     ) {
     }

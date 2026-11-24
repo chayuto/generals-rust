@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "Common/BuildAssistant.h"
 #include "Common/DamageFX.h"
 #include "Common/Dict.h"
 #include "Common/GameAudio.h"
@@ -54,6 +55,8 @@
 #include "GameClient/Water.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/Armor.h"
+#include "GameLogic/CaveSystem.h"
+#include "GameLogic/CrateSystem.h"
 #include "GameLogic/Damage.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/GhostObject.h"
@@ -82,7 +85,33 @@ struct Wp51PlayerListCountTag { using type = Int PlayerList::*; };
 template struct MemberAccess<Wp51PlayerListCountTag, &PlayerList::m_playerCount>;
 inline Int PlayerList::* access_member(Wp51PlayerListCountTag);
 
+struct Wp51PlayerDefaultTeamTag { using type = Team* Player::*; };
+template struct MemberAccess<Wp51PlayerDefaultTeamTag, &Player::m_defaultTeam>;
+inline Team* Player::* access_member(Wp51PlayerDefaultTeamTag);
+
 namespace oracle_wp51 {
+
+class OracleTerrainLogic : public TerrainLogic {
+public:
+    Region3D extent;
+
+    OracleTerrainLogic() {
+        extent.lo = {0.0f, 0.0f, 0.0f};
+        extent.hi = {1000.0f, 1000.0f, 100.0f};
+    }
+
+    void getExtent(Region3D* out) const override {
+        if (out) *out = extent;
+    }
+
+    void getExtentIncludingBorder(Region3D* out) const override {
+        if (out) *out = extent;
+    }
+
+    void getMaximumPathfindExtent(Region3D* out) const override {
+        if (out) *out = extent;
+    }
+};
 
 class NullDisplayStringManager : public DisplayStringManager {
 public:
@@ -253,10 +282,19 @@ struct World {
         TheThingFactory = NEW ThingFactory;
         TheThingFactory->init();
 
+        TheCrateSystem = NEW CrateSystem;
+        TheCrateSystem->init();
+
+        TheCaveSystem = NEW CaveSystem;
+        TheCaveSystem->init();
+
+        TheBuildAssistant = NEW BuildAssistant;
+        TheBuildAssistant->init();
+
         TheAI = NEW AI;
         TheAI->init();
 
-        TheTerrainLogic = NEW TerrainLogic;
+        TheTerrainLogic = NEW OracleTerrainLogic;
         TheTerrainLogic->init();
 
         TheGhostObjectManager = NEW GhostObjectManagerDummy;
@@ -293,6 +331,9 @@ struct World {
 
         TheGameLogic = NEW GameLogic;
         TheGameLogic->reset();
+        // `GameLogic::reset()` invokes `ThePartitionManager->reset()` which deletes `m_cells`;
+        // re-initialize `PartitionManager` against `OracleTerrainLogic` for WP-5.2 spatial queries.
+        ThePartitionManager->init();
 
         Player* p_a = ThePlayerList->getNthPlayer(0);
         Player* p_b = ThePlayerList->getNthPlayer(1);
@@ -315,9 +356,52 @@ struct World {
         TheTeamFactory->initTeam("TeamB", AsciiString::TheEmptyString, TRUE, &dict_b);
         team_a = TheTeamFactory->findTeam("TeamA");
         team_b = TheTeamFactory->findTeam("TeamB");
-        if (team_a && p_a) team_a->setControllingPlayer(p_a);
-        if (team_b && p_b) team_b->setControllingPlayer(p_b);
+        if (team_a && p_a) {
+            team_a->setControllingPlayer(p_a);
+            p_a->*access_member(Wp51PlayerDefaultTeamTag()) = team_a;
+        }
+        if (team_b && p_b) {
+            team_b->setControllingPlayer(p_b);
+            p_b->*access_member(Wp51PlayerDefaultTeamTag()) = team_b;
+        }
         set_frame(1);
+    }
+
+    void init_players(const char* tmpl_a, const char* tmpl_b) {
+        Player* p_a = ThePlayerList->getNthPlayer(0);
+        Player* p_b = ThePlayerList->getNthPlayer(1);
+        if (p_a) {
+            const PlayerTemplate* pta =
+                tmpl_a ? ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(tmpl_a)) : nullptr;
+            p_a->init(pta);
+            if (!p_a->getResourceGatheringManager()) {
+                p_a->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (team_a) {
+                team_a->setControllingPlayer(p_a);
+                p_a->*access_member(Wp51PlayerDefaultTeamTag()) = team_a;
+            }
+        }
+        if (p_b) {
+            const PlayerTemplate* ptb =
+                tmpl_b ? ThePlayerTemplateStore->findPlayerTemplate(NAMEKEY(tmpl_b)) : nullptr;
+            p_b->init(ptb);
+            if (!p_b->getResourceGatheringManager()) {
+                p_b->*access_member(Wp51PlayerRgmTag()) = newInstance(ResourceGatheringManager);
+            }
+            if (team_b) {
+                team_b->setControllingPlayer(p_b);
+                p_b->*access_member(Wp51PlayerDefaultTeamTag()) = team_b;
+            }
+        }
+        if (p_a && p_b) {
+            p_a->setPlayerRelationship(p_b, ENEMIES);
+            p_b->setPlayerRelationship(p_a, ENEMIES);
+        }
+    }
+
+    void flush_destroy_list() {
+        TheGameLogic->processDestroyList();
     }
 
     void set_frame(UnsignedInt f) {
@@ -344,6 +428,12 @@ struct World {
                 ObjectCreationListStore::parseObjectCreationListDefinition(ini);
             } else if (std::strcmp(tok, "SpecialPower") == 0) {
                 SpecialPowerStore::parseSpecialPowerDefinition(ini);
+            } else if (std::strcmp(tok, "CrateData") == 0) {
+                INI::parseCrateTemplateDefinition(ini);
+            } else if (std::strcmp(tok, "CommandSet") == 0) {
+                INI::parseCommandSetDefinition(ini);
+            } else if (std::strcmp(tok, "PlayerTemplate") == 0) {
+                INI::parsePlayerTemplateDefinition(ini);
             } else if (std::strcmp(tok, "Weapon") == 0) {
                 WeaponStore::parseWeaponTemplateDefinition(ini);
             } else if (std::strcmp(tok, "Locomotor") == 0) {
