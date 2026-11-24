@@ -188,3 +188,30 @@ Prior to implementing **`WP-5.1` (`28` packets: `PKT-165..192`)**, a single cura
 
 3. **Updated Operational Rule for `WP-4.x` / `WP-5.2+`:**
    - Continue delegating **`C4` spine gap lists, re-entrancy designs, and sub-batch splits** to an external read-only research agent via curated exact repo paths, **while reserving local `env:local-full` capacity strictly for `vendor/GeneralsX` `.cpp` detail checks, `oracle_*_world.h` singleton bring-up, Rust strong typing, and `$0` local 3-mode verification**.
+
+---
+
+### 6.7 Empirical `WP-5.2` Subagent Context-Bloat Audit & Wave-Packer Protocol (`2026-11-24`)
+
+Transcript telemetry from early `WP-5.2` worker runs identified why single-worker sessions burned `5–16M` cached input tokens and tripped rate limits before emitting Rust code:
+
+| Subagent Session | Outcome | Planner Turns | File Writes | New Input Tokens | Cache Read Tokens | Output Tokens | Peak Context |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `3bde15df` (`WP-5.2-B` #1) | Hung in `lldb` (`21 min`) | `33` | `6` | `367,090` | `8,775,569` | `44,650` | `349,452` |
+| `fa3fd4d7` (`WP-5.2-B` #2) | Landed `49b51de` (`21` pkts) | `67` | `27` | `1,353,058` | `16,521,582` | `160,152` | `525,704` |
+| `0c28e67a` (`WP-5.2-A` #1) | `429` Quota hit at Turn 7 | `7` | `0` | `464,430` | `1,624,053` | `7,455` | `464,436` |
+| `dfe0fb6d` (`WP-5.2-A` #2) | Spine audit (`0` writes) | `15+` | `0` | `462,161+` | `5,059,849+` | `23,669+` | `505,000+` |
+
+#### Five Root Causes Quantified
+1. **Unattended `lldb --batch` Hang (`3bde15df`):** Invoking `lldb --batch -o "run ..."` without `-k "bt 15" -k "quit" -o "quit"` left `lldb` parked at an interactive prompt on `EXC_BAD_ACCESS` (`Pathfinder::getCell` null `m_map`) after inflating context to `349k`.
+2. **Unbounded Full-File Exploratory Reads (`458k–526k` Context Floor):** Turn 1–5 bulk-read entire multi-thousand-line files (`sim/mod.rs` `~40k` tokens, `module_factory.rs` `~13k`, `golden_wp52_upgrade.rs` `~13k`, `module.rs` `~6.4k`, `ARCHITECTURE_SPEC.md` `~6.3k`, plus `vendor/` headers), locking every subsequent turn into replaying `~460k–525k` tokens (`$O(T^2)` cache-read blowup).
+3. **Duplicated `140`-Line Packet Preambles:** Reading `12–20` `PKT-*.md` files directly repeats identical determinism cheat sheets, EA GPLv3 copyright headers, and boilerplate symbol indexes (`~20k–35k` redundant tokens per wave).
+4. **Noisy Compiler & Linker Output (`~712 KB` per compile):** `scripts/build_oracle.py` emitted hundreds of `-Wnew-returns-null` diagnostics and macOS `ld: warning: ... built for newer version 26.0` lines on clean builds.
+5. **Mid-Wave Spine Discovery:** Missing shared `SimApi` / `SimWorld` / `DieFacet` hooks discovered mid-wave stall worker contexts unless audited up front (requiring `WP-5.2-0b` and stopping `dfe0fb6d`).
+
+#### Five Mandatory Lean-Wave Guardrails (`< 100k` Peak Context Target)
+1. **Pre-Pack Every Wave with `scripts/pack_wave.py` (`$0` CPU):** Generate `/tmp/wave_<id>.md` (`~20k–35k` tokens total) containing deduplicated rules once, extracted `ObjectRecord`/`SimView`/`SimApi`/`ModuleSnapshotHeader`/`BehaviorModule`/facet signatures (no `SimContext` impl bodies), matching `BUILTIN_ZH_MODULES` lines, `oracle_wp51::World` signatures, and license-stripped C++ sources starting at `## 3. Reference C++ Source`.
+2. **Hard Ban on Full-File Reference Reads in Worker Briefs:** Workers read `/tmp/wave_<id>.md` on Turn 1 and must **never** read full `sim/mod.rs`, `module_factory.rs`, `golden_*.rs`, `ARCHITECTURE_SPEC.md`, `lint_determinism.py`, or `vendor/` `.cpp` files (use targeted `grep -n <sym> <file> | head -n 20` if a single helper signature is needed).
+3. **`10–12` Packet Wave Cap & Strict Write Schedule:** Split large categories into `10–12` packet waves (`WP-5.2-D` split into `D1` [10] + `D2` [10]); require Turn-2 C++ oracle creation and Turn-4 batched Rust writes, or immediate stop by Turn 2 if a shared spine blocker is found.
+4. **Quiet Clean Oracle Logs (`scripts/build_oracle.py`):** Suppress `-Wno-new-returns-null` and macOS `-Wl,-w` linker version warnings while keeping real errors intact.
+5. **Hard Context & Debugger Circuit Breakers:** Always pass `-k "bt 15" -k "quit" -o "quit"` to `lldb --batch`, and terminate/re-brief any worker exceeding `150k` context or Turn 4 with `0` writes.

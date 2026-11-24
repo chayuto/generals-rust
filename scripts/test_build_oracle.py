@@ -77,6 +77,9 @@ class TestBuildOracle(unittest.TestCase):
             self.assertIn("-fsanitize=undefined", cmd)
             self.assertIn("-Wno-macro-redefined", cmd)
             self.assertIn("-Wno-implicit-exception-spec-mismatch", cmd)
+            self.assertIn("-Wno-new-returns-null", cmd)
+            if sys.platform == "darwin":
+                self.assertIn("-Wl,-w", cmd)
             self.assertIn("-ffp-contract=off", cmd)
             self.assertIn("-DTEST_FLAG=1", cmd)
             self.assertIn("-include", cmd)

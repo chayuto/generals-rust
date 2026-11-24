@@ -266,7 +266,11 @@ def build_command(
         compile_flags.append("-ffp-contract=off")
 
     # Quiet legacy WWLib / DXVK header warnings that do not affect oracle correctness.
-    for wflag in ("-Wno-macro-redefined", "-Wno-implicit-exception-spec-mismatch"):
+    for wflag in (
+        "-Wno-macro-redefined",
+        "-Wno-implicit-exception-spec-mismatch",
+        "-Wno-new-returns-null",
+    ):
         if wflag not in compile_flags:
             compile_flags.append(wflag)
 
@@ -280,6 +284,8 @@ def build_command(
     cmd.extend(str(s) for s in sources)
     cmd.extend(["-o", str(output)])
     cmd.extend(link_args)
+    if sys.platform == "darwin" and "-Wl,-w" not in cmd:
+        cmd.append("-Wl,-w")
     return cmd
 
 
