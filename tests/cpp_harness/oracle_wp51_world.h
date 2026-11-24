@@ -13,6 +13,7 @@
 
 #include "oracle_common.h"
 
+#include <cstdarg>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -25,6 +26,7 @@
 #include "Common/GameLOD.h"
 #include "Common/GameState.h"
 #include "Common/GlobalData.h"
+#include "Common/MessageStream.h"
 #include "Common/ModuleFactory.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/NameKeyGenerator.h"
@@ -47,13 +49,16 @@
 #include "GameClient/Eva.h"
 #include "GameClient/FXList.h"
 #include "GameClient/GameClient.h"
+#include "GameClient/GameText.h"
 #include "GameClient/Image.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/RayEffect.h"
+#include "GameClient/SelectionXlat.h"
 #include "GameClient/Snow.h"
 #include "GameClient/Water.h"
 #include "GameLogic/AI.h"
+#include "GameLogic/AIPathfind.h"
 #include "GameLogic/Armor.h"
 #include "GameLogic/CaveSystem.h"
 #include "GameLogic/CrateSystem.h"
@@ -68,6 +73,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/SidesList.h"
 #include "GameLogic/TerrainLogic.h"
+#include "GameLogic/VictoryConditions.h"
 #include "GameLogic/Weapon.h"
 #include "GameLogic/WeaponSet.h"
 
@@ -110,6 +116,19 @@ public:
 
     void getMaximumPathfindExtent(Region3D* out) const override {
         if (out) *out = extent;
+    }
+
+    Real getGroundHeight(Real, Real, Coord3D* normal = nullptr) const override {
+        if (normal) { normal->x = 0.0f; normal->y = 0.0f; normal->z = 1.0f; }
+        return 0.0f;
+    }
+
+    Bool isCliffCell(Real, Real) const override { return FALSE; }
+
+    Bool isUnderwater(Real, Real, Real* waterZ = nullptr, Real* terrainZ = nullptr) override {
+        if (waterZ) *waterZ = 0.0f;
+        if (terrainZ) *terrainZ = 0.0f;
+        return FALSE;
     }
 };
 
@@ -208,6 +227,34 @@ public:
     Real getFileLengthMS(AsciiString) const override { return 0.0f; }
     void closeAnySamplesUsingFile(const void*) override {}
     void setDeviceListenerPosition() override {}
+};
+
+class NullGameText : public GameTextInterface {
+public:
+    AsciiStringVec empty_vec;
+    void init() override {}
+    void reset() override {}
+    void update() override {}
+    UnicodeString fetch(const Char*, Bool* exists = nullptr) override {
+        if (exists) *exists = FALSE;
+        return UnicodeString::TheEmptyString;
+    }
+    UnicodeString fetch(AsciiString, Bool* exists = nullptr) override {
+        if (exists) *exists = FALSE;
+        return UnicodeString::TheEmptyString;
+    }
+    UnicodeString fetchFormat(const Char*, ...) override { return UnicodeString::TheEmptyString; }
+    UnicodeString fetchOrSubstitute(const Char*, const WideChar* sub) override {
+        return sub ? UnicodeString(sub) : UnicodeString::TheEmptyString;
+    }
+    UnicodeString fetchOrSubstituteFormat(const Char*, const WideChar*, ...) override {
+        return UnicodeString::TheEmptyString;
+    }
+    UnicodeString fetchOrSubstituteFormatVA(const Char*, const WideChar*, va_list) override {
+        return UnicodeString::TheEmptyString;
+    }
+    AsciiStringVec& getStringsWithLabelPrefix(AsciiString) override { return empty_vec; }
+    void initMapStringFile(const AsciiString&) override {}
 };
 
 struct World {
@@ -321,6 +368,13 @@ struct World {
         TheDisplayStringManager = new NullDisplayStringManager;
         TheGameClient = new NullGameClient;
         TheInGameUI = new NullInGameUI;
+        TheGameText = new NullGameText;
+        TheGameText->init();
+        TheMessageStream = NEW MessageStream;
+        TheMessageStream->init();
+        TheSelectionTranslator = NEW SelectionTranslator;
+        TheVictoryConditions = createVictoryConditions();
+        TheVictoryConditions->init();
         TheControlBar = NEW ControlBar;
         TheRayEffects = NEW RayEffectSystem;
         TheRayEffects->init();
@@ -334,6 +388,8 @@ struct World {
         // `GameLogic::reset()` invokes `ThePartitionManager->reset()` which deletes `m_cells`;
         // re-initialize `PartitionManager` against `OracleTerrainLogic` for WP-5.2 spatial queries.
         ThePartitionManager->init();
+        // `GameLogic::reset()` also resets `TheAI`; allocate pathfind cells against `OracleTerrainLogic`.
+        TheAI->pathfinder()->newMap();
 
         Player* p_a = ThePlayerList->getNthPlayer(0);
         Player* p_b = ThePlayerList->getNthPlayer(1);
