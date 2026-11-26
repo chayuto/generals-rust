@@ -4,6 +4,8 @@
 //! Packet: `packets/phase5/PKT-300_TunnelContain.md`.
 //! Golden test: `crates/zh_logic/tests/golden_pkt300_tunnel.rs`.
 //!
+//! The tracker operations here also serve `CaveContain`, selected by [`TrackerKey`].
+//!
 //! Every tunnel of a player shares that player's [`TunnelTrackerState`]; the module's own
 //! `OpenContain` list stays empty. `healObjects` runs once per tunnel per update, as the
 //! reference builds it (`PRESERVE_TUNNEL_HEAL_STACKING`), so `updateFullHealTime` is compiled
@@ -29,7 +31,7 @@ use crate::rules::combat_types::{DamageType, DeathType};
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::KindOfType;
 use crate::rules::object_status_types::ObjectStatusType;
-use crate::sim::{SimApi, SimView};
+use crate::sim::{SimApi, SimView, TunnelTrackerState};
 use std::any::Any;
 use zh_common::ini::{IniError, IniReader, LOGICFRAMES_PER_SECOND};
 use zh_common::types::{
@@ -79,15 +81,40 @@ fn controlling_player(sim: &dyn SimView, slot: ObjectSlot) -> Option<Int> {
     sim.object(slot).map(|o| sim.player_index(o.team_id))
 }
 
-/// `m_containList` of `player`'s tracker.
-pub fn tracker_contained(sim: &dyn SimView, player: Int) -> &[ObjectId] {
-    sim.tunnel_tracker(player)
-        .map_or(&[], |t| t.contain_list.as_slice())
+/// Which `TunnelTracker` an operation works on: a player's tunnel network, or the one
+/// `CaveSystem` keeps for a cave index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackerKey {
+    Player(Int),
+    Cave(Int),
+}
+
+impl TrackerKey {
+    pub fn get(self, sim: &dyn SimView) -> Option<&TunnelTrackerState> {
+        match self {
+            Self::Player(p) => sim.tunnel_tracker(p),
+            Self::Cave(i) => sim.cave_tracker(i),
+        }
+    }
+
+    /// A player's tracker is made on demand. A cave tracker exists only once a cave has
+    /// registered its index.
+    pub fn get_mut(self, sim: &mut dyn SimApi) -> Option<&mut TunnelTrackerState> {
+        match self {
+            Self::Player(p) => Some(sim.tunnel_tracker_mut(p)),
+            Self::Cave(i) => sim.cave_tracker_mut(i),
+        }
+    }
+}
+
+/// `m_containList` of the tracker.
+pub fn tracker_contained(sim: &dyn SimView, key: TrackerKey) -> &[ObjectId] {
+    key.get(sim).map_or(&[], |t| t.contain_list.as_slice())
 }
 
 /// `TunnelTracker::getContainCount`.
-fn tracker_contain_count(sim: &dyn SimView, player: Int) -> UnsignedInt {
-    sim.tunnel_tracker(player)
+pub(crate) fn tracker_contain_count(sim: &dyn SimView, key: TrackerKey) -> UnsignedInt {
+    key.get(sim)
         .map_or(0, |t| t.contain_list_size as UnsignedInt)
 }
 
@@ -95,7 +122,7 @@ fn tracker_contain_count(sim: &dyn SimView, player: Int) -> UnsignedInt {
 /// `AllowInsideKindOf` says.
 pub fn tracker_is_valid_container_for(
     sim: &dyn SimView,
-    player: Int,
+    key: TrackerKey,
     obj: ObjectSlot,
     check_capacity: Bool,
 ) -> Bool {
@@ -103,19 +130,34 @@ pub fn tracker_is_valid_container_for(
         return FALSE;
     }
     if check_capacity != FALSE {
-        let count = tracker_contain_count(sim, player) as Int;
+        let count = tracker_contain_count(sim, key) as Int;
         return Bool::from(count < sim.max_tunnel_capacity());
     }
     TRUE
 }
 
+/// `Object::onContainedBy(nullptr)`: the front entrance is no longer an object. The rider
+/// stays listed but is contained by nothing.
+fn on_contained_by_nothing(sim: &mut dyn SimApi, rider: ObjectSlot) {
+    sim.set_status(rider, ObjectStatusType::Unselectable);
+    sim.clear_status(rider, ObjectStatusType::Masked);
+    sim.set_contained_by(rider, None);
+    let now = sim.frame();
+    if let Some(o) = sim.object_mut(rider) {
+        o.contained_by_frame = now;
+    }
+    sim.handle_partition_cell_maintenance(rider);
+}
+
 /// `TunnelTracker::onTunnelDestroyed`. The last entrance takes every passenger with it;
 /// otherwise the passengers that came in through it move to the front entrance.
-pub fn tracker_on_tunnel_destroyed(sim: &mut dyn SimApi, player: Int, dead: ObjectSlot) {
+pub fn tracker_on_tunnel_destroyed(sim: &mut dyn SimApi, key: TrackerKey, dead: ObjectSlot) {
     let Some(dead_id) = sim.object(dead).map(|o| o.id) else {
         return;
     };
-    let tracker = sim.tunnel_tracker_mut(player);
+    let Some(tracker) = key.get_mut(sim) else {
+        return;
+    };
     let was_last = tracker.on_tunnel_destroyed(dead_id);
     let front = tracker.tunnel_ids.first().copied();
     // Neither `destroyObject` nor `onContainedBy` edits the list, so a copy walks it.
@@ -128,9 +170,10 @@ pub fn tracker_on_tunnel_destroyed(sim: &mut dyn SimApi, player: Int, dead: Obje
                 sim.destroy_object(rider);
             }
         }
-        let tracker = sim.tunnel_tracker_mut(player);
-        tracker.contain_list.clear();
-        tracker.contain_list_size = 0;
+        if let Some(tracker) = key.get_mut(sim) {
+            tracker.contain_list.clear();
+            tracker.contain_list_size = 0;
+        }
         return;
     }
 
@@ -142,17 +185,20 @@ pub fn tracker_on_tunnel_destroyed(sim: &mut dyn SimApi, player: Int, dead: Obje
         if sim.object(rider).and_then(|o| o.contained_by) != Some(dead) {
             continue;
         }
-        // Every listed entrance is a live object, so there is always a front one.
-        if let Some(front) = front {
-            let enclosing = sim.contain_is_enclosing_container_for(front, rider);
-            on_contained_by(sim, rider, front, enclosing);
+        // A tunnel leaves the list when it is deleted; a cave that is deleted without
+        // dying stays on it.
+        match front {
+            // Tunnels and caves both enclose. `front` can be the dying cave itself, if it
+            // was listed twice, and its own module cannot be asked while it executes.
+            Some(front) => on_contained_by(sim, rider, front, TRUE),
+            None => on_contained_by_nothing(sim, rider),
         }
     }
 }
 
 /// `TunnelTracker::healObjects` and `healObject`.
-pub fn tracker_heal_objects(sim: &mut dyn SimApi, player: Int, frames: Real) {
-    let passengers = tracker_contained(sim, player).to_vec();
+pub fn tracker_heal_objects(sim: &mut dyn SimApi, key: TrackerKey, frames: Real) {
+    let passengers = tracker_contained(sim, key).to_vec();
     for id in passengers {
         let Some(rider) = sim.find_object(id) else {
             continue;
@@ -174,15 +220,17 @@ pub fn tracker_heal_objects(sim: &mut dyn SimApi, player: Int, frames: Real) {
 }
 
 /// `TunnelTracker::getCurNemesis`. A stale nemesis is forgotten as a side effect.
-pub fn tracker_cur_nemesis(sim: &mut dyn SimApi, player: Int) -> Option<ObjectSlot> {
-    let (id, timestamp) = sim
-        .tunnel_tracker(player)
+pub fn tracker_cur_nemesis(sim: &mut dyn SimApi, key: TrackerKey) -> Option<ObjectSlot> {
+    let (id, timestamp) = key
+        .get(sim)
         .map(|t| (t.cur_nemesis_id, t.nemesis_timestamp))?;
     if id == ObjectId::INVALID {
         return None;
     }
     if timestamp.wrapping_add(4 * LOGICFRAMES_PER_SECOND as UnsignedInt) < sim.frame() {
-        sim.tunnel_tracker_mut(player).cur_nemesis_id = ObjectId::INVALID;
+        if let Some(tracker) = key.get_mut(sim) {
+            tracker.cur_nemesis_id = ObjectId::INVALID;
+        }
         return None;
     }
     let target = sim.find_object(id).filter(|&slot| {
@@ -195,14 +243,16 @@ pub fn tracker_cur_nemesis(sim: &mut dyn SimApi, player: Int) -> Option<ObjectSl
         })
     });
     if target.is_none() {
-        sim.tunnel_tracker_mut(player).cur_nemesis_id = ObjectId::INVALID;
+        if let Some(tracker) = key.get_mut(sim) {
+            tracker.cur_nemesis_id = ObjectId::INVALID;
+        }
     }
     target
 }
 
 /// `TunnelTracker::updateNemesis`.
-pub fn tracker_update_nemesis(sim: &mut dyn SimApi, player: Int, target: Option<ObjectSlot>) {
-    if tracker_cur_nemesis(sim, player).is_none() {
+pub fn tracker_update_nemesis(sim: &mut dyn SimApi, key: TrackerKey, target: Option<ObjectSlot>) {
+    if tracker_cur_nemesis(sim, key).is_none() {
         let Some(target) = target else {
             return;
         };
@@ -219,13 +269,16 @@ pub fn tracker_update_nemesis(sim: &mut dyn SimApi, player: Int, target: Option<
         };
         if wanted {
             let now = sim.frame();
-            let tracker = sim.tunnel_tracker_mut(player);
-            tracker.cur_nemesis_id = id;
+            if let Some(tracker) = key.get_mut(sim) {
+                tracker.cur_nemesis_id = id;
+                tracker.nemesis_timestamp = now;
+            }
+        }
+    } else if tracker_cur_nemesis(sim, key) == target {
+        let now = sim.frame();
+        if let Some(tracker) = key.get_mut(sim) {
             tracker.nemesis_timestamp = now;
         }
-    } else if tracker_cur_nemesis(sim, player) == target {
-        let now = sim.frame();
-        sim.tunnel_tracker_mut(player).nemesis_timestamp = now;
     }
 }
 
@@ -259,7 +312,7 @@ impl TunnelContain {
         let Some(player) = controlling_player(sim, ctx.owner_slot) else {
             return;
         };
-        tracker_on_tunnel_destroyed(sim, player, ctx.owner_slot);
+        tracker_on_tunnel_destroyed(sim, TrackerKey::Player(player), ctx.owner_slot);
         self.is_currently_registered = FALSE;
     }
 
@@ -346,7 +399,7 @@ impl ContainBehavior for TunnelContain {
             return;
         }
         let old_player = sim.player_index(old_team);
-        tracker_on_tunnel_destroyed(sim, old_player, ctx.owner_slot);
+        tracker_on_tunnel_destroyed(sim, TrackerKey::Player(old_player), ctx.owner_slot);
         let new_player = sim.player_index(new_team);
         let Some(id) = sim.object(ctx.owner_slot).map(|o| o.id) else {
             return;
@@ -408,7 +461,7 @@ impl ContainBehavior for TunnelContain {
         };
         // One `DamageInfo` serves every passenger.
         let mut dmg = dmg.clone();
-        while let Some(&id) = tracker_contained(sim, player).first() {
+        while let Some(&id) = tracker_contained(sim, TrackerKey::Player(player)).first() {
             let Some(rider) = sim.find_object(id) else {
                 break;
             };
@@ -448,7 +501,11 @@ impl ContainBehavior for TunnelContain {
         let Some(player) = controlling_player(sim, ctx.owner_slot) else {
             return UpdateSleepTime::NONE;
         };
-        tracker_heal_objects(sim, player, self.data.frames_for_full_heal);
+        tracker_heal_objects(
+            sim,
+            TrackerKey::Player(player),
+            self.data.frames_for_full_heal,
+        );
 
         let Some((source, timestamp)) = sim.object_last_damage(ctx.owner_slot) else {
             return UpdateSleepTime::NONE;
@@ -456,7 +513,7 @@ impl ContainBehavior for TunnelContain {
         if timestamp.wrapping_add(LOGICFRAMES_PER_SECOND as UnsignedInt) > sim.frame() {
             if let Some(attacker) = sim.find_object(source) {
                 if sim.player_relationship(ctx.owner_slot, attacker) == Relationship::Enemies {
-                    tracker_update_nemesis(sim, player, Some(attacker));
+                    tracker_update_nemesis(sim, TrackerKey::Player(player), Some(attacker));
                 }
             }
         }
@@ -473,13 +530,15 @@ impl ContainBehavior for TunnelContain {
     // The getters below answer from the player's tracker.
 
     fn contain_count_view(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
-        controlling_player(sim, ctx.owner_slot).map_or(0, |p| tracker_contain_count(sim, p))
+        controlling_player(sim, ctx.owner_slot)
+            .map_or(0, |p| tracker_contain_count(sim, TrackerKey::Player(p)))
     }
     fn contain_max_view(&self, sim: &dyn SimView, ctx: ModuleContext) -> Int {
         controlling_player(sim, ctx.owner_slot).map_or(0, |_| sim.max_tunnel_capacity())
     }
     fn contained_view<'a>(&'a self, sim: &'a dyn SimView, ctx: ModuleContext) -> &'a [ObjectId] {
-        controlling_player(sim, ctx.owner_slot).map_or(&[], |p| tracker_contained(sim, p))
+        controlling_player(sim, ctx.owner_slot)
+            .map_or(&[], |p| tracker_contained(sim, TrackerKey::Player(p)))
     }
     fn contains_view(&self, sim: &dyn SimView, ctx: ModuleContext, id: ObjectId) -> Bool {
         let inside = sim
@@ -501,7 +560,7 @@ impl ContainBehavior for TunnelContain {
         check_capacity: Bool,
     ) -> Bool {
         controlling_player(sim, ctx.owner_slot).map_or(FALSE, |p| {
-            tracker_is_valid_container_for(sim, p, rider, check_capacity)
+            tracker_is_valid_container_for(sim, TrackerKey::Player(p), rider, check_capacity)
         })
     }
     fn order_exit(

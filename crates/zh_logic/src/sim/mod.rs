@@ -1476,6 +1476,9 @@ pub trait SimApi: SimView {
     fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState;
     fn cave_register(&mut self, cave_index: Int);
     fn cave_unregister(&mut self, cave_index: Int);
+    /// `CaveInterface::setOriginalTeam` on `cave`'s cave module. `FALSE` when the object
+    /// has none to call. The executing module cannot be reached this way.
+    fn cave_set_original_team(&mut self, cave: ObjectSlot, team: TeamId) -> Bool;
     fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState>;
     fn launch_projectile(
         &mut self,
@@ -5171,7 +5174,8 @@ impl SimApi for SimContext {
         else {
             return;
         };
-        if contained || under_const || sold {
+        // An object without a team has no controlling player.
+        if contained || under_const || sold || old_team == TeamId::INVALID {
             return;
         }
         if !self.world.player_default_teams.is_empty()
@@ -6280,7 +6284,15 @@ impl SimApi for SimContext {
             return;
         };
         self.world.team_member_remove(old_team, owner);
+        // `TeamId::INVALID` is a null `Team*`: `setTeam` runs `onCapture` only between two
+        // teams.
+        if new_team == TeamId::INVALID {
+            return;
+        }
         self.world.team_member_prepend(new_team, owner);
+        if old_team == TeamId::INVALID {
+            return;
+        }
         self.idle_on_capture(owner, old_team, new_team);
         *self.world.player_captured_objects.entry(new_team).or_insert(0) += 1;
         for ms in beh_slots {
@@ -6639,6 +6651,27 @@ impl SimApi for SimContext {
 
     fn cave_unregister(&mut self, cave_index: Int) {
         self.world.cave_system.unregister_cave(cave_index);
+    }
+
+    fn cave_set_original_team(&mut self, cave: ObjectSlot, team: TeamId) -> Bool {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(cave).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::CAVE_INTERFACE))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        let Some(&ms) = slots.first() else {
+            return FALSE;
+        };
+        let mut found = FALSE;
+        let _ = self.dispatch_module(ms, |m, _, _| {
+            if let Some(c) = m.as_cave_mut() {
+                c.set_original_team(team);
+                found = TRUE;
+            }
+        });
+        found
     }
 
     fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState> {
@@ -8946,6 +8979,10 @@ impl SimApi for MockSimApi {
 
     fn cave_unregister(&mut self, cave_index: Int) {
         self.ctx.cave_unregister(cave_index);
+    }
+
+    fn cave_set_original_team(&mut self, cave: ObjectSlot, team: TeamId) -> Bool {
+        self.ctx.cave_set_original_team(cave, team)
     }
 
     fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState> {

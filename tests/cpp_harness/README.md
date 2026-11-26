@@ -70,12 +70,36 @@ A small object normally spans at most two cells per axis, and its cell array has
 - **What goes wrong:** the reference reads freed memory when the destroy list is flushed (a) while a passenger list still holds a destroyed object, which happens after a unit is exited through another player's tunnel and then destroyed, or (b) while an object's container has been destroyed, which happens after a unit enters a sold or killed tunnel that is later destroyed.
 - **How the oracle handles it:** `gen_pkt300_tunnel.cpp` skips the flush in those states only; the operations themselves still run. The port stores object ids, so it has no matching undefined behaviour, and no vector says what it should do there.
 
+### A cave never leaves its network when it is deleted
+
+- **Where:** `CaveContain.cpp`. It overrides `onDie` but not `onDelete`, unlike `TunnelContain`.
+- **What goes wrong:** a cave destroyed without dying stays on its tracker's list of entrances. If it becomes the front entrance after a flush, `TunnelTracker::onTunnelDestroyed` calls `onContainedBy(nullptr)`: the riders stay listed but are contained by nothing, and can be listed a second time. A cave whose index is switched before `onBuildComplete` is listed twice.
+- **How the oracle handles it:** `gen_pkt264_cave.cpp` runs all of this.
+
+### A cave can end up without a team
+
+- **Where:** `CaveContain::onRemoving` and `recalcApparentControllingPlayer`.
+- **What goes wrong:** a cave built while its network is occupied has no `m_originalTeam`. If the network empties through it, every cave of the index is defected to `nullptr`. `ActiveBody::attemptDamage` then dereferences the null player when a hit on or from such a cave names a source.
+- **How the oracle handles it:** `gen_pkt264_cave.cpp` keeps the teamless caves and sends those hits without a source.
+
+### `CaveSystem` crashes or spins on indices it was not built for
+
+- Contain calls, queries and `onDie` on a cave whose index no cave has registered dereference a null tracker.
+- `registerNewCave` with a negative index appends slots until memory runs out.
+- Saving a system with an unused index below a used one throws.
+
+### Shared passenger lists ignore "expose stealthed units"
+
+`TunnelTracker::removeFromContain` takes `exposeStealthUnits` and never reads it, so leaving a tunnel or cave detects nobody. Mutating that argument in the port changes nothing, which is correct. `golden_pkt264_cave` forces stealthed passengers out and records that none is detected.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault.
 
 - **Neutral player without a default team.** `Player::init` leaves `m_defaultTeam` null, and `GarrisonContain::onObjectCreated` spawns its `InitialRoster` into `getControllingPlayer()->getDefaultTeam()`. `init_with_neutral_player()` now creates `TeamNeutral` and aborts if the player still has no default team.
 - **UI messages.** Damaging a structure reaches `Radar::tryUnderAttackEvent`, then `InGameUI::message`, which needs `TheGlobalLanguageData`. `NullInGameUI` overrides the message calls as no-ops.
+
+- **Shroud edges.** An object whose looking changes a cell for the local player reaches `TheDisplay`, which is null. A harness that moves looking objects between teams must first reveal the map to those players, each while another player is local (`gen_pkt264_cave.cpp`).
 
 After changing the fixture, rebuild every oracle that uses the changed function and `cmp` its output with the committed JSON.
 

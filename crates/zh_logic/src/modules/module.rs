@@ -1558,7 +1558,11 @@ pub trait CaveFacet {
         ctx: ModuleContext,
         new_index: Int,
     );
+    /// `TeamId::INVALID` is the null team.
     fn set_original_team(&mut self, old_team: TeamId);
+    /// `CaveContain::recalcApparentControllingPlayer`, which `Player` and `StealthUpdate`
+    /// call through the contain interface.
+    fn recalc_apparent_controlling_player(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
 }
 
 /// Land mine arm/disarm facet (`LandMineInterface`).

@@ -794,6 +794,9 @@ impl SimApi for EngineSim<'_> {
     fn cave_unregister(&mut self, cave_index: Int) {
         not_wired("cave_unregister")
     }
+    fn cave_set_original_team(&mut self, cave: ObjectSlot, team: TeamId) -> Bool {
+        not_wired("cave_set_original_team")
+    }
     fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState> {
         not_wired("cave_tracker_mut")
     }

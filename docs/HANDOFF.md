@@ -7,7 +7,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
-- Packets: 220 of 463 implemented, 243 unported (Phase 2: 102, Phase 4: 4, Phase 5: 91, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 221 of 463 implemented, 242 unported (Phase 2: 102, Phase 4: 4, Phase 5: 90, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -19,7 +19,8 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | `a31f330`, `2700f1d` | Spatial grid stage 4a–4b (`PKT-160 PartitionManager`): shroud cells, object-side vision/shroud/jamming, `SightingInfo`, refresh sites, `TerrainLogic::setActiveBoundary`, faithful `Object::onDestroy` + `TeamMemberList` ordering |
 | `de99fdb` | `PKT-372 SpyVisionUpdate` (plus `SpyVisionSpecialPower` / `SabotageInternetCenterCrateCollide` wiring and `SimApi` vision-spied helpers) & `PKT-323 DynamicShroudClearingRangeUpdate` (`golden_shroud_updates`) |
 | `b428ad1` | Contain getters take the game view (owner decision on `OPEN_DECISIONS.md` items 4 and 5) |
-| (this commit) | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
+| `fafa769` and next | `PKT-300 TunnelContain`, `PKT-264 CaveContain` |
+| `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 
 ## Not verified
@@ -32,12 +33,16 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 - **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game). The one-module trial is done and its measured cost is recorded there. It decides whether more module ports are the best use of effort.
 - Cheap further swaps: the byte CRC (inline in a header, so it forces a large rebuild) and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
-- If module porting continues: `PKT-348 PhysicsUpdate` (read, not started; it needs a `set_object_transform` on `SimApi`, Matrix3D X/Y rotations, a deferred op for re-entrant forces, and `get_mass` to include contained items), or the unblocked `PKT-264` (needs the `PKT-300` tracker operations over the cave trackers) and `PKT-284` (needs the remaining containment hooks).
+- If module porting continues: `PKT-348 PhysicsUpdate` (read, not started; it needs a `set_object_transform` on `SimApi`, Matrix3D X/Y rotations, a deferred op for re-entrant forces, and `get_mass` to include contained items), or `PKT-284 OverlordContain` (needs the remaining containment hooks, `OPEN_DECISIONS.md` item 5).
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.
 
 ## Waiting on the owner
 
 - `OPEN_DECISIONS.md` item 10, and the other unanswered items there.
+
+## Cost of module ports
+
+One worker per packet, with a script-built reading bundle: about 305k tokens for `PKT-300` and 270k for `PKT-264` (roughly 900 and 450 lines of C++ without comments), plus the coordinator's checks. The coordinator rebuilds the oracle three ways, reruns the gates and runs random mutations on the new module (read each survivor against the C++: several were harmless). Start the coordinator from a fresh session.
 
 ## How the recent work was checked
 

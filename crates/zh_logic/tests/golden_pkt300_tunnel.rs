@@ -14,7 +14,9 @@ use zh_common::xfer::{Xfer, XferCrc, XferError, XferSave};
 use zh_logic::arena::{FacetMask, ModuleContext, ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::DamageInfo;
 use zh_logic::modules::contain::open_contain::kill_object;
-use zh_logic::modules::contain::tunnel_contain::{tracker_cur_nemesis, tracker_update_nemesis};
+use zh_logic::modules::contain::tunnel_contain::{
+    tracker_cur_nemesis, tracker_update_nemesis, TrackerKey,
+};
 use zh_logic::modules::module::{
     AiUpdateFacet, BehaviorModule, CommandSourceType, ContainFacet, ModuleData, ModuleType,
 };
@@ -585,10 +587,10 @@ fn apply(sim: &mut SimContext, s: &mut Scene, op: [u32; 4]) {
         }
         15 => {
             let target = if b == 0 { None } else { s.get(b as usize - 1) };
-            tracker_update_nemesis(sim, a as Int, target);
+            tracker_update_nemesis(sim, TrackerKey::Player(a as Int), target);
         }
         16 => {
-            s.nemesis = tracker_cur_nemesis(sim, a as Int)
+            s.nemesis = tracker_cur_nemesis(sim, TrackerKey::Player(a as Int))
                 .and_then(|slot| sim.object(slot))
                 .map_or(0, |o| o.id.0 as u32);
         }

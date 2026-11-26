@@ -1262,7 +1262,7 @@ pub fn apply_contain_deferred_op<C: ContainBehavior + ?Sized>(
 
 /// Implements [`BehaviorModule`] and every containment facet for a [`ContainBehavior`] type.
 macro_rules! impl_contain_module {
-    ($ty:ty) => {
+    ($ty:ty $(, { $($extra:item)* })?) => {
         const _: () = {
             use $crate::arena::{DeferredSelfOp, ModuleContext, ModuleSidecar, ObjectSlot};
             use $crate::combat::damage::DamageInfo;
@@ -1355,6 +1355,7 @@ macro_rules! impl_contain_module {
                 fn as_collide_mut(&mut self) -> Option<&mut dyn CollideFacet> {
                     Some(self)
                 }
+                $($($extra)*)?
                 fn as_die(&self) -> Option<&dyn DieFacet> {
                     Some(self)
                 }

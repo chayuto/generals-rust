@@ -1,5 +1,6 @@
 //! `WP-5.3`: `ContainModule` implementations (`GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Contain/`).
 
+pub mod cave_contain;
 pub mod contain_module;
 pub mod garrison_contain;
 pub mod heal_contain;
@@ -119,5 +120,15 @@ pub fn register_contain_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenera
         false,
         tunnel_contain::parse_tunnel_contain_data,
         tunnel_contain::create_tunnel_contain,
+    );
+    reg.register_module(
+        nk,
+        "CaveContain",
+        ModuleType::Behavior,
+        FacetMask(0x05f | FacetMask::CAVE_INTERFACE.0 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        cave_contain::parse_cave_contain_data,
+        cave_contain::create_cave_contain,
     );
 }
