@@ -1426,6 +1426,9 @@ macro_rules! impl_contain_module {
             }
 
             impl ContainFacet for $ty {
+                fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
+                    self.open_data().weapon_bonus_passed_to_passengers
+                }
                 fn get_contain_count(&self) -> UnsignedInt {
                     self.open_core().contain_list_size
                 }

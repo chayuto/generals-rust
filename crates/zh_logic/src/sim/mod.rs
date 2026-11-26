@@ -38,6 +38,7 @@ use crate::object::weapon_set::{
 use crate::pathfinder::pathfind_cell::CellType as PathfindCellType;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::rules::combat_types::{
+    WeaponStatus,
     is_subdual_damage, ArmorSetFlags, ArmorSetType, DamageType, WeaponSetFlags, WeaponSetType,
     ARMORSET_COUNT,
 };
@@ -593,6 +594,8 @@ pub struct ObjectRecord {
     pub weapon_bonus_condition: UnsignedInt,
     pub experience_tracker: ExperienceTrackerState,
     pub weapon_set: WeaponSet,
+    /// `Drawable::getBarrelCount` per slot. It comes from the model, which the port does not load.
+    pub weapon_barrel_count: [Int; WEAPONSLOT_COUNT],
     pub armor_set_flags: ArmorSetFlags,
     pub layer: PathfindLayerEnum,
     pub contained_by: Option<ObjectSlot>,
@@ -695,6 +698,7 @@ impl ObjectRecord {
             weapon_bonus_condition: 0,
             experience_tracker: ExperienceTrackerState::default(),
             weapon_set: WeaponSet::new(),
+            weapon_barrel_count: [0; WEAPONSLOT_COUNT],
             armor_set_flags: ArmorSetFlags::new(),
             layer: PathfindLayerEnum::Ground,
             contained_by: None,
@@ -960,6 +964,15 @@ pub trait SimView {
     fn player_has_science(&self, team_id: TeamId, science: ScienceType) -> Bool;
     fn player_is_preorder(&self, team_id: TeamId) -> Bool;
     fn player_has_upgrade(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool;
+    /// The condition flags `Weapon::computeBonus` reads: the object's own, plus its
+    /// container's when that container passes weapon bonuses to passengers.
+    fn weapon_bonus_condition_flags(&self, owner: ObjectSlot) -> UnsignedInt;
+    /// `Object::isReloadTimeShared`.
+    fn is_reload_time_shared(&self, owner: ObjectSlot) -> Bool;
+    /// `Drawable::getBarrelCount`.
+    fn weapon_barrel_count(&self, owner: ObjectSlot, wslot: WeaponSlotType) -> Int;
+    /// `Object::getLastShotFiredFrame`.
+    fn last_shot_fired_frame(&self, owner: ObjectSlot) -> UnsignedInt;
     fn adjust_damage_by_armor(
         &self,
         target: ObjectSlot,
@@ -1084,6 +1097,8 @@ pub trait SimView {
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
 pub trait SimApi: SimView {
+    /// Applies a shared reload time to every weapon in the owner's weapon set.
+    fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus);
     fn rng_logic_int(&mut self, lo: Int, hi: Int) -> Int;
     fn rng_logic_real(&mut self, lo: Real, hi: Real) -> Real;
     fn object_mut(&mut self, slot: ObjectSlot) -> Option<&mut ObjectRecord>;
@@ -2682,6 +2697,48 @@ impl SimView for SimContext {
             .unwrap_or(FALSE)
     }
 
+    fn weapon_bonus_condition_flags(&self, owner: ObjectSlot) -> UnsignedInt {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return 0;
+        };
+        let mut flags = obj.weapon_bonus_condition;
+        if let Some(container) = obj.contained_by.and_then(|c| self.world.objects.get(c)) {
+            let passes = container
+                .contain_slot
+                .and_then(|cs| self.world.modules.payload(cs))
+                .and_then(|p| p.as_contain())
+                .map_or(FALSE, |c| c.is_weapon_bonus_passed_to_passengers());
+            if passes != FALSE {
+                flags |= container.weapon_bonus_condition;
+            }
+        }
+        flags
+    }
+
+    fn is_reload_time_shared(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(FALSE, |o| o.weapon_set.is_shared_reload_time())
+    }
+
+    fn weapon_barrel_count(&self, owner: ObjectSlot, wslot: WeaponSlotType) -> Int {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(0, |o| o.weapon_barrel_count[wslot.as_i32() as usize])
+    }
+
+    fn last_shot_fired_frame(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.world.objects.get(owner).map_or(0, |o| {
+            o.weapon_set
+                .weapons
+                .iter()
+                .flatten()
+                .fold(0, |recent, w| recent.max(w.last_fire_frame))
+        })
+    }
+
     fn player_has_upgrade(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
         if self
             .world
@@ -3613,6 +3670,15 @@ impl SimContext {
 }
 
 impl SimApi for SimContext {
+    fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            for w in obj.weapon_set.weapons.iter_mut().flatten() {
+                w.set_possible_next_shot_frame(when);
+                w.status = status;
+            }
+        }
+    }
+
     fn rng_logic_int(&mut self, lo: Int, hi: Int) -> Int {
         self.world.rng.get_game_logic_random_value(lo, hi)
     }
@@ -6691,6 +6757,22 @@ impl SimView for MockSimApi {
         self.ctx.player_is_preorder(team_id)
     }
 
+    fn weapon_bonus_condition_flags(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.ctx.weapon_bonus_condition_flags(owner)
+    }
+
+    fn is_reload_time_shared(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.is_reload_time_shared(owner)
+    }
+
+    fn weapon_barrel_count(&self, owner: ObjectSlot, wslot: WeaponSlotType) -> Int {
+        self.ctx.weapon_barrel_count(owner, wslot)
+    }
+
+    fn last_shot_fired_frame(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.ctx.last_shot_fired_frame(owner)
+    }
+
     fn player_has_upgrade(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
         self.ctx.player_has_upgrade(team_id, mask)
     }
@@ -7056,6 +7138,10 @@ impl SimView for MockSimApi {
 }
 
 impl SimApi for MockSimApi {
+    fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
+        self.ctx.share_weapon_reload(owner, when, status);
+    }
+
     fn rng_logic_int(&mut self, lo: Int, hi: Int) -> Int {
         self.ctx.rng_logic_int(lo, hi)
     }

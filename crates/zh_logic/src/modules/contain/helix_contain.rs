@@ -598,6 +598,9 @@ impl ExitFacet for HelixContain {
 }
 
 impl ContainFacet for HelixContain {
+    fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
+        self.0.is_weapon_bonus_passed_to_passengers()
+    }
     fn add_to_contain(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, obj: ObjectSlot) {
         self.0.admit(sim, ctx, obj);
     }

@@ -897,6 +897,10 @@ pub trait CollideFacet {
 
 /// Container facet (`ContainModuleInterface`).
 pub trait ContainFacet {
+    /// `isWeaponBonusPassedToPassengers`.
+    fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
+        FALSE
+    }
     fn get_contain_count(&self) -> UnsignedInt;
     fn get_contain_max(&self) -> Int {
         -1
