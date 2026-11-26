@@ -2833,6 +2833,7 @@ impl SimView for SimContext {
         }
     }
 
+    /// `a`'s `Object::getRelationship(b)`; the argument order matters.
     fn player_relationship(&self, a: ObjectSlot, b: ObjectSlot) -> Relationship {
         let Some(oa) = self.world.objects.get(a) else {
             return Relationship::Neutral;
@@ -2840,6 +2841,13 @@ impl SimView for SimContext {
         let Some(ob) = self.world.objects.get(b) else {
             return Relationship::Neutral;
         };
+        // An undetected defector auto-acquires nobody, and everybody takes it for their own.
+        if oa.is_undetected_defector() != FALSE {
+            return Relationship::Neutral;
+        }
+        if ob.is_undetected_defector() != FALSE {
+            return Relationship::Allies;
+        }
         let pa = self.player_index_for_team(oa.team_id);
         let pb = self.player_index_for_team(ob.team_id);
         if pa == pb {

@@ -21,6 +21,7 @@ pub use subdual_damage_helper::SubdualDamageHelper;
 pub use temp_weapon_bonus_helper::{TempWeaponBonusHelper, WEAPON_BONUS_CONDITION_INVALID};
 
 use crate::arena::{FacetMask, ModuleDataId, ObjectSlot};
+use crate::combat::firing_tracker::FiringTracker;
 use crate::rules::kind_of::KindOfType;
 use crate::scheduler::SleepyUpdatePhase;
 use crate::sim::{SimApi, SimContext};
@@ -145,6 +146,22 @@ pub fn attach_object_helpers(sim: &mut SimContext, obj_slot: ObjectSlot) {
         sim.set_wake_frame(ws_slot, UpdateSleepTime::NONE);
         if let Some(obj) = sim.world.objects.get_mut(obj_slot) {
             obj.weapon_status_helper_slot = Some(ws_slot);
+        }
+
+        // `FiringTracker` sleeps until a shot is reported to it.
+        let ft_tag = sim.rules.name_keys.name_to_key("ModuleTag_FiringTrackerHelper");
+        let ft_name = sim.rules.name_keys.name_to_key("FiringTracker");
+        let ft_slot = sim.world.attach_module(
+            obj_slot,
+            ft_tag,
+            ModuleDataId::INVALID,
+            FacetMask::UPDATE,
+            SleepyUpdatePhase::Final,
+            Box::new(FiringTracker::new(ft_name, sim.world.frame)),
+        );
+        sim.set_wake_frame(ft_slot, UpdateSleepTime::FOREVER);
+        if let Some(obj) = sim.world.objects.get_mut(obj_slot) {
+            obj.firing_tracker_slot = Some(ft_slot);
         }
 
         let tw_tag = sim.rules.name_keys.name_to_key("ModuleTag_TempWeaponBonusHelper");

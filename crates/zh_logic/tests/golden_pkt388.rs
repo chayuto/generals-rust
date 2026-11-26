@@ -1,25 +1,22 @@
 //! Gate V2 differential verification for `PKT-388 WeaponBonusUpdate` against
 //! `docs/golden_vectors/PKT-388.json` (`tests/cpp_harness/gen_wp55_weapon_bonus.cpp`).
 //!
-//! `FiringTracker` is not attached as a module here. A sleeping stand-in takes its place beside
-//! the bonus helper, and the sleepy update heap starts in the recorded layout, so the layout
-//! after each operation shows the order in which the helpers were woken.
+//! The sleepy update heap starts in the recorded layout, so the layout after each operation
+//! shows the order in which the helpers were woken.
 
-use std::any::Any;
 use zh_common::golden_json::{decode_hex_bytes, extract_vector_lines, get_str, get_u32};
 use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::{Coord3D, Region3D};
-use zh_common::types::{Int, NameKeyType, ObjectId, Real, Relationship, TeamId, FALSE};
-use zh_common::xfer::{Xfer, XferCrc, XferError, XferSave};
-use zh_logic::arena::{FacetMask, ModuleDataId, ModuleSlot, ObjectSlot};
+use zh_common::types::{Int, ObjectId, Real, Relationship, TeamId, FALSE};
+use zh_common::xfer::{XferCrc, XferSave};
+use zh_logic::arena::{ModuleSlot, ObjectSlot};
 use zh_logic::modules::contain::open_contain::kill_object;
-use zh_logic::modules::module::BehaviorModule;
 use zh_logic::modules::update::weapon_bonus_update::WeaponBonusUpdate;
 use zh_logic::object::weapon::WeaponTemplate;
 use zh_logic::rules::combat_types::{DamageType, DeathType};
 use zh_logic::rules::disabled_types::DisabledType;
 use zh_logic::rules::object_status_types::ObjectStatusMaskType;
-use zh_logic::scheduler::{SleepyUpdatePhase, UPDATE_SLEEP_FOREVER};
+use zh_logic::scheduler::UPDATE_SLEEP_FOREVER;
 use zh_logic::sim::{RulesRegistry, SimApi, SimContext, SimView, SimWorld};
 
 const JSON: &str = include_str!("../../../docs/golden_vectors/PKT-388.json");
@@ -52,25 +49,9 @@ const TAGS: [&str; 10] = [
     "ModuleTag_WBU",
     "ModuleTag_Contain",
 ];
-const FIRING_TRACKER: usize = 6;
 const COLUMNS: [&str; 7] = [
     "sleep", "next0", "next1", "modules", "objects", "heap", "bonused",
 ];
-
-struct SleepingStandIn(NameKeyType);
-
-impl BehaviorModule for SleepingStandIn {
-    fn module_name_key(&self) -> NameKeyType {
-        self.0
-    }
-    fn xfer(&mut self, _: &mut dyn Xfer, _: &dyn SimView) -> Result<(), XferError> {
-        Ok(())
-    }
-    fn crc(&self, _: &mut dyn Xfer) {}
-    fn as_any(&self) -> Option<&dyn Any> {
-        Some(self)
-    }
-}
 
 struct Fnv(u32);
 
@@ -172,39 +153,7 @@ fn spawn(sim: &mut SimContext, name: &str, team: TeamId, x: u32, y: u32) -> Obje
         slot,
         &Coord3D::new(Real::from_bits(x), Real::from_bits(y), 0.0),
     );
-    add_firing_tracker_stand_in(sim, slot);
     slot
-}
-
-/// Puts the stand-in where `FiringTracker` sits: just before the bonus helper.
-fn add_firing_tracker_stand_in(sim: &mut SimContext, owner: ObjectSlot) {
-    let Some(helper) = sim
-        .object(owner)
-        .and_then(|o| o.temp_weapon_bonus_helper_slot)
-    else {
-        return;
-    };
-    let tag = sim.rules.name_keys.name_to_key(TAGS[FIRING_TRACKER]);
-    let slot = sim.world.attach_module(
-        owner,
-        tag,
-        ModuleDataId::INVALID,
-        FacetMask::UPDATE,
-        SleepyUpdatePhase::Final,
-        Box::new(SleepingStandIn(tag)),
-    );
-    sim.world
-        .modules
-        .meta_mut(slot)
-        .schedule
-        .set_next_call_frame(UPDATE_SLEEP_FOREVER);
-    let behaviors = &mut sim.world.objects.get_mut(owner).expect("object").behaviors;
-    let entry = behaviors.pop().expect("stand-in entry");
-    let at = behaviors
-        .iter()
-        .position(|&(ms, _)| ms == helper)
-        .expect("helper entry");
-    behaviors.insert(at, entry);
 }
 
 /// The object, unless it was never made or has been destroyed.

@@ -97,19 +97,6 @@ impl WeaponBonusUpdate {
     }
 }
 
-/// `Object::getRelationship(that) == ALLIES`, including undetected defectors.
-fn is_ally(sim: &dyn SimView, me: ObjectSlot, that: ObjectSlot) -> bool {
-    let defector = |slot| {
-        sim.object(slot)
-            .is_some_and(|o| o.is_undetected_defector() != FALSE)
-    };
-    if defector(me) {
-        false
-    } else {
-        defector(that) || sim.player_relationship(me, that) == Relationship::Allies
-    }
-}
-
 impl UpdateFacet for WeaponBonusUpdate {
     fn update(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) -> UpdateSleepTime {
         let me = ctx.owner_slot;
@@ -125,7 +112,7 @@ impl UpdateFacet for WeaponBonusUpdate {
 
         // The kind-of test is not a search filter: riders of a rejected container still count.
         for obj in sim.find_objects_in_range(&center, self.data.bonus_range) {
-            if !is_ally(sim, me, obj) {
+            if sim.player_relationship(me, obj) != Relationship::Allies {
                 continue;
             }
             let passes = sim.object(obj).is_some_and(|o| {
