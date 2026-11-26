@@ -13,6 +13,7 @@ pub mod helper;
 pub mod module;
 pub mod module_factory;
 pub mod special_power;
+pub mod update;
 pub mod upgrade;
 
 pub use module::{

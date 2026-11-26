@@ -22,3 +22,16 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `find_objects_in_range` returns objects in world list order, not partition scan order. Matching it needs the `PartitionManager` cell lists, which are not ported. `PropagandaTowerBehavior` saves its tracked ids in scan order, so its `Xfer` bytes differ once it tracks two or more. `golden_wp53_c3` compares the ids sorted.
 - **`PKT-291 PropagandaTowerBehavior` is not yet bit-exact**, whatever `PORT_MAP.md` counts, because of the scan order above. Once the partition scan is ported, remove the id sorting from `golden_wp53_c3`.
 - `capture_object` / `set_object_team` leave out the rest of `Object::onCapture`: `cancelAllTasks` on a dozer, clearing the `SCRIPT_UNSELLABLE` status and a skirmish AI selling a captured faction building.
+- **`FireWeaponWhenDamagedBehavior` is not bit-exact for a weapon whose `DelayBetweenShots` range has different ends**, although `PORT_MAP.md` counts it. Its private firing code takes the minimum delay, where C++ `privateFireWeapon` draws one from the logic PRNG and applies the rate-of-fire bonus. It should use a shared `Weapon` firing routine, which is not ported.
+- With `retail-crc`, `WeaponTemplate::get_delay_between_shots` returns the maximum when the minimum exceeds it; the retail PRNG helper draws a value there. The default build matches.
+- `physics_apply_force` and `physics_apply_motive_force` are stand-ins: they add force over mass to velocity. C++ adds to acceleration, keeps only the lateral part while motive, and ignores NaN.
+- `FloatUpdate` over dry ground: C++ writes an uninitialised `waterZ` to the object, so there is no value to match. The port writes 0.
+- `ProneUpdate` skips the model condition for an object without a drawable, where C++ would crash.
+- `PKT-307`, `PKT-343` and `PKT-364` are header-only manifest entries for modules ported under another packet (`PKT-308`, `PKT-281`, `PKT-233`). `PORT_MAP.md` still lists them as unported.
+
+## Waiting on unported code
+
+- `PKT-266 CountermeasuresBehavior`: `PhysicsBehavior` (`getVelocityMagnitude`, `transferVelocityTo`, a real `applyMotiveForce`) and the `Vector2` normalise and rotate math. Its constructor also leaves `m_reloadFrame` unset.
+- `PKT-267 DumbProjectileBehavior`: `Weapon::positionProjectileForLaunch`, `PartitionManager::estimateTerrainExtremesAlongLine`, `WeaponTemplate::shouldProjectileCollideWith` and `WeaponStore::handleProjectileDetonation`.
+- `PKT-305 AutoDepositUpdate`: a hook for `Player::becomingTeamMember`, a per-player `ScoreKeeper`, construction percent on objects, and a home for the upgrade template that `getUpgradedSupplyBoost` caches across all instances.
+- `PKT-329 FireWeaponUpdate`: `Weapon::forceFireWeapon` and `loadAmmoNow`, and `Object::getLastShotFiredFrame`.
