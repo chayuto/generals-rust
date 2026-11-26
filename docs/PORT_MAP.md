@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`215` implemented, `0` seeded skeletons, `248` unported)
-- **Golden Vector Oracles:** `58` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `57` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `59` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `58` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -252,11 +252,13 @@
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/special_power_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/scheduler/sleepy_heap.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/spatial/partition_grid.rs` | `implemented` |
 
 ## Golden Vector Oracles
 
 | Oracle JSON | Declared Vectors | `source_sha256` |
 |---|---:|---|
+| `docs/golden_vectors/PARTITION_GRID.json` | 1200 | no |
 | `docs/golden_vectors/PKT-001.json` | 1000 | no |
 | `docs/golden_vectors/PKT-002.json` | 1000 | no |
 | `docs/golden_vectors/PKT-003.json` | 1000 | no |
@@ -335,6 +337,7 @@
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2_big_vfs.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2b_compression.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_xfer.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt003.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt116_academy_stats.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt143_locomotor.rs` | `active` |

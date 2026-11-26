@@ -1,6 +1,6 @@
 # Spatial grid (`PKT-160 PartitionManager`) scope
 
-Scoping only. No grid code is ported. Sizes are approximate line counts of `PartitionManager.cpp` (5,921 lines; the header adds 1,601), grouped by function name.
+Stage 1a (cell filing, `spatial/partition_grid.rs`, golden `golden_partition_grid`) is ported and not wired into the sim. Sizes are approximate line counts of `PartitionManager.cpp` (5,921 lines; the header adds 1,601), grouped by function name.
 
 ## Why it matters
 
@@ -28,7 +28,22 @@ Scoping only. No grid code is ported. Sizes are approximate line counts of `Part
 
 Not needed yet: threat and value maps (~340), position finding and line of sight (~380). Query filters (~500) can be added per caller.
 
-## Decisions before building
+**Stage 2 cannot be exact before stage 3.** Resolving a collision re-queues both mobile objects (`processContactList` calls `makeDirty(false)`), which changes the order of later filing and so of search results. Until collisions are ported, a wired grid diverges wherever two mobile objects touch.
+
+## For wiring into the sim (stage 2)
+
+- Mark an object dirty only where C++ does: `reactToTransformChange` (past its thresholds) and the other `makeDirty(true)` sites in `Object.cpp`, including script disabled and unpowered changes.
+- `setGeometryInfo` is unregister then register. `setGeometryInfoZ` does neither.
+- A map boundary change rebuilds the grid and registers everything again.
+- C++ calls `onPartitionCellChange` inside the update loop; `PartitionGrid::update` returns the ids afterwards.
+- Collision checks belong between re-filings, at the marked point in `update`.
+- Ghost objects are not modelled.
+
+## Decisions taken
+
+The owner accepted the behaviour change and asked for a faithful port.
+
+## Open questions
 
 1. **Stage 2 changes existing behaviour.** New objects become invisible to queries until the next grid update. Some existing harnesses and vectors may have to be regenerated.
 2. **Terrain interface.** The grid is sized from the map extent and reads cell heights. `ThingTerrainAccess` needs those.
