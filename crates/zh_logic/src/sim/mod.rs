@@ -1011,6 +1011,16 @@ pub trait SimView {
     fn object_ai_goal_object(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
     fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    /// The objects `PartitionManager::iterateObjectsInRange(obj, radius,
+    /// FROM_BOUNDINGSPHERE_3D)` accepts by distance, in no particular order. As in
+    /// the reference, objects awaiting the destroy list are included. The
+    /// reference only visits objects filed in partition cells near `owner`, so it
+    /// can miss an object whose large sphere is in range from further away.
+    fn find_objects_in_range_bounding_sphere_3d(
+        &self,
+        owner: ObjectSlot,
+        radius: Real,
+    ) -> Vec<ObjectSlot>;
     fn find_special_power_module(
         &self,
         owner: ObjectSlot,
@@ -2982,6 +2992,43 @@ impl SimView for SimContext {
                     let dy = pos.y - center.y;
                     (dx * dx + dy * dy) <= r2
                 })
+            })
+            .collect()
+    }
+
+    fn find_objects_in_range_bounding_sphere_3d(
+        &self,
+        owner: ObjectSlot,
+        radius: Real,
+    ) -> Vec<ObjectSlot> {
+        let Some(me) = self.world.objects.get(owner) else {
+            return Vec::new();
+        };
+        let a = *me.thing.get_position();
+        let a_z = a.z + me.geometry.get_z_delta_to_center_position();
+        let a_radius = me.geometry.get_bounding_sphere_radius();
+        self.world
+            .objects
+            .world_iter()
+            .filter(|&slot| {
+                // Objects awaiting the destroy list stay in the reference partition.
+                slot != owner
+                    && self.world.objects.get(slot).is_some_and(|obj| {
+                        if self.is_out_of_partition(slot) {
+                            return false;
+                        }
+                        let b = obj.thing.get_position();
+                        let dx = b.x - a.x;
+                        let dy = b.y - a.y;
+                        let dz = (b.z + obj.geometry.get_z_delta_to_center_position()) - a_z;
+                        let mut dist_sqr = dx * dx + dy * dy + dz * dz;
+                        let total = a_radius + obj.geometry.get_bounding_sphere_radius();
+                        if total > 0.0 {
+                            let shrunk = zh_common::math::gm_sqrtf(dist_sqr) - total;
+                            dist_sqr = if shrunk <= 0.0 { 0.0 } else { shrunk * shrunk };
+                        }
+                        dist_sqr < radius * radius
+                    })
             })
             .collect()
     }
@@ -6882,6 +6929,15 @@ impl SimView for MockSimApi {
 
     fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
         self.ctx.find_objects_in_range_bounding(center, radius)
+    }
+
+    fn find_objects_in_range_bounding_sphere_3d(
+        &self,
+        owner: ObjectSlot,
+        radius: Real,
+    ) -> Vec<ObjectSlot> {
+        self.ctx
+            .find_objects_in_range_bounding_sphere_3d(owner, radius)
     }
 
     fn find_special_power_module(

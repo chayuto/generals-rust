@@ -4,11 +4,14 @@ pub mod base_renerate_update;
 pub mod deletion_update;
 pub mod dynamic_geometry_info_update;
 pub mod float_update;
+pub mod height_die_update;
 pub mod fire_weapon_update;
 pub mod lifetime_update;
 pub mod projectile_stream_update;
 pub mod prone_update;
+pub mod radius_decal_update;
 pub mod smart_bomb_target_homing_update;
+pub mod special_power_update_module;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;
@@ -107,5 +110,25 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         projectile_stream_update::parse_projectile_stream_update_data,
         projectile_stream_update::create_projectile_stream_update,
+    );
+    reg.register_module(
+        nk,
+        "RadiusDecalUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        radius_decal_update::parse_radius_decal_update_data,
+        radius_decal_update::create_radius_decal_update,
+    );
+    reg.register_module(
+        nk,
+        "HeightDieUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        height_die_update::parse_height_die_update_data,
+        height_die_update::create_height_die_update,
     );
 }

@@ -37,6 +37,9 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `Weapon::transfer_next_shot_stats_from` copies the stored status; C++ copies `getStatus()`, which refreshes it first. It has no callers.
 - `set_geometry_info` only stores the geometry. C++ `Object::setGeometryInfo` also re-registers the object with the partition manager and tells the drawable, so a later range scan can differ after `DynamicGeometryInfoUpdate`.
 - `ProjectileStreamUpdate::add_projectile` has no caller until weapon projectiles are ported.
+- **`PKT-333 HeightDieUpdate` is not fully bit-exact** with `TargetHeightIncludesStructures`, although `PORT_MAP.md` counts it. C++ only visits partition cells near the owner, so it can miss a tall structure that the distance rule alone accepts, and the port then kills the object when C++ would not. Needs partition cells; no vector covers it.
+- `find_objects_in_range` and `find_objects_in_range_bounding` differ from C++ in two ways besides order: they skip destroyed objects, which stay in the partition until the destroy list is processed, and they accept a distance equal to the radius, where C++ uses `<`. `find_objects_in_range_bounding_sphere_3d` does neither.
+- `RadiusDecalUpdate::create_radius_decal` has no caller, and takes a template name because decal templates are not ported.
 
 ## Waiting on unported code
 
