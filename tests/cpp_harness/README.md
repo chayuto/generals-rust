@@ -189,6 +189,30 @@ A small object normally spans at most two cells per axis, and its cell array has
 - **What happens:** both crash. The port accepts the collision and skips the topple.
 - **Guard:** `gen_pkt334_267_382_346_misc.cpp` avoids both inputs; keep formation members on the map.
 
+### Object upgrades are queued without a money check
+
+- **Where:** `ProductionUpdate::queueUpgrade` calls `canAffordUpgrade` for `UPGRADE_TYPE_PLAYER` only.
+- **What happens:** `Money::withdraw` takes what there is, but a cancel refunds the full cost. An object upgrade also sets the player's in-production bit, which neither completion nor cancel clears.
+- **Guard:** `golden_pkt354_production`.
+
+### An upgrade entry saves exit door 0
+
+- **Where:** `ProductionEntry::ProductionEntry` does not assign `m_exitDoor`; the zeroed pool block makes it `DOOR_1`.
+- **Related:** `cancelUnitCreate(PRODUCTIONID_INVALID)` with an upgrade first in the queue reads the upgrade pointer as a thing template.
+- **Port contract:** upgrade entries start at door 0, and the cancel by id 0 returns `FALSE`. `golden_pkt354_production` covers both.
+
+### A quantity modifier can be zero or negative
+
+- **Where:** `ProductionUpdate::update`.
+- **What happens:** with `QuantityModifier = X 0` the entry is dropped at completion without a unit. A negative count keeps it at the head of the queue for good.
+- **Guard:** `golden_pkt354_production`, variant 5.
+
+### The last matching command button decides what can be built
+
+- **Where:** `BuildAssistant::isPossibleToMakeUnit`.
+- **What happens:** `canBuild` is asked about the last button whose template is equivalent to the request, not about the requested template.
+- **Guard:** `golden_pkt354_production` (`U9` follows `UE` in the command set).
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault or a silent wrong answer.
@@ -197,6 +221,9 @@ These are headless-setup gaps, not reference-code quirks. Each one surfaced as a
 - **Effects need filed objects.** `FXList` drops an effect whose object or position is shrouded, which includes an object not yet filed by `ThePartitionManager->update()` and any position off the map.
 
 - **Neutral player without a default team.** `Player::init` leaves `m_defaultTeam` null, and `GarrisonContain::onObjectCreated` spawns its `InitialRoster` into `getControllingPlayer()->getDefaultTeam()`. `init_with_neutral_player()` now creates `TeamNeutral` and aborts if the player still has no default team.
+- **Money without a player template.** `Player::init(nullptr)` never calls `Money::setPlayerIndex`, so a deposit records its income on player 0. `gen_pkt354_production.cpp` sets the index itself.
+- **`InactiveBody` objects are effectively dead.** `Player::canBuildMoreOfType` and other counts skip them, so a limit never trips. Give the objects an `ActiveBody` when a vector should reach it.
+- **Prerequisites.** `Prerequisites` name no templates until `TheThingFactory->postProcessLoad()` runs.
 - **UI messages.** Damaging a structure reaches `Radar::tryUnderAttackEvent`, then `InGameUI::message`, which needs `TheGlobalLanguageData`. `NullInGameUI` overrides the message calls as no-ops.
 
 - **Shroud edges.** An object whose looking changes a cell for the local player reaches `TheDisplay`, which is null. A harness that moves looking objects between teams must first reveal the map to those players, each while another player is local (`gen_pkt264_cave.cpp`).

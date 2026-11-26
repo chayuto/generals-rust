@@ -283,6 +283,11 @@ pub enum DeferredSelfOp {
         source_id: ObjectId,
     },
     ParkingRelease(ObjectId),
+    /// `ProductionUpdate::setHoldDoorOpen` while that module is executing.
+    ProductionHoldDoor {
+        door: Int,
+        hold: Bool,
+    },
     BridgeSyncTowerState {
         tower_index: u8,
         damage_state: u8,

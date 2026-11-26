@@ -45,6 +45,7 @@ pub const ACADEMY_CLASSIFICATION_TYPE_NAMES: [&str; 3] =
 
 pub mod combat_types;
 pub mod command_button;
+pub mod command_set;
 pub mod disabled_types;
 pub mod kind_of;
 pub mod model_state;

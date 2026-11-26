@@ -633,6 +633,12 @@ pub trait BehaviorModule: Send {
     fn as_countermeasures_mut(&mut self) -> Option<&mut dyn CountermeasuresFacet> {
         None
     }
+    fn as_production(&self) -> Option<&dyn ProductionFacet> {
+        None
+    }
+    fn as_production_mut(&mut self) -> Option<&mut dyn ProductionFacet> {
+        None
+    }
     fn as_parking_place(&self) -> Option<&dyn ParkingPlaceFacet> {
         None
     }
@@ -1387,6 +1393,71 @@ pub trait SlowDeathFacet {
     fn is_slow_death_in_progress(&self) -> Bool {
         FALSE
     }
+}
+
+/// `CanMakeType` (`BuildAssistant.h`).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanMakeType {
+    Ok = 0,
+    NoPrereq = 1,
+    NoMoney = 2,
+    FactoryIsDisabled = 3,
+    QueueFull = 4,
+    ParkingPlacesFull = 5,
+    MaxedOutForPlayer = 6,
+}
+
+/// Build queue facet (`ProductionUpdateInterface`). Units are identified by template and
+/// upgrades by name key.
+pub trait ProductionFacet {
+    fn production_count(&self) -> UnsignedInt;
+    fn count_unit_type_in_queue(&self, tmpl: ThingTemplateId) -> UnsignedInt;
+    fn is_upgrade_in_queue(&self, upgrade: NameKeyType) -> Bool;
+    /// The thing template of `getSpecialPowerConstructionCommandButton`.
+    fn special_power_construction_template(&self) -> Option<ThingTemplateId>;
+    fn set_special_power_construction_template(&mut self, tmpl: Option<ThingTemplateId>);
+    fn can_queue_create_unit(
+        &self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        tmpl: ThingTemplateId,
+    ) -> CanMakeType;
+    fn can_queue_upgrade(&self) -> CanMakeType;
+    fn request_unique_unit_id(&mut self) -> Int;
+    fn queue_upgrade(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        upgrade: NameKeyType,
+    ) -> Bool;
+    fn cancel_upgrade(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        upgrade: NameKeyType,
+    ) -> Bool;
+    fn queue_create_unit(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        tmpl: ThingTemplateId,
+        production_id: Int,
+    ) -> Bool;
+    fn cancel_unit_create(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        production_id: Int,
+    ) -> Bool;
+    fn cancel_all_units_of_type(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        tmpl: ThingTemplateId,
+    );
+    fn cancel_and_refund_all_production(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+    fn set_hold_door_open(&mut self, sim: &dyn SimView, door: ExitDoorType, hold: Bool);
 }
 
 /// Exit/door dispatch facet (`ExitInterface`).

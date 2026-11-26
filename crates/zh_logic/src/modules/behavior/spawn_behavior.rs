@@ -214,7 +214,7 @@ impl SpawnBehavior {
     /// differs from the previous one, which starts out empty. So `CanReclaimOrphans`
     /// has no effect and the door is never unreserved.
     fn create_spawn(&mut self, sim: &mut dyn SimApi, parent: ObjectSlot) -> bool {
-        let Some(exit_door) = sim.reserve_exit_door(parent) else {
+        let Some(exit_door) = sim.try_reserve_exit_door(parent) else {
             return false;
         };
         if exit_door == crate::modules::module::ExitDoorType::DoorNoneAvailable {
@@ -305,7 +305,7 @@ impl SpawnBehavior {
         if sim.object_is_kind_of(barracks, KindOfType::Structure) == FALSE {
             return false;
         }
-        let Some(door) = sim.reserve_exit_door(barracks) else {
+        let Some(door) = sim.try_reserve_exit_door(barracks) else {
             return false;
         };
         sim.exit_object_via_door(barracks, new_spawn, door);

@@ -4,6 +4,7 @@
 
 use crate::engine_sim::{not_wired, EngineSim};
 use zh_logic::sim::*;
+use zh_logic::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 use zh_logic::arena::{
     DeferredSelfOp, FacetMask, ModuleArena, ModuleContext, ModuleDataId, ModuleMeta,
@@ -401,6 +402,33 @@ impl SimView for EngineSim<'_> {
     fn player_default_team(&self, team_id: TeamId) -> TeamId {
         not_wired("player_default_team")
     }
+    fn production_can_make_unit(&self, builder: ObjectSlot, tmpl: ThingTemplateId, own: Option<&dyn ProductionFacet>) -> CanMakeType {
+        not_wired("production_can_make_unit")
+    }
+    fn unit_cost_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int {
+        not_wired("unit_cost_to_build")
+    }
+    fn unit_time_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int {
+        not_wired("unit_time_to_build")
+    }
+    fn player_allowed_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Bool {
+        not_wired("player_allowed_to_build")
+    }
+    fn can_produce_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool {
+        not_wired("can_produce_upgrade")
+    }
+    fn affected_by_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool {
+        not_wired("affected_by_upgrade")
+    }
+    fn player_has_upgrade_in_production(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
+        not_wired("player_has_upgrade_in_production")
+    }
+    fn parking_door_requirement(&self, owner: ObjectSlot, tmpl: ThingTemplateId) -> (Bool, Bool) {
+        not_wired("parking_door_requirement")
+    }
+    fn object_has_exit_interface(&self, owner: ObjectSlot) -> Bool {
+        not_wired("object_has_exit_interface")
+    }
     fn player_is_skirmish_ai(&self, team_id: TeamId) -> Bool {
         not_wired("player_is_skirmish_ai")
     }
@@ -736,6 +764,39 @@ impl SimApi for EngineSim<'_> {
     }
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot) {
         not_wired("dispatch_on_build_complete")
+    }
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+        not_wired("deposit_player_money")
+    }
+    fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType) {
+        not_wired("player_add_upgrade_in_production")
+    }
+    fn player_remove_upgrade(&mut self, team_id: TeamId, upgrade: NameKeyType) {
+        not_wired("player_remove_upgrade")
+    }
+    fn complete_production_upgrade(&mut self, owner: ObjectSlot, upgrade: NameKeyType) {
+        not_wired("complete_production_upgrade")
+    }
+    fn reserve_exit_door(&mut self, owner: ObjectSlot, tmpl: ThingTemplateId) -> ExitDoorType {
+        not_wired("reserve_exit_door")
+    }
+    fn try_reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
+        not_wired("try_reserve_exit_door")
+    }
+    fn unreserve_exit_door(&mut self, owner: ObjectSlot, door: ExitDoorType) {
+        not_wired("unreserve_exit_door")
+    }
+    fn factory_new_object(&mut self, tmpl: ThingTemplateId, team_id: TeamId) -> ObjectSlot {
+        not_wired("factory_new_object")
+    }
+    fn production_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        not_wired("production_unit_created")
+    }
+    fn record_unit_production(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        not_wired("record_unit_production")
+    }
+    fn production_set_hold_door_open(&mut self, owner: ObjectSlot, door: ExitDoorType, hold: Bool) {
+        not_wired("production_set_hold_door_open")
     }
     fn notify_object_killed(&mut self, victim: ObjectSlot, killer: ObjectId, dmg: &DamageInfo) {
         not_wired("notify_object_killed")
@@ -1196,9 +1257,6 @@ impl SimApi for EngineSim<'_> {
     fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
         not_wired("on_unit_created")
     }
-    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
-        not_wired("reserve_exit_door")
-    }
     fn exit_object_by_budding( &mut self, owner: ObjectSlot, new_obj: ObjectSlot, bud_host: Option<ObjectSlot>, ) {
         not_wired("exit_object_by_budding")
     }
@@ -1369,9 +1427,6 @@ impl SimApi for EngineSim<'_> {
     }
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
         not_wired("stop_all_bone_fx")
-    }
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
-        not_wired("deposit_player_money")
     }
     fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int) {
         not_wired("add_floating_money_text")

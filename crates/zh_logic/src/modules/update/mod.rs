@@ -28,6 +28,7 @@ pub mod lifetime_update;
 pub mod physics_update;
 pub mod projectile_stream_update;
 pub mod power_plant_update;
+pub mod production_update;
 pub mod prone_update;
 pub mod queue_production_exit_update;
 pub mod radar_update;
@@ -451,6 +452,16 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         power_plant_update::parse_power_plant_update_data,
         power_plant_update::create_power_plant_update,
+    );
+    reg.register_module(
+        nk,
+        "ProductionUpdate",
+        ModuleType::Behavior,
+        production_update::ProductionUpdateModuleData::FACET_MASK,
+        SleepyUpdatePhase::Normal,
+        false,
+        production_update::parse_production_update_data,
+        production_update::create_production_update,
     );
     reg.register_module(
         nk,

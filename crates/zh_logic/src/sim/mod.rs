@@ -6,6 +6,9 @@
 //! 2. [`SimWorld`] (all mutable state hashed by `GameLogic::getCRC`)
 //! 3. [`ClientSink`] (write-only visual/audio notifications, no-op in headless simulation)
 
+mod production;
+
+use crate::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::arena::{
@@ -503,6 +506,7 @@ pub struct RulesRegistry {
     pub locomotor_store: LocomotorStore,
     pub science_store: ScienceStore,
     pub upgrade_center: UpgradeCenter,
+    pub command_sets: crate::rules::command_set::CommandSetStore,
     pub damage_fx_store: DamageFXStore,
     pub special_power_store: SpecialPowerStore,
     pub crate_system: CrateSystem,
@@ -561,6 +565,7 @@ impl RulesRegistry {
             locomotor_store: LocomotorStore::new(),
             science_store,
             upgrade_center,
+            command_sets: Default::default(),
             damage_fx_store: DamageFXStore::new(),
             special_power_store: SpecialPowerStore::new(),
             crate_system,
@@ -645,6 +650,8 @@ pub struct ObjectRecord {
     pub team_id: TeamId,
     pub status: ObjectStatusMaskType,
     pub private_status: u8,
+    /// `Object::m_scriptStatus` (`OBJECT_STATUS_SCRIPT_*`).
+    pub script_status: u8,
     pub geometry: GeometryInfo,
     pub disabled_mask: DisabledMaskType,
     pub disabled_till_frame: [UnsignedInt; DISABLED_COUNT],
@@ -660,8 +667,6 @@ pub struct ObjectRecord {
     pub layer: PathfindLayerEnum,
     pub contained_by: Option<ObjectSlot>,
     pub contained_by_frame: UnsignedInt,
-    /// `Object::m_scriptStatus`; scripts are unported.
-    pub script_status: u8,
     /// `AIUpdateInterface::m_lastCommandSource`; the AI update is unported.
     pub ai_last_command_source: CommandSourceType,
     pub producer_id: ObjectId,
@@ -753,6 +758,7 @@ impl ObjectRecord {
             team_id,
             status: ObjectStatusMaskType::new(),
             private_status: 0,
+            script_status: 0,
             geometry,
             disabled_mask: DisabledMaskType::new(),
             disabled_till_frame: [0; DISABLED_COUNT],
@@ -767,7 +773,6 @@ impl ObjectRecord {
             layer: PathfindLayerEnum::Ground,
             contained_by: None,
             contained_by_frame: 0,
-            script_status: 0,
             ai_last_command_source: CommandSourceType::FromAi,
             producer_id: ObjectId::INVALID,
             builder_id: ObjectId::INVALID,
@@ -1228,6 +1233,24 @@ pub trait SimView {
     fn local_player_index(&self) -> Int;
     /// `Player::getDefaultTeam()` of the player controlling `team_id`.
     fn player_default_team(&self, team_id: TeamId) -> TeamId;
+    /// `BuildAssistant::canMakeUnit`.
+    fn production_can_make_unit(&self, builder: ObjectSlot, tmpl: ThingTemplateId, own: Option<&dyn ProductionFacet>) -> CanMakeType;
+    /// `ThingTemplate::calcCostToBuild`.
+    fn unit_cost_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int;
+    /// `ThingTemplate::calcTimeToBuild`.
+    fn unit_time_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int;
+    /// `Player::allowedToBuild`.
+    fn player_allowed_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Bool;
+    /// `Object::canProduceUpgrade`.
+    fn can_produce_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool;
+    /// `Object::affectedByUpgrade`.
+    fn affected_by_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool;
+    /// `Player::hasUpgradeInProduction`.
+    fn player_has_upgrade_in_production(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool;
+    /// Whether a parking place wants a door at queue time, and whether it is full.
+    fn parking_door_requirement(&self, owner: ObjectSlot, tmpl: ThingTemplateId) -> (Bool, Bool);
+    /// Whether `Object::getObjectExitInterface` finds one.
+    fn object_has_exit_interface(&self, owner: ObjectSlot) -> Bool;
     fn player_is_skirmish_ai(&self, team_id: TeamId) -> Bool;
     /// `Player::getRelationship` from the controller of `team_id` toward `player_index`.
     fn team_relationship_to_player(&self, team_id: TeamId, player_index: Int) -> Relationship;
@@ -1491,6 +1514,29 @@ pub trait SimApi: SimView {
     );
     fn dispatch_on_die(&mut self, owner: ObjectSlot, dmg: &DamageInfo);
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot);
+    /// `Money::deposit` without income tracking.
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt);
+    /// `Player::addUpgrade` with `UPGRADE_STATUS_IN_PRODUCTION`.
+    fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType);
+    /// `Player::removeUpgrade`.
+    fn player_remove_upgrade(&mut self, team_id: TeamId, upgrade: NameKeyType);
+    /// A factory finished researching an upgrade.
+    fn complete_production_upgrade(&mut self, owner: ObjectSlot, upgrade: NameKeyType);
+    /// `ExitInterface::reserveDoorForExit`.
+    fn reserve_exit_door(&mut self, owner: ObjectSlot, tmpl: ThingTemplateId) -> ExitDoorType;
+    /// As `reserve_exit_door` with no template, for callers that must know whether
+    /// there is an exit interface at all (`None` if not, or while it runs).
+    fn try_reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType>;
+    /// `ExitInterface::unreserveDoorForExit`.
+    fn unreserve_exit_door(&mut self, owner: ObjectSlot, door: ExitDoorType);
+    /// `ThingFactory::newObject`.
+    fn factory_new_object(&mut self, tmpl: ThingTemplateId, team_id: TeamId) -> ObjectSlot;
+    /// `Player::onUnitCreated`.
+    fn production_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot);
+    /// `AcademyStats::recordProduction`.
+    fn record_unit_production(&mut self, factory: ObjectSlot, unit: ObjectSlot);
+    /// `ProductionUpdateInterface::setHoldDoorOpen` of `owner`.
+    fn production_set_hold_door_open(&mut self, owner: ObjectSlot, door: ExitDoorType, hold: Bool);
     fn notify_object_killed(&mut self, victim: ObjectSlot, killer: ObjectId, dmg: &DamageInfo);
     fn record_attacked_by(&mut self, victim: ObjectSlot, attacker: ObjectId);
     fn notify_subdual_damage(&mut self, owner: ObjectSlot, amount: Real);
@@ -1859,9 +1905,6 @@ pub trait SimApi: SimView {
     fn new_object_from_template(&mut self, name: &str, team: TeamId) -> Option<ObjectSlot>;
     /// `Player::onUnitCreated` of the unit's controlling player.
     fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot);
-    /// `getObjectExitInterface()->reserveDoorForExit(nullptr, nullptr)`; `None` without
-    /// an exit interface.
-    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType>;
     fn exit_object_by_budding(
         &mut self,
         owner: ObjectSlot,
@@ -2002,8 +2045,6 @@ pub trait SimApi: SimView {
     fn pathfinder_remove_object(&mut self, owner: ObjectSlot);
     /// `BoneFXUpdate::stopAllBoneFX` (the module is unported: the call is recorded).
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot);
-    /// `Money::deposit`, with its unsigned wrapping amount.
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt);
     /// `InGameUI::addFloatingText` of an "add cash" message.
     fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int);
     /// The mask of the template in the `static` of `AutoDepositUpdate`'s
@@ -2247,6 +2288,32 @@ pub struct SimWorld {
     pub skill_points_awarded: BTreeMap<Int, Int>,
     /// `AcademyStats::recordBuildingCapture` calls, by player index.
     pub buildings_captured: BTreeMap<Int, UnsignedInt>,
+    /// `Player::m_upgradesInProgress`.
+    pub player_upgrades_in_progress: BTreeMap<TeamId, UpgradeMaskType>,
+    /// `Player::m_handicap`; absent means every handicap is 1.
+    pub player_handicaps: BTreeMap<TeamId, crate::economy::handicap::Handicap>,
+    /// `Player::m_productionCostChanges` by template name.
+    pub player_cost_change_percent: BTreeMap<(TeamId, String), Real>,
+    /// `Player::m_productionTimeChanges` by template name.
+    pub player_time_change_percent: BTreeMap<(TeamId, String), Real>,
+    /// Teams whose player has `m_canBuildBase` cleared.
+    pub teams_cannot_build_base: BTreeSet<TeamId>,
+    /// Teams whose player has `m_canBuildUnits` cleared.
+    pub teams_cannot_build_units: BTreeSet<TeamId>,
+    pub player_score_keepers: BTreeMap<TeamId, crate::economy::score_keeper::ScoreKeeper>,
+    pub player_academy: BTreeMap<TeamId, crate::economy::academy_stats::AcademyStats>,
+    /// `GameLogic::m_thingTemplateBuildableOverrides` by template name.
+    pub buildable_overrides: BTreeMap<String, crate::object::thing_template::BuildableStatus>,
+    /// `GameLogic::getSuperweaponRestriction`.
+    pub superweapon_restriction: UnsignedShort,
+    /// `GameLogic::isScoringEnabled`.
+    pub scoring_enabled: Bool,
+    /// `ScriptEngine::notifyOfCompletedUpgrade`: player index, upgrade, source object.
+    pub completed_upgrades: Vec<(Int, String, ObjectId)>,
+    /// `ScriptEngine::m_frameObjectCountChanged`, as far as production sets it.
+    pub object_count_changed_frame: UnsignedInt,
+    /// `AIPlayer::onUnitProduced` calls (factory, unit); the AI player is unported.
+    pub units_produced: Vec<(ObjectId, ObjectId)>,
 }
 
 impl Default for SimWorld {
@@ -2362,6 +2429,20 @@ impl SimWorld {
             control_bar_overrides: BTreeMap::new(),
             skill_points_awarded: BTreeMap::new(),
             buildings_captured: BTreeMap::new(),
+            player_upgrades_in_progress: BTreeMap::new(),
+            player_handicaps: BTreeMap::new(),
+            player_cost_change_percent: BTreeMap::new(),
+            player_time_change_percent: BTreeMap::new(),
+            teams_cannot_build_base: BTreeSet::new(),
+            teams_cannot_build_units: BTreeSet::new(),
+            player_score_keepers: BTreeMap::new(),
+            player_academy: BTreeMap::new(),
+            buildable_overrides: BTreeMap::new(),
+            superweapon_restriction: 0,
+            scoring_enabled: TRUE,
+            completed_upgrades: Vec::new(),
+            object_count_changed_frame: 0,
+            units_produced: Vec::new(),
         }
     }
 
@@ -4046,6 +4127,9 @@ impl SimContext {
             return;
         };
         let empty_mask = UpgradeMaskType::new();
+        if let Some(pending) = self.world.player_upgrades_in_progress.get_mut(&team_id) {
+            pending.clear_and_set(&upgrade_mask, &empty_mask);
+        }
         self.world
             .player_upgrades
             .entry(team_id)
@@ -5244,6 +5328,47 @@ impl SimView for SimContext {
 
     fn local_player_index(&self) -> Int {
         self.world.local_player_index
+    }
+
+    fn production_can_make_unit(&self, builder: ObjectSlot, tmpl: ThingTemplateId, own: Option<&dyn ProductionFacet>) -> CanMakeType {
+        self.can_make_unit_for(builder, tmpl, own)
+    }
+
+    fn unit_cost_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int {
+        self.unit_cost_for(team_id, tmpl)
+    }
+
+    fn unit_time_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int {
+        self.unit_time_for(team_id, tmpl)
+    }
+
+    fn player_allowed_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Bool {
+        self.allowed_to_build_for(team_id, tmpl)
+    }
+
+    fn can_produce_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool {
+        self.can_produce_upgrade_for(owner, upgrade)
+    }
+
+    fn affected_by_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool {
+        self.affected_by_upgrade_for(owner, upgrade)
+    }
+
+    fn player_has_upgrade_in_production(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
+        Bool::from(
+            self.world
+                .player_upgrades_in_progress
+                .get(&team_id)
+                .is_some_and(|owned| owned.test_for_all(mask) != FALSE),
+        )
+    }
+
+    fn parking_door_requirement(&self, owner: ObjectSlot, tmpl: ThingTemplateId) -> (Bool, Bool) {
+        self.parking_requirement_for(owner, tmpl)
+    }
+
+    fn object_has_exit_interface(&self, owner: ObjectSlot) -> Bool {
+        self.has_exit_interface(owner)
     }
 
     fn player_default_team(&self, team_id: TeamId) -> TeamId {
@@ -6524,6 +6649,64 @@ impl SimApi for SimContext {
         self.handle_partition_cell_maintenance(owner);
     }
 
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+        self.deposit_money(team_id, amount);
+    }
+
+    fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType) {
+        self.add_upgrade_in_production(team_id, upgrade);
+    }
+
+    fn player_remove_upgrade(&mut self, team_id: TeamId, upgrade: NameKeyType) {
+        self.remove_player_upgrade_of(team_id, upgrade);
+    }
+
+    fn complete_production_upgrade(&mut self, owner: ObjectSlot, upgrade: NameKeyType) {
+        self.complete_upgrade_of(owner, upgrade);
+    }
+
+    fn reserve_exit_door(&mut self, owner: ObjectSlot, tmpl: ThingTemplateId) -> ExitDoorType {
+        self.reserve_exit_door_of(owner, tmpl)
+    }
+
+    fn try_reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
+        let es = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.exit_slot.or(o.contain_slot))?;
+        if self.world.modules.is_executing(es) {
+            return None;
+        }
+        // The callers pass no template and no particular object.
+        self.dispatch_module(es, |m, sim, ctx| {
+            m.as_exit_mut()
+                .map(|e| e.reserve_door_for_exit(sim, ctx, ThingTemplateId(0), None))
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn unreserve_exit_door(&mut self, owner: ObjectSlot, door: ExitDoorType) {
+        self.unreserve_exit_door_of(owner, door);
+    }
+
+    fn factory_new_object(&mut self, tmpl: ThingTemplateId, team_id: TeamId) -> ObjectSlot {
+        self.factory_new_object_of(tmpl, team_id)
+    }
+
+    fn production_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        self.unit_created(factory, unit);
+    }
+
+    fn record_unit_production(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        self.record_production_of(factory, unit);
+    }
+
+    fn production_set_hold_door_open(&mut self, owner: ObjectSlot, door: ExitDoorType, hold: Bool) {
+        self.hold_production_door(owner, door, hold);
+    }
+
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot) {
         let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
             o.behaviors
@@ -6684,6 +6867,9 @@ impl SimApi for SimContext {
         };
         let empty_mask = UpgradeMaskType::new();
         if upgrade_type == UpgradeType::Player {
+            if let Some(pending) = self.world.player_upgrades_in_progress.get_mut(&team_id) {
+                pending.clear_and_set(&upgrade_mask, &empty_mask);
+            }
             self.world
                 .player_upgrades
                 .entry(team_id)
@@ -6986,6 +7172,9 @@ impl SimApi for SimContext {
         if my_team == new_team {
             return;
         }
+        let _ = self.with_production(owner, |p, sim, ctx| {
+            p.cancel_and_refund_all_production(sim, ctx);
+        });
         if let Some(obj) = self.world.objects.get_mut(owner) {
             obj.set_undetected_defector(Bool::from(detection_frames > 0));
         }
@@ -9046,24 +9235,6 @@ impl SimApi for SimContext {
             .add_object_built(&view, TRUE);
     }
 
-    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
-        let es = self
-            .world
-            .objects
-            .get(owner)
-            .and_then(|o| o.exit_slot.or(o.contain_slot))?;
-        if self.world.modules.is_executing(es) {
-            return None;
-        }
-        // The callers pass no template and no particular object.
-        self.dispatch_module(es, |m, sim, ctx| {
-            m.as_exit_mut()
-                .map(|e| e.reserve_door_for_exit(sim, ctx, ThingTemplateId(0), None))
-        })
-        .ok()
-        .flatten()
-    }
-
     fn exit_object_by_budding(
         &mut self,
         owner: ObjectSlot,
@@ -10010,11 +10181,6 @@ impl SimApi for SimContext {
         }
     }
 
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
-        let entry = self.world.player_money.entry(team_id).or_insert(0);
-        *entry = entry.wrapping_add(amount);
-    }
-
     fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int) {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.floating_money_texts.push((id, *pos, amount));
@@ -10537,6 +10703,42 @@ impl SimView for MockSimApi {
         self.ctx.local_player_index()
     }
 
+    fn production_can_make_unit(&self, builder: ObjectSlot, tmpl: ThingTemplateId, own: Option<&dyn ProductionFacet>) -> CanMakeType {
+        self.ctx.production_can_make_unit(builder, tmpl, own)
+    }
+
+    fn unit_cost_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int {
+        self.ctx.unit_cost_to_build(team_id, tmpl)
+    }
+
+    fn unit_time_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Int {
+        self.ctx.unit_time_to_build(team_id, tmpl)
+    }
+
+    fn player_allowed_to_build(&self, team_id: TeamId, tmpl: ThingTemplateId) -> Bool {
+        self.ctx.player_allowed_to_build(team_id, tmpl)
+    }
+
+    fn can_produce_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool {
+        self.ctx.can_produce_upgrade(owner, upgrade)
+    }
+
+    fn affected_by_upgrade(&self, owner: ObjectSlot, upgrade: NameKeyType) -> Bool {
+        self.ctx.affected_by_upgrade(owner, upgrade)
+    }
+
+    fn player_has_upgrade_in_production(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
+        self.ctx.player_has_upgrade_in_production(team_id, mask)
+    }
+
+    fn parking_door_requirement(&self, owner: ObjectSlot, tmpl: ThingTemplateId) -> (Bool, Bool) {
+        self.ctx.parking_door_requirement(owner, tmpl)
+    }
+
+    fn object_has_exit_interface(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_has_exit_interface(owner)
+    }
+
     fn player_default_team(&self, team_id: TeamId) -> TeamId {
         self.ctx.player_default_team(team_id)
     }
@@ -10926,8 +11128,12 @@ impl SimApi for MockSimApi {
         self.ctx.on_unit_created(factory, unit);
     }
 
-    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
-        self.ctx.reserve_exit_door(owner)
+    fn reserve_exit_door(&mut self, owner: ObjectSlot, tmpl: ThingTemplateId) -> ExitDoorType {
+        self.ctx.reserve_exit_door(owner, tmpl)
+    }
+
+    fn try_reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
+        self.ctx.try_reserve_exit_door(owner)
     }
 
     fn exit_object_by_budding(&mut self, owner: ObjectSlot, new_obj: ObjectSlot, bud_host: Option<ObjectSlot>) {
@@ -11094,6 +11300,42 @@ impl SimApi for MockSimApi {
 
     fn dispatch_on_die(&mut self, owner: ObjectSlot, dmg: &DamageInfo) {
         self.ctx.dispatch_on_die(owner, dmg);
+    }
+
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+        self.ctx.deposit_player_money(team_id, amount);
+    }
+
+    fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType) {
+        self.ctx.player_add_upgrade_in_production(team_id, upgrade);
+    }
+
+    fn player_remove_upgrade(&mut self, team_id: TeamId, upgrade: NameKeyType) {
+        self.ctx.player_remove_upgrade(team_id, upgrade);
+    }
+
+    fn complete_production_upgrade(&mut self, owner: ObjectSlot, upgrade: NameKeyType) {
+        self.ctx.complete_production_upgrade(owner, upgrade);
+    }
+
+    fn unreserve_exit_door(&mut self, owner: ObjectSlot, door: ExitDoorType) {
+        self.ctx.unreserve_exit_door(owner, door);
+    }
+
+    fn factory_new_object(&mut self, tmpl: ThingTemplateId, team_id: TeamId) -> ObjectSlot {
+        self.ctx.factory_new_object(tmpl, team_id)
+    }
+
+    fn production_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        self.ctx.production_unit_created(factory, unit);
+    }
+
+    fn record_unit_production(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        self.ctx.record_unit_production(factory, unit);
+    }
+
+    fn production_set_hold_door_open(&mut self, owner: ObjectSlot, door: ExitDoorType, hold: Bool) {
+        self.ctx.production_set_hold_door_open(owner, door, hold);
     }
 
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot) {
@@ -12152,10 +12394,6 @@ impl SimApi for MockSimApi {
 
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
         self.ctx.stop_all_bone_fx(owner);
-    }
-
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
-        self.ctx.deposit_player_money(team_id, amount);
     }
 
     fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int) {
