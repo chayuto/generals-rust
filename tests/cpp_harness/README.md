@@ -64,6 +64,12 @@ A small object normally spans at most two cells per axis, and its cell array has
 - **Guard:** `WP5_0_SleepyHeap_displaced.json` (the harness's second output) and `test_sleepy_heap_displaced_root_golden_vectors`. The six local replays never displace slot 0 (about 40 million updates, measured 2026-11-27), so a replay check cannot see this.
 - **Lesson for new harnesses:** inputs chosen to be "safe" for the reference are inputs the port is never held to.
 
+### Tunnel passenger lists can keep pointers to destroyed objects
+
+- **Where:** `TunnelContain.cpp` and `TunnelTracker.cpp`.
+- **What goes wrong:** the reference reads freed memory when the destroy list is flushed (a) while a passenger list still holds a destroyed object, which happens after a unit is exited through another player's tunnel and then destroyed, or (b) while an object's container has been destroyed, which happens after a unit enters a sold or killed tunnel that is later destroyed.
+- **How the oracle handles it:** `gen_pkt300_tunnel.cpp` skips the flush in those states only; the operations themselves still run. The port stores object ids, so it has no matching undefined behaviour, and no vector says what it should do there.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault.

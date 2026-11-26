@@ -474,7 +474,7 @@ pub trait ContainBehavior: Any + Send {
             if let Some(rider) = sim.find_object(id) {
                 sim.destroy_object(rider);
                 // `Object::onDestroy` removes the rider from its container immediately.
-                remove_from_contain(self, sim, ctx, rider, FALSE);
+                self.remove_one(sim, ctx, rider, FALSE);
             }
         }
     }
@@ -549,6 +549,60 @@ pub trait ContainBehavior: Any + Send {
         self.open_core().is_passenger_allowed_to_fire(sim, ctx)
     }
     /// `OpenContain::onContaining` only plays audio.
+    // C++ virtuals that shared or redirected passenger lists override.
+
+    fn add_to_list(&mut self, sim: &mut dyn SimApi, _ctx: ModuleContext, rider: ObjectSlot) {
+        self.open_core_mut().add_to_contain_list(sim, rider);
+    }
+    fn remove_one(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        rider: ObjectSlot,
+        expose_stealthed: Bool,
+    ) {
+        remove_from_contain(self, sim, ctx, rider, expose_stealthed);
+    }
+    fn kill_all(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+        kill_all_contained(self, sim, ctx);
+    }
+    fn harm_all(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &DamageInfo) {
+        harm_and_force_exit_all_contained(self, sim, ctx, dmg);
+    }
+    fn order_exit(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        cmd_source: CommandSourceType,
+    ) {
+        order_all_passengers_to_exit(self, sim, ctx, cmd_source);
+    }
+    fn contain_count_view(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
+        self.open_core().contain_list_size
+    }
+    fn contain_max_view(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Int {
+        self.contain_max_value()
+    }
+    fn contained_view<'a>(&'a self, _sim: &'a dyn SimView, _ctx: ModuleContext) -> &'a [ObjectId] {
+        &self.open_core().contain_list
+    }
+    fn hero_count_view(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
+        self.open_core().hero_units_contained
+    }
+    /// `OpenContain::isContained` asks the object, not the list.
+    fn contains_view(&self, sim: &dyn SimView, ctx: ModuleContext, id: ObjectId) -> Bool {
+        Bool::from(
+            sim.find_object(id)
+                .and_then(|slot| sim.object(slot))
+                .is_some_and(|o| o.contained_by == Some(ctx.owner_slot)),
+        )
+    }
+    fn is_tunnel(&self) -> Bool {
+        FALSE
+    }
+    fn kicks_out_on_capture(&self) -> Bool {
+        TRUE
+    }
     fn contained(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _rider: ObjectSlot) {}
     /// `OpenContain::onRemoving` only plays audio.
     fn removing(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _rider: ObjectSlot) {}
@@ -646,7 +700,7 @@ fn sync_contain_sidecar<C: ContainBehavior + ?Sized>(
 
 /// The partition half of `OpenContain::addOrRemoveObjFromWorld`. Riders that `obj`
 /// holds without enclosing them come and go with it.
-fn add_or_remove_obj_from_world(sim: &mut dyn SimApi, obj: ObjectSlot, add: Bool) {
+pub(crate) fn add_or_remove_obj_from_world(sim: &mut dyn SimApi, obj: ObjectSlot, add: Bool) {
     sim.set_in_partition(obj, add);
     for id in sim.contain_items(obj) {
         if let Some(rider) = sim.find_object(id) {
@@ -658,7 +712,7 @@ fn add_or_remove_obj_from_world(sim: &mut dyn SimApi, obj: ObjectSlot, add: Bool
 }
 
 /// `Object::onContainedBy` (status bits plus back pointer and shroud refresh).
-fn on_contained_by(sim: &mut dyn SimApi, rider: ObjectSlot, owner: ObjectSlot, enclosing: Bool) {
+pub(crate) fn on_contained_by(sim: &mut dyn SimApi, rider: ObjectSlot, owner: ObjectSlot, enclosing: Bool) {
     sim.set_status(rider, ObjectStatusType::Unselectable);
     if enclosing != FALSE {
         sim.set_status(rider, ObjectStatusType::Masked);
@@ -670,7 +724,7 @@ fn on_contained_by(sim: &mut dyn SimApi, rider: ObjectSlot, owner: ObjectSlot, e
 }
 
 /// `Object::onRemovedFrom`.
-fn on_removed_from(sim: &mut dyn SimApi, rider: ObjectSlot) {
+pub(crate) fn on_removed_from(sim: &mut dyn SimApi, rider: ObjectSlot) {
     sim.clear_status(rider, ObjectStatusType::Masked);
     sim.clear_status(rider, ObjectStatusType::Unselectable);
     sim.set_contained_by(rider, None);
@@ -711,7 +765,7 @@ pub fn add_to_contain<C: ContainBehavior + ?Sized>(
         return;
     }
     let rider_team = rec.team_id;
-    c.open_core_mut().add_to_contain_list(sim, rider);
+    c.add_to_list(sim, ctx, rider);
     c.open_core_mut().player_entered_mask = sim.player_mask(rider_team);
     sync_contain_sidecar(c, sim, ctx);
 
@@ -844,7 +898,7 @@ pub fn harm_and_force_exit_all_contained<C: ContainBehavior + ?Sized>(
 ) {
     while let Some(&rider_id) = c.open_core().contain_list.first() {
         if let Some(rider) = sim.find_object(rider_id) {
-            remove_from_contain(c, sim, ctx, rider, TRUE);
+            c.remove_one(sim, ctx, rider, TRUE);
             let mut d = dmg.clone();
             sim.attempt_damage(rider, &mut d);
         }
@@ -975,7 +1029,7 @@ pub fn exit_object_via_door<C: ContainBehavior + ?Sized>(
     ctx: ModuleContext,
     exit_obj: ObjectSlot,
 ) {
-    remove_from_contain(c, sim, ctx, exit_obj, FALSE);
+    c.remove_one(sim, ctx, exit_obj, FALSE);
 
     let door_open_time = c.open_data().door_open_time;
     c.open_core_mut().door_close_countdown = door_open_time;
@@ -1151,7 +1205,7 @@ pub fn on_collide<C: ContainBehavior + ?Sized>(
                 }
                 sim.order_ai_exit(rider, ctx.owner_slot, CommandSourceType::FromAi);
             } else {
-                remove_from_contain(c, sim, ctx, rider, TRUE);
+                c.remove_one(sim, ctx, rider, TRUE);
             }
         }
     }
@@ -1169,7 +1223,7 @@ pub fn order_all_passengers_to_exit<C: ContainBehavior + ?Sized>(
     ctx: ModuleContext,
     cmd_source: CommandSourceType,
 ) {
-    let ids = c.open_core().contain_list.clone();
+    let ids = c.contained_view(sim, ctx).to_vec();
     for id in ids {
         if let Some(rider) = sim.find_object(id) {
             if sim.has_ai(rider) != FALSE {
@@ -1195,7 +1249,7 @@ pub fn apply_contain_deferred_op<C: ContainBehavior + ?Sized>(
         DeferredSelfOp::ContainRemove {
             obj,
             expose_stealthed,
-        } => remove_from_contain(c, sim, ctx, obj, expose_stealthed),
+        } => c.remove_one(sim, ctx, obj, expose_stealthed),
         DeferredSelfOp::ContainRemoveAll { expose_stealthed } => {
             c.remove_all(sim, ctx, expose_stealthed);
         }
@@ -1471,11 +1525,11 @@ macro_rules! impl_contain_module {
                 fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
                     self.open_data().weapon_bonus_passed_to_passengers
                 }
-                fn get_contain_count(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
-                    self.open_core().contain_list_size
+                fn get_contain_count(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
+                    self.contain_count_view(sim, ctx)
                 }
-                fn get_contain_max(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Int {
-                    self.contain_max_value()
+                fn get_contain_max(&self, sim: &dyn SimView, ctx: ModuleContext) -> Int {
+                    self.contain_max_view(sim, ctx)
                 }
                 fn is_enclosing_container_for(&self, _other: ObjectSlot) -> Bool {
                     self.is_enclosing()
@@ -1506,10 +1560,10 @@ macro_rules! impl_contain_module {
                 }
                 fn get_contained_items<'a>(
                     &'a self,
-                    _sim: &'a dyn SimView,
-                    _ctx: ModuleContext,
+                    sim: &'a dyn SimView,
+                    ctx: ModuleContext,
                 ) -> &'a [ObjectId] {
-                    &self.open_core().contain_list
+                    self.contained_view(sim, ctx)
                 }
                 fn add_to_contain(
                     &mut self,
@@ -1525,7 +1579,7 @@ macro_rules! impl_contain_module {
                     ctx: ModuleContext,
                     obj: ObjectSlot,
                 ) {
-                    self.open_core_mut().add_to_contain_list(sim, obj);
+                    self.add_to_list(sim, ctx, obj);
                     let sidecar = BehaviorModule::sync_sidecar(self);
                     sim.set_module_sidecar(ctx.mod_slot, sidecar);
                 }
@@ -1536,7 +1590,7 @@ macro_rules! impl_contain_module {
                     obj: ObjectSlot,
                     expose_stealthed: Bool,
                 ) {
-                    oc::remove_from_contain(self, sim, ctx, obj, expose_stealthed);
+                    self.remove_one(sim, ctx, obj, expose_stealthed);
                 }
                 fn remove_all_contained(
                     &mut self,
@@ -1547,7 +1601,7 @@ macro_rules! impl_contain_module {
                     self.remove_all(sim, ctx, expose_stealthed);
                 }
                 fn kill_all_contained(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-                    oc::kill_all_contained(self, sim, ctx);
+                    self.kill_all(sim, ctx);
                 }
                 fn harm_and_force_exit_all_contained(
                     &mut self,
@@ -1555,7 +1609,7 @@ macro_rules! impl_contain_module {
                     ctx: ModuleContext,
                     dmg: &DamageInfo,
                 ) {
-                    oc::harm_and_force_exit_all_contained(self, sim, ctx, dmg);
+                    self.harm_all(sim, ctx, dmg);
                 }
                 fn is_passenger_allowed_to_fire(
                     &self,
@@ -1571,16 +1625,24 @@ macro_rules! impl_contain_module {
                 fn get_stealth_units_contained(&self) -> UnsignedInt {
                     self.open_core().stealth_units_contained
                 }
-                fn get_hero_units_contained(&self) -> UnsignedInt {
-                    self.open_core().hero_units_contained
+                fn get_hero_units_contained(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
+                    self.hero_count_view(sim, ctx)
+                }
+
+                fn is_tunnel_contain(&self) -> Bool {
+                    self.is_tunnel()
+                }
+
+                fn is_kick_out_on_capture(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+                    self.kicks_out_on_capture()
                 }
                 fn is_contained(
                     &self,
-                    _sim: &dyn SimView,
-                    _ctx: ModuleContext,
+                    sim: &dyn SimView,
+                    ctx: ModuleContext,
                     obj_id: ObjectId,
                 ) -> Bool {
-                    Bool::from(self.open_core().contain_list.contains(&obj_id))
+                    self.contains_view(sim, ctx, obj_id)
                 }
                 fn on_selling(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
                     self.selling(sim, ctx);
@@ -1607,14 +1669,14 @@ macro_rules! impl_contain_module {
                     cmd_source: CommandSourceType,
                     _instantly: Bool,
                 ) {
-                    oc::order_all_passengers_to_exit(self, sim, ctx, cmd_source);
+                    self.order_exit(sim, ctx, cmd_source);
                 }
                 fn order_all_passengers_to_idle(
                     &mut self,
                     sim: &mut dyn SimApi,
-                    _ctx: ModuleContext,
+                    ctx: ModuleContext,
                 ) {
-                    for id in self.open_core().contain_list.clone() {
+                    for id in self.contained_view(sim, ctx).to_vec() {
                         if let Some(rider) = sim.find_object(id) {
                             sim.ai_idle(rider, CommandSourceType::FromAi);
                         }
@@ -1623,9 +1685,9 @@ macro_rules! impl_contain_module {
                 fn order_all_passengers_to_hack_internet(
                     &mut self,
                     sim: &mut dyn SimApi,
-                    _ctx: ModuleContext,
+                    ctx: ModuleContext,
                 ) {
-                    for id in self.open_core().contain_list.clone() {
+                    for id in self.contained_view(sim, ctx).to_vec() {
                         if let Some(rider) = sim.find_object(id) {
                             if sim.object_is_kind_of(rider, KindOfType::MoneyHacker) != FALSE {
                                 sim.ai_hack_internet(rider, CommandSourceType::FromAi);

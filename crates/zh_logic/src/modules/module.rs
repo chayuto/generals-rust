@@ -996,7 +996,7 @@ pub trait ContainFacet {
     fn get_stealth_units_contained(&self) -> UnsignedInt {
         0
     }
-    fn get_hero_units_contained(&self) -> UnsignedInt {
+    fn get_hero_units_contained(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
         0
     }
     fn get_rider_slot(&self, _sim: &dyn SimView) -> Option<ObjectSlot> {

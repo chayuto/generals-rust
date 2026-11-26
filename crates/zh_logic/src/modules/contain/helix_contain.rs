@@ -710,8 +710,8 @@ impl ContainFacet for HelixContain {
     fn get_stealth_units_contained(&self) -> UnsignedInt {
         self.0.get_stealth_units_contained()
     }
-    fn get_hero_units_contained(&self) -> UnsignedInt {
-        self.0.get_hero_units_contained()
+    fn get_hero_units_contained(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
+        self.0.get_hero_units_contained(sim, ctx)
     }
     fn is_contained(&self, sim: &dyn SimView, ctx: ModuleContext, obj_id: ObjectId) -> Bool {
         self.0.is_contained(sim, ctx, obj_id)

@@ -7,7 +7,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
-- Packets: 219 of 463 implemented, 244 unported (Phase 2: 102, Phase 4: 4, Phase 5: 92, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 220 of 463 implemented, 243 unported (Phase 2: 102, Phase 4: 4, Phase 5: 91, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -32,7 +32,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 - **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game). The one-module trial is done and its measured cost is recorded there. It decides whether more module ports are the best use of effort.
 - Cheap further swaps: the byte CRC (inline in a header, so it forces a large rebuild) and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
-- If module porting continues: `PKT-348 PhysicsUpdate` (read, not started; it needs a `set_object_transform` on `SimApi`, Matrix3D X/Y rotations, a deferred op for re-entrant forces, and `get_mass` to include contained items), or the now unblocked `PKT-264`, `PKT-284`, `PKT-300`.
+- If module porting continues: `PKT-348 PhysicsUpdate` (read, not started; it needs a `set_object_transform` on `SimApi`, Matrix3D X/Y rotations, a deferred op for re-entrant forces, and `get_mass` to include contained items), or the unblocked `PKT-264` (needs the `PKT-300` tracker operations over the cave trackers) and `PKT-284` (needs the remaining containment hooks).
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.
 
 ## Waiting on the owner

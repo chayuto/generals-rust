@@ -180,12 +180,10 @@ impl TunnelTrackerState {
     }
 
     pub fn on_tunnel_created(&mut self, tunnel_id: ObjectId) {
-        if !self.tunnel_ids.contains(&tunnel_id) {
-            self.tunnel_ids.push(tunnel_id);
-        }
+        self.tunnel_ids.push(tunnel_id);
         #[cfg(feature = "retail-crc")]
         {
-            self.tunnel_count = self.tunnel_count.saturating_add(1);
+            self.tunnel_count = self.tunnel_count.wrapping_add(1);
         }
         #[cfg(not(feature = "retail-crc"))]
         {
@@ -195,19 +193,21 @@ impl TunnelTrackerState {
     }
 
     /// Removes `tunnel_id` and returns `TRUE` when zero entrances remain (signaling kill-all).
+    /// The world half is `tunnel_contain::tracker_on_tunnel_destroyed`.
     pub fn on_tunnel_destroyed(&mut self, tunnel_id: ObjectId) -> Bool {
-        if let Some(pos) = self.tunnel_ids.iter().position(|&id| id == tunnel_id) {
-            self.tunnel_ids.remove(pos);
-        }
         #[cfg(feature = "retail-crc")]
         {
-            self.tunnel_count = self.tunnel_count.saturating_sub(1);
+            self.tunnel_ids.retain(|&id| id != tunnel_id);
+            self.tunnel_count = self.tunnel_count.wrapping_sub(1);
             Bool::from(self.tunnel_count == 0)
         }
         #[cfg(not(feature = "retail-crc"))]
         {
+            if let Some(pos) = self.tunnel_ids.iter().position(|&id| id == tunnel_id) {
+                self.tunnel_ids.remove(pos);
+                self.needs_full_heal_time_update = TRUE;
+            }
             self.tunnel_count = self.tunnel_ids.len() as UnsignedInt;
-            self.needs_full_heal_time_update = TRUE;
             Bool::from(self.tunnel_ids.is_empty())
         }
     }
@@ -1103,7 +1103,12 @@ pub trait SimView {
         obj: ObjectSlot,
         check_capacity: Bool,
     ) -> Bool;
-    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState>;
+    /// `Player::getTunnelSystem` of the player at `player_index`.
+    fn tunnel_tracker(&self, player_index: Int) -> Option<&TunnelTrackerState>;
+    /// `GlobalData::m_maxTunnelCapacity`.
+    fn max_tunnel_capacity(&self) -> Int;
+    /// `getLastDamageInfo()->in.m_sourceID` and `getLastDamageTimestamp` of the body.
+    fn object_last_damage(&self, owner: ObjectSlot) -> Option<(ObjectId, UnsignedInt)>;
     fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState>;
     fn cave_can_switch_index(&self, old_index: Int, new_index: Int) -> Bool;
     fn bridge_is_passable(&self, bridge_id: ObjectId) -> Bool;
@@ -1468,9 +1473,7 @@ pub trait SimApi: SimView {
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D);
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real);
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum);
-    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId);
-    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool;
-    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState;
+    fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState;
     fn cave_register(&mut self, cave_index: Int);
     fn cave_unregister(&mut self, cave_index: Int);
     fn cave_tracker_mut(&mut self, cave_index: Int) -> Option<&mut TunnelTrackerState>;
@@ -1685,7 +1688,8 @@ pub struct SimWorld {
     pub demoralized_events: Vec<(ObjectId, UnsignedInt)>,
     pub supply_dropzone_resets: Vec<ObjectId>,
     pub neutral_team_id: TeamId,
-    pub tunnel_trackers: BTreeMap<TeamId, TunnelTrackerState>,
+    /// Keyed by player index.
+    pub tunnel_trackers: BTreeMap<Int, TunnelTrackerState>,
     pub cave_system: CaveSystem<TunnelTrackerState>,
     pub bridge_links: BTreeMap<ObjectId, [ObjectId; 4]>,
     pub bridge_passable: BTreeMap<ObjectId, Bool>,
@@ -3936,8 +3940,19 @@ impl SimView for SimContext {
         FALSE
     }
 
-    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState> {
-        self.world.tunnel_trackers.get(&team_id)
+    fn tunnel_tracker(&self, player_index: Int) -> Option<&TunnelTrackerState> {
+        self.world.tunnel_trackers.get(&player_index)
+    }
+
+    fn max_tunnel_capacity(&self) -> Int {
+        self.rules.global_data.max_tunnel_capacity
+    }
+
+    fn object_last_damage(&self, owner: ObjectSlot) -> Option<(ObjectId, UnsignedInt)> {
+        let bs = self.world.objects.get(owner)?.body_slot?;
+        let body = self.world.modules.payload(bs)?.as_body()?;
+        let source = body.get_last_damage_info()?.input.source_id;
+        Some((source, body.get_last_damage_timestamp()?))
     }
 
     fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState> {
@@ -6614,24 +6629,8 @@ impl SimApi for SimContext {
         }
     }
 
-    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) {
-        self.world
-            .tunnel_trackers
-            .entry(team_id)
-            .or_default()
-            .on_tunnel_created(tunnel_id);
-    }
-
-    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool {
-        self.world
-            .tunnel_trackers
-            .entry(team_id)
-            .or_default()
-            .on_tunnel_destroyed(tunnel_id)
-    }
-
-    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState {
-        self.world.tunnel_trackers.entry(team_id).or_default()
+    fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState {
+        self.world.tunnel_trackers.entry(player_index).or_default()
     }
 
     fn cave_register(&mut self, cave_index: Int) {
@@ -8031,8 +8030,16 @@ impl SimView for MockSimApi {
             .is_valid_container_for(container, obj, check_capacity)
     }
 
-    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState> {
-        self.ctx.tunnel_tracker(team_id)
+    fn tunnel_tracker(&self, player_index: Int) -> Option<&TunnelTrackerState> {
+        self.ctx.tunnel_tracker(player_index)
+    }
+
+    fn max_tunnel_capacity(&self) -> Int {
+        self.ctx.max_tunnel_capacity()
+    }
+
+    fn object_last_damage(&self, owner: ObjectSlot) -> Option<(ObjectId, UnsignedInt)> {
+        self.ctx.object_last_damage(owner)
     }
 
     fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState> {
@@ -8929,16 +8936,8 @@ impl SimApi for MockSimApi {
         self.ctx.set_object_layer(owner, layer);
     }
 
-    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) {
-        self.ctx.tunnel_add_entrance(team_id, tunnel_id);
-    }
-
-    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool {
-        self.ctx.tunnel_remove_entrance(team_id, tunnel_id)
-    }
-
-    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState {
-        self.ctx.tunnel_tracker_mut(team_id)
+    fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState {
+        self.ctx.tunnel_tracker_mut(player_index)
     }
 
     fn cave_register(&mut self, cave_index: Int) {

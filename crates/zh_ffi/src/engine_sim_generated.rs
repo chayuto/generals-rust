@@ -254,8 +254,14 @@ impl SimView for EngineSim<'_> {
     fn is_valid_container_for( &self, container: ObjectSlot, obj: ObjectSlot, check_capacity: Bool, ) -> Bool {
         not_wired("is_valid_container_for")
     }
-    fn tunnel_tracker(&self, team_id: TeamId) -> Option<&TunnelTrackerState> {
+    fn tunnel_tracker(&self, player_index: Int) -> Option<&TunnelTrackerState> {
         not_wired("tunnel_tracker")
+    }
+    fn max_tunnel_capacity(&self) -> Int {
+        not_wired("max_tunnel_capacity")
+    }
+    fn object_last_damage(&self, owner: ObjectSlot) -> Option<(ObjectId, UnsignedInt)> {
+        not_wired("object_last_damage")
     }
     fn cave_tracker(&self, cave_index: Int) -> Option<&TunnelTrackerState> {
         not_wired("cave_tracker")
@@ -779,13 +785,7 @@ impl SimApi for EngineSim<'_> {
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
         not_wired("set_object_layer")
     }
-    fn tunnel_add_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) {
-        not_wired("tunnel_add_entrance")
-    }
-    fn tunnel_remove_entrance(&mut self, team_id: TeamId, tunnel_id: ObjectId) -> Bool {
-        not_wired("tunnel_remove_entrance")
-    }
-    fn tunnel_tracker_mut(&mut self, team_id: TeamId) -> &mut TunnelTrackerState {
+    fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState {
         not_wired("tunnel_tracker_mut")
     }
     fn cave_register(&mut self, cave_index: Int) {

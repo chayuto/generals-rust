@@ -1189,7 +1189,7 @@ fn golden_wp53_a_all_1000_seeds() {
             (
                 oc.get_contain_count(&sim, ctx),
                 oc.get_stealth_units_contained(),
-                oc.get_hero_units_contained(),
+                oc.get_hero_units_contained(&sim, ctx),
                 oc.get_player_entered_mask(),
                 oc.get_contained_items(&sim, ctx)
                     .iter()
@@ -1270,7 +1270,7 @@ fn golden_wp53_a_all_1000_seeds() {
             (
                 oc.get_contain_count(&sim, ctx),
                 oc.get_stealth_units_contained(),
-                oc.get_hero_units_contained(),
+                oc.get_hero_units_contained(&sim, ctx),
             )
         };
         let inf_hp_bits = body_health_bits(&sim, p_inf);

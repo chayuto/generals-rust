@@ -10,6 +10,7 @@ pub mod open_contain;
 pub mod parachute_contain;
 pub mod railed_transport_contain;
 pub mod transport_contain;
+pub mod tunnel_contain;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;
@@ -108,5 +109,15 @@ pub fn register_contain_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenera
         false,
         helix_contain::parse_helix_contain_data,
         helix_contain::create_helix_contain,
+    );
+    reg.register_module(
+        nk,
+        "TunnelContain",
+        ModuleType::Behavior,
+        FacetMask(0x057 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        tunnel_contain::parse_tunnel_contain_data,
+        tunnel_contain::create_tunnel_contain,
     );
 }
