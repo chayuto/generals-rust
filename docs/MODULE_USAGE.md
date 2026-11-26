@@ -8,8 +8,8 @@ or weapon code outside modules). The replays do not match their recordings
 (`BASELINE.md`), so they are a sample of play, not the original games.
 
 - Classes created: 104; in every replay: 50.
-- Classes with a ported packet: 78 of 104; in every replay: 43 of 50.
-- Instances with a ported packet: 13040 of 14355.
+- Classes with a ported packet: 82 of 104; in every replay: 43 of 50.
+- Instances with a ported packet: 13180 of 14355.
 
 ## Not ported
 
@@ -23,13 +23,9 @@ or weapon code outside modules). The replays do not match their recordings
 | `DozerAIUpdate` | `PKT-321` | 6 | 45 | 105594 |
 | `SpawnBehavior` | `PKT-296` | 6 | 23 | 46341 |
 | `MinefieldBehavior` | `PKT-279` | 5 | 53 | 29795 |
-| `SpectreGunshipDeploymentUpdate` | `PKT-370` | 4 | 64 | 18180 |
 | `SupplyTruckAIUpdate` | `PKT-380` | 4 | 26 | 40352 |
-| `AutoFindHealingUpdate` | `PKT-306` | 4 | 20 | 10536 |
 | `ChinookAIUpdate` | `PKT-312` | 4 | 18 | 61770 |
 | `HelicopterSlowDeathBehavior` | `PKT-334` | 4 | 18 | 26512 |
-| `AssistedTargetingUpdate` | `PKT-304` | 4 | 6 | 10759 |
-| `HordeUpdate` | `PKT-336` | 3 | 50 | 21101 |
 | `WorkerAIUpdate` | `PKT-389` | 3 | 30 | 69258 |
 | `SlavedUpdate` | `PKT-365` | 3 | 12 | 34735 |
 | `TransportAIUpdate` | `PKT-384` | 3 | 11 | 11159 |

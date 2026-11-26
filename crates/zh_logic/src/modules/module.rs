@@ -9,11 +9,13 @@
 use std::any::Any;
 
 use crate::arena::{
-    DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ObjectSlot, ThingTemplateId,
+    DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ModuleSlot, ObjectSlot, ThingTemplateId,
 };
 use crate::combat::damage::DamageInfo;
 use crate::gamelogic::global_data::{BodyDamageType, WeaponBonusConditionType};
 use crate::modules::update::dock_update::DockUpdateState;
+use crate::modules::update::horde_update::HordeActionType;
+use crate::object::weapon_set::WeaponSlotType;
 pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
@@ -631,6 +633,15 @@ pub trait BehaviorModule: Send {
     fn as_parking_place_mut(&mut self) -> Option<&mut dyn ParkingPlaceFacet> {
         None
     }
+    fn as_horde(&self) -> Option<&dyn HordeFacet> {
+        None
+    }
+    fn as_special_power_update_mut(&mut self) -> Option<&mut dyn SpecialPowerUpdateFacet> {
+        None
+    }
+    fn as_assisted_targeting_mut(&mut self) -> Option<&mut dyn AssistedTargetingFacet> {
+        None
+    }
     fn as_spawn_behavior(&self) -> Option<&dyn SpawnBehaviorFacet> {
         None
     }
@@ -683,6 +694,9 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_transport_passenger_mut(&mut self) -> Option<&mut dyn TransportPassengerFacet> {
+        None
+    }
+    fn as_slaved_update(&self) -> Option<&dyn SlavedUpdateFacet> {
         None
     }
     fn as_slaved_update_mut(&mut self) -> Option<&mut dyn SlavedUpdateFacet> {
@@ -1795,6 +1809,30 @@ pub trait AiUpdateFacet {
     fn set_locomotor_ultra_accurate(&mut self, _ultra: Bool) {}
     fn set_locomotor_close_enough_dist(&mut self, _dist: Real) {}
     fn set_locomotor_close_enough_dist_3d(&mut self, _is_3d: Bool) {}
+    /// `AICommandInterface::aiGetHealed`.
+    fn ai_get_healed(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _heal_unit: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    /// `AICommandInterface::aiAttackObject`.
+    fn ai_attack_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _victim: ObjectSlot,
+        _max_shots_to_fire: Int,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    /// `FALSE` when the slot is on a turret that is disabled
+    /// (`getWhichTurretForWeaponSlot`, `isTurretEnabled`).
+    fn is_weapon_slot_enabled(&self, _slot: WeaponSlotType) -> Bool {
+        TRUE
+    }
 }
 
 /// Marks a physics module (`PhysicsBehavior`). Its members are on the object
@@ -1974,6 +2012,10 @@ pub trait StealthDetectorFacet {
 
 /// Slaved update facet (`SlavedUpdateInterface`).
 pub trait SlavedUpdateFacet {
+    /// `getSlaverID`.
+    fn get_slaver_id(&self) -> ObjectId {
+        ObjectId::INVALID
+    }
     fn on_slaver_die(
         &mut self,
         _sim: &mut dyn SimApi,
@@ -1981,4 +2023,64 @@ pub trait SlavedUpdateFacet {
         _dmg: Option<&DamageInfo>,
     ) {
     }
+}
+
+/// `HordeUpdateInterface`.
+pub trait HordeFacet {
+    fn is_in_horde(&self) -> Bool;
+    fn has_flag(&self) -> Bool;
+    fn is_true_horde_member(&self) -> Bool;
+    fn is_allowed_nationalism(&self) -> Bool;
+    fn horde_action_type(&self) -> HordeActionType;
+}
+
+/// The special power module that called `initiateIntentToDoSpecialPower`. It is
+/// dispatched at that moment, so calls back to it go through this reference.
+pub struct SpecialPowerCaller<'a> {
+    pub ctx: ModuleContext,
+    pub module: &'a mut dyn SpecialPowerFacet,
+}
+
+impl SpecialPowerCaller<'_> {
+    /// Runs `f` on the special power module `target`, which may be the caller.
+    pub fn with(
+        &mut self,
+        sim: &mut dyn SimApi,
+        target: ModuleSlot,
+        f: &mut dyn FnMut(&mut dyn SpecialPowerFacet, &mut dyn SimApi, ModuleContext),
+    ) {
+        if target == self.ctx.mod_slot {
+            f(&mut *self.module, sim, self.ctx);
+        } else {
+            sim.with_special_power_module(target, f);
+        }
+    }
+}
+
+/// `SpecialPowerUpdateInterface`.
+pub trait SpecialPowerUpdateFacet {
+    /// `initiateIntentToDoSpecialPower`: `TRUE` when this module takes the power.
+    #[allow(clippy::too_many_arguments)]
+    fn initiate_intent_to_do_special_power(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        caller: SpecialPowerCaller<'_>,
+        template_id: UnsignedInt,
+        target_obj: Option<ObjectSlot>,
+        target_pos: Option<&Coord3D>,
+        command_options: UnsignedInt,
+    ) -> Bool;
+}
+
+/// `AssistedTargetingUpdate`'s two entry points.
+pub trait AssistedTargetingFacet {
+    fn is_free_to_assist(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) -> Bool;
+    fn assist_attack(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        requesting: ObjectSlot,
+        victim: ObjectSlot,
+    );
 }

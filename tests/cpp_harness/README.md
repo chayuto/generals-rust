@@ -234,3 +234,24 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 
 `revealMapForPlayerPermanently` calls `TheDisplay->setShroudLevel` for the local player, and there is none. Reveal first, then `setLocalPlayer`. Without the reveal, `FXList` drops effects at shrouded positions (`gen_pkt383_377_305_topple.cpp`).
 
+
+### The Spectre orbit radius is never initialised
+- **Where:** `SpectreGunshipDeploymentUpdateModuleData::m_gunshipOrbitRadius`, read by `initiateIntentToDoSpecialPower`.
+- **What happens:** neither the constructor nor `buildFieldParse` sets it; it is zero only because pool memory is. The same code dereferences a null special power module, gunship template, target position or current locomotor without a test.
+- **Related:** the module's `xfer` calls `UpdateModule::xfer`, skipping the `SpecialPowerUpdateModule` version byte, and does not save the target position.
+- **Guard:** `golden_pkt336_370_306_304_leaves` places every gunship with a zero radius and compares the save bytes.
+
+### The auto heal threshold for busy units is unreachable
+- **Where:** `AutoFindHealingUpdate::update`.
+- **What happens:** the `AlwaysHeal` test follows a `return`, so a busy unit never looks for a heal pad.
+- **Guard:** `golden_pkt336_370_306_304_leaves` has variants with `AlwaysHeal` above the health of busy units.
+
+### A horde member forgets what it does not save
+- **Where:** `HordeUpdate::xfer`.
+- **What happens:** `m_trueHordeMember` and `m_lastHordeRefreshFrame` are not saved. `joinOrLeaveHorde` has no caller.
+
+### A feedback laser starts at its parent, not at `from`
+- **Where:** `AssistedTargetingUpdate::makeFeedbackLaser`, `LaserUpdate::initLaser`.
+- **What happens:** the laser object is put at `from`, but the client update takes its start from the parent's drawable (always the assistant). Only the object position is logic state.
+- **Related:** `TransportContain::isPassengerAllowedToFire(getID())`, as `isAbleToAttack` asks it about the object's own hold, tests the holder itself, so only an infantry holder can attack through its passengers.
+- **Guard:** `golden_pkt336_370_306_304_leaves` compares the laser object, its parent and its end.

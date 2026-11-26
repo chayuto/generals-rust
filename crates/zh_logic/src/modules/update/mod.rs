@@ -2,6 +2,10 @@
 
 pub mod auto_deposit_update;
 pub mod base_renerate_update;
+pub mod assisted_targeting_update;
+pub mod auto_find_healing_update;
+pub mod spectre_gunship_deployment_update;
+pub mod horde_update;
 pub mod default_production_exit_update;
 pub mod deletion_update;
 pub mod dock_update;
@@ -71,6 +75,46 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         auto_deposit_update::parse_auto_deposit_update_data,
         auto_deposit_update::create_auto_deposit_update,
+    );
+    reg.register_module(
+        nk,
+        "HordeUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::HORDE_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        horde_update::parse_horde_update_data,
+        horde_update::create_horde_update,
+    );
+    reg.register_module(
+        nk,
+        "SpectreGunshipDeploymentUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::SPECIAL_POWER_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        spectre_gunship_deployment_update::parse_spectre_gunship_deployment_update_data,
+        spectre_gunship_deployment_update::create_spectre_gunship_deployment_update,
+    );
+    reg.register_module(
+        nk,
+        "AutoFindHealingUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        auto_find_healing_update::parse_auto_find_healing_update_data,
+        auto_find_healing_update::create_auto_find_healing_update,
+    );
+    reg.register_module(
+        nk,
+        "AssistedTargetingUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        assisted_targeting_update::parse_assisted_targeting_update_data,
+        assisted_targeting_update::create_assisted_targeting_update,
     );
     reg.register_module(
         nk,

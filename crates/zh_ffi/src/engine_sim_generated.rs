@@ -62,6 +62,8 @@ use zh_logic::spatial::partition_collide::{
     geom_collides_with_geom, process_contacts, CollideInfo, CollisionHost,
 };
 use zh_logic::spatial::partition_grid::{PartitionGrid, PartitionObject};
+use zh_logic::modules::module::{SpecialPowerCaller, SpecialPowerFacet};
+use zh_logic::modules::update::horde_update::TerrainDecalType;
 use zh_logic::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
 use zh_logic::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
@@ -79,6 +81,27 @@ use zh_common::types::{
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
 impl SimView for EngineSim<'_> {
+    fn draw_icon_ui(&self) -> Bool {
+        not_wired("draw_icon_ui")
+    }
+    fn horde_member_state(&self, owner: ObjectSlot) -> Option<Bool> {
+        not_wired("horde_member_state")
+    }
+    fn ai_is_idle(&self, owner: ObjectSlot) -> Bool {
+        not_wired("ai_is_idle")
+    }
+    fn ai_cur_locomotor_preferred_height(&self, owner: ObjectSlot) -> Option<Real> {
+        not_wired("ai_cur_locomotor_preferred_height")
+    }
+    fn terrain_extent(&self) -> Region3D {
+        not_wired("terrain_extent")
+    }
+    fn object_is_able_to_attack(&self, owner: ObjectSlot) -> Bool {
+        not_wired("object_is_able_to_attack")
+    }
+    fn object_has_client_update(&self, owner: ObjectSlot, name: &str) -> Bool {
+        not_wired("object_has_client_update")
+    }
     fn frame(&self) -> UnsignedInt {
         self.engine_frame()
     }
@@ -472,6 +495,24 @@ impl SimView for EngineSim<'_> {
 }
 
 impl SimApi for EngineSim<'_> {
+    fn with_special_power_module( &mut self, module: ModuleSlot, f: &mut dyn FnMut(&mut dyn SpecialPowerFacet, &mut dyn SimApi, ModuleContext), ) {
+        not_wired("with_special_power_module")
+    }
+    fn initiate_special_power_update( &mut self, update: ModuleSlot, caller: SpecialPowerCaller<'_>, template_id: UnsignedInt, target_obj: Option<ObjectSlot>, target_pos: Option<&Coord3D>, command_options: UnsignedInt, ) -> Option<Bool> {
+        not_wired("initiate_special_power_update")
+    }
+    fn select_object(&mut self, owner: ObjectSlot, create_new: Bool, player_mask: UnsignedShort) {
+        not_wired("select_object")
+    }
+    fn ai_get_healed(&mut self, owner: ObjectSlot, heal_unit: ObjectSlot, cmd_source: CommandSourceType) {
+        not_wired("ai_get_healed")
+    }
+    fn ai_attack_object( &mut self, owner: ObjectSlot, victim: ObjectSlot, max_shots_to_fire: Int, cmd_source: CommandSourceType, ) {
+        not_wired("ai_attack_object")
+    }
+    fn request_assist_from( &mut self, assistant: ObjectSlot, requesting: ObjectSlot, victim: ObjectSlot, ) -> Bool {
+        not_wired("request_assist_from")
+    }
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
         not_wired("share_weapon_reload")
     }

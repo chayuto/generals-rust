@@ -1,7 +1,7 @@
 //! `PKT-244`: Base `SpecialPowerModule`, `SpecialPowerModuleData`, and `SpecialPowerBehaviorImpl`
 //! (`SpecialPowerModule.h` / `SpecialPowerModule.cpp`).
 
-use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ObjectSlot};
+use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ModuleSlot, ObjectSlot};
 use crate::modules::module::{BehaviorModule, ModuleData, ModuleSnapshotHeader, SpecialPowerFacet};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::rules::kind_of::KindOfType;
@@ -9,6 +9,7 @@ use crate::rules::object_status_types::ObjectStatusType;
 use crate::rules::science::{ScienceType, SCIENCE_INVALID};
 use crate::rules::special_power::SpecialPowerTemplate;
 use crate::rules::special_power_types::SpecialPowerType;
+use crate::modules::module::SpecialPowerCaller;
 use crate::sim::{SimApi, SimView};
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
 use zh_common::math::Coord3D;
@@ -330,22 +331,47 @@ impl SpecialPowerModule {
         ctx: ModuleContext,
         target: Option<ObjectSlot>,
         target_pos: Option<&Coord3D>,
-        _command_options: UnsignedInt,
+        command_options: UnsignedInt,
     ) -> bool {
-        let has_sp_update = sim.object(ctx.owner_slot).is_some_and(|o| {
+        let updates: Vec<ModuleSlot> = sim.object(ctx.owner_slot).map_or_else(Vec::new, |o| {
             o.behaviors
                 .iter()
-                .any(|&(_, mask)| mask.contains(FacetMask::SPECIAL_POWER_UPDATE))
+                .filter(|&&(_, mask)| mask.contains(FacetMask::SPECIAL_POWER_UPDATE))
+                .map(|&(ms, _)| ms)
+                .collect()
         });
-        if has_sp_update {
+        let template_id = self.resolve_template_id(&*sim);
+        let mut taken = false;
+        let mut unported = false;
+        for update in updates {
+            let caller = SpecialPowerCaller { ctx, module: self };
+            match sim.initiate_special_power_update(
+                update,
+                caller,
+                template_id,
+                target,
+                target_pos,
+                command_options,
+            ) {
+                Some(valid) if valid != FALSE => {
+                    taken = true;
+                    break;
+                }
+                Some(_) => {}
+                None => unported = true,
+            }
+        }
+        // Update modules without the facet are stood in for by a recorded order.
+        if !taken && unported {
             sim.trigger_special_ability(ctx.owner_slot, target, target_pos);
+            taken = true;
         }
 
         if self.available_on_frame == u32::MAX {
             return false;
         }
 
-        has_sp_update
+        taken
     }
 
     pub fn about_to_do_special_power(
