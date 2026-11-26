@@ -3,6 +3,7 @@
 pub mod contain_module;
 pub mod garrison_contain;
 pub mod heal_contain;
+pub mod helix_contain;
 pub mod internet_hack_contain;
 pub mod mob_nexus_contain;
 pub mod open_contain;
@@ -97,5 +98,15 @@ pub fn register_contain_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenera
         false,
         parachute_contain::parse_parachute_contain_data,
         parachute_contain::create_parachute_contain,
+    );
+    reg.register_module(
+        nk,
+        "HelixContain",
+        ModuleType::Behavior,
+        FacetMask(0x057 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        helix_contain::parse_helix_contain_data,
+        helix_contain::create_helix_contain,
     );
 }

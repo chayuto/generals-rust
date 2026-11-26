@@ -1350,6 +1350,8 @@ pub trait SimApi: SimView {
     fn contain_remove_all(&mut self, container: ObjectSlot, expose_stealthed: Bool);
     fn contain_kill_all(&mut self, container: ObjectSlot);
     fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>);
+    /// `BodyModuleInterface::setDamageState`.
+    fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType);
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D);
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real);
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum);
@@ -5341,6 +5343,19 @@ impl SimApi for SimContext {
         }
     }
 
+    fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType) {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(bs) {
+            let _ = self.dispatch_module(bs, |m, sim, ctx| {
+                if let Some(b) = m.as_body_mut() {
+                    b.set_damage_state(sim, ctx, new_state);
+                }
+            });
+        }
+    }
+
     fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>) {
         let frame = self.world.frame;
         if let Some(obj) = self.world.objects.get_mut(passenger) {
@@ -7564,6 +7579,10 @@ impl SimApi for MockSimApi {
 
     fn contain_kill_all(&mut self, container: ObjectSlot) {
         self.ctx.contain_kill_all(container);
+    }
+
+    fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType) {
+        self.ctx.set_body_damage_state(owner, new_state);
     }
 
     fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>) {
