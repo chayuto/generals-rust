@@ -3,7 +3,7 @@
 
 use crate::arena::{FacetMask, ModuleContext, ModuleSlot};
 use crate::combat::damage::DamageInfo;
-use crate::modules::module::{ModuleData, ModuleSnapshotHeader};
+use crate::modules::module::{BehaviorModule, ModuleData, ModuleSnapshotHeader};
 use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
 use crate::sim::{SimApi, SimView};
 use std::any::Any;
@@ -93,6 +93,24 @@ impl UpdateScheduleTracker {
     pub fn load_post_process(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.mod_slot = Some(ctx.mod_slot);
         sim.set_module_schedule(ctx.mod_slot, self.schedule);
+    }
+}
+
+/// Runs `f` with `this` back in the arena, for a call a C++ module makes that can call it
+/// back (damage to its own owner). `this` ends up with what the callbacks changed.
+pub fn lend_self<T>(
+    this: &mut T,
+    sim: &mut dyn SimApi,
+    ctx: ModuleContext,
+    mut f: impl FnMut(&mut dyn SimApi),
+) where
+    T: BehaviorModule + Clone + 'static,
+{
+    let copy = Box::new(this.clone());
+    if let Some(mut back) = sim.lend_module(ctx.mod_slot, copy, &mut f) {
+        if let Some(back) = back.as_any_mut().and_then(|a| a.downcast_mut::<T>()) {
+            std::mem::swap(this, back);
+        }
     }
 }
 

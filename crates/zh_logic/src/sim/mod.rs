@@ -1099,6 +1099,17 @@ pub trait SimView {
     /// `ITER_FASTEST` and no filters; the caller applies its own. Only objects filed
     /// by the last [`SimContext::update_partition`] and strictly closer than `radius`.
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    /// `PartitionManager::iteratePotentialCollisions`: the objects `geom` at `pos` would
+    /// collide with.
+    fn find_potential_collisions(
+        &self,
+        pos: &Coord3D,
+        geom: &GeometryInfo,
+        angle: Real,
+        use_2d: Bool,
+    ) -> Vec<ObjectSlot>;
+    /// `isClearingMines` of the owner's AI module. `FALSE` without one.
+    fn ai_is_clearing_mines(&self, owner: ObjectSlot) -> Bool;
     /// The same search from an object, which is never part of the result.
     fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot>;
     /// The object form of the search under `FROM_BOUNDINGSPHERE_3D`.
@@ -1311,6 +1322,23 @@ pub trait SimApi: SimView {
         duration: UnsignedInt,
     ) -> Bool;
     fn dispatch_on_damage(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo);
+    /// Files `module` back at `slot`, which is executing, while `f` runs, so that callbacks
+    /// reach it as they reach a C++ module further up the stack. Returns it with what they
+    /// changed, or `None` if the slot was freed. See `behavior_module::lend_self`.
+    fn lend_module(
+        &mut self,
+        slot: ModuleSlot,
+        module: Box<dyn BehaviorModule>,
+        f: &mut dyn FnMut(&mut dyn SimApi),
+    ) -> Option<Box<dyn BehaviorModule>>;
+    /// `BodyModuleInterface::internalChangeHealth` on the owner's body.
+    fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real);
+    /// `GeometryInfo::makeRandomOffsetWithinFootprint`, drawing from the logic stream.
+    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D);
+    /// `setScootParms` on the first `LandMineInterface` module of the owner.
+    fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D);
+    /// `AutoHealBehavior::stopHealing` on the owner's first `AutoHealBehavior`.
+    fn stop_auto_healing(&mut self, owner: ObjectSlot);
     /// `attempt_damage` by a module on its own owner. A module cannot be called back while it
     /// executes: this returns the owner's status when the `onDamage` loop reached `watch`.
     fn attempt_damage_watching(
@@ -4219,6 +4247,51 @@ impl SimView for SimContext {
         )
     }
 
+    fn find_potential_collisions(
+        &self,
+        pos: &Coord3D,
+        geom: &GeometryInfo,
+        angle: Real,
+        use_2d: Bool,
+    ) -> Vec<ObjectSlot> {
+        let rule = if use_2d != FALSE {
+            DistanceCalculationType::FromBoundingSphere2d
+        } else {
+            DistanceCalculationType::FromBoundingSphere3d
+        };
+        let probe = CollideInfo {
+            pos: *pos,
+            geometry: geom.clone(),
+            angle,
+        };
+        // "just a little slop"
+        let radius = geom.get_bounding_sphere_radius() * 1.1;
+        let mut found = self.search_partition(QueryCenter::Position(*pos), radius, rule);
+        found.retain(|&other| {
+            self.world.objects.get(other).is_some_and(|o| {
+                let them = CollideInfo {
+                    pos: *o.thing.get_position(),
+                    geometry: o.geometry.clone(),
+                    angle: o.thing.get_orientation(),
+                };
+                geom_collides_with_geom(&probe, &them)
+            })
+        });
+        found
+    }
+
+    fn ai_is_clearing_mines(&self, owner: ObjectSlot) -> Bool {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return FALSE;
+        };
+        let ctx = self.world.modules.meta(ms).context(ms);
+        self.world
+            .modules
+            .payload(ms)
+            .and_then(|m| m.as_ai())
+            .map_or(FALSE, |ai| ai.is_clearing_mines(self, ctx))
+    }
+
     fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot> {
         self.search_partition_from_object(owner, radius, DistanceCalculationType::FromCenter2d)
     }
@@ -5420,6 +5493,68 @@ impl SimApi for SimContext {
                     b.set_aflame(sim, ctx, setting);
                 }
             });
+        }
+    }
+
+    fn lend_module(
+        &mut self,
+        slot: ModuleSlot,
+        module: Box<dyn BehaviorModule>,
+        f: &mut dyn FnMut(&mut dyn SimApi),
+    ) -> Option<Box<dyn BehaviorModule>> {
+        if !self.world.modules.is_executing(slot) {
+            f(self);
+            return Some(module);
+        }
+        let generation = self.world.modules.meta(slot).generation;
+        self.world.modules.restore_payload(slot, generation, module);
+        f(self);
+        let taken = self.world.modules.take_payload(slot).ok();
+        taken.map(|(module, _, _)| module)
+    }
+
+    fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real) {
+        let Some(body_slot) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(body_slot, |m, sim, ctx| {
+            if let Some(body) = m.as_body_mut() {
+                body.internal_change_health(sim, ctx, delta);
+            }
+        });
+    }
+
+    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D) {
+        geom.make_random_offset_within_footprint(pt, &mut self.world.rng);
+    }
+
+    fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D) {
+        for ms in self.behavior_slots(owner) {
+            let mut handled = false;
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(f) = m.as_land_mine_mut() {
+                    f.set_scoot_parms(sim, ctx, start, end);
+                    handled = true;
+                }
+            });
+            if handled {
+                break;
+            }
+        }
+    }
+
+    fn stop_auto_healing(&mut self, owner: ObjectSlot) {
+        for ms in self.behavior_slots(owner) {
+            let mut handled = false;
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(f) = m.as_auto_heal_mut() {
+                    f.stop_healing(sim, ctx);
+                    handled = true;
+                }
+            });
+            if handled {
+                break;
+            }
         }
     }
 
@@ -8980,6 +9115,20 @@ impl SimView for MockSimApi {
         self.ctx.find_objects_in_range(center, radius)
     }
 
+    fn find_potential_collisions(
+        &self,
+        pos: &Coord3D,
+        geom: &GeometryInfo,
+        angle: Real,
+        use_2d: Bool,
+    ) -> Vec<ObjectSlot> {
+        self.ctx.find_potential_collisions(pos, geom, angle, use_2d)
+    }
+
+    fn ai_is_clearing_mines(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.ai_is_clearing_mines(owner)
+    }
+
     fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot> {
         self.ctx.find_objects_in_range_of(owner, radius)
     }
@@ -9500,6 +9649,31 @@ impl SimApi for MockSimApi {
 
     fn set_body_aflame(&mut self, owner: ObjectSlot, setting: Bool) {
         self.ctx.set_body_aflame(owner, setting);
+    }
+
+    fn lend_module(
+        &mut self,
+        slot: ModuleSlot,
+        module: Box<dyn BehaviorModule>,
+        f: &mut dyn FnMut(&mut dyn SimApi),
+    ) -> Option<Box<dyn BehaviorModule>> {
+        self.ctx.lend_module(slot, module, f)
+    }
+
+    fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real) {
+        self.ctx.body_internal_change_health(owner, delta);
+    }
+
+    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D) {
+        self.ctx.random_offset_within_footprint(geom, pt);
+    }
+
+    fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D) {
+        self.ctx.set_land_mine_scoot_parms(owner, start, end);
+    }
+
+    fn stop_auto_healing(&mut self, owner: ObjectSlot) {
+        self.ctx.stop_auto_healing(owner);
     }
 
     fn attempt_damage_watching(

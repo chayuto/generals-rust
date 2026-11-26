@@ -1,5 +1,6 @@
 //! `PKT-165`: `ActiveBody` (`ActiveBody.h` / `ActiveBody.cpp`).
 
+use crate::modules::behavior::behavior_module::lend_self;
 use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar};
 use crate::combat::armor::Armor;
 use crate::combat::damage::DamageInfo;
@@ -369,6 +370,26 @@ impl ActiveBody {
         }
     }
 
+    /// Runs `onDamage` or `onHealing` of the owner's modules. A land mine damages its own
+    /// owner and changes its health from there, so for one the body is lent back to the
+    /// arena meanwhile. Wrapper bodies cannot be lent from here and stay checked out.
+    fn run_damage_callbacks(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        mut f: impl FnMut(&mut dyn SimApi),
+    ) {
+        let land_mine = sim
+            .object(ctx.owner_slot)
+            .is_some_and(|o| o.land_mine_slot.is_some());
+        let plain = sim.rules().name_keys.lookup_key("ActiveBody") == Some(self.base.module_name_key);
+        if land_mine && plain {
+            lend_self(self, sim, ctx, f);
+        } else {
+            f(sim);
+        }
+    }
+
     fn is_priority_damager(&self, sim: &dyn SimView, id: ObjectId) -> bool {
         let Some(slot) = sim.find_object(id) else {
             return false;
@@ -439,7 +460,8 @@ impl ActiveBody {
         self.sync_sidecar_to_sim(sim, ctx);
 
         if self.current_health < self.prev_health {
-            sim.dispatch_on_damage(ctx.owner_slot, dmg);
+            let owner = ctx.owner_slot;
+            self.run_damage_callbacks(sim, ctx, |s| s.dispatch_on_damage(owner, dmg));
         }
 
         if self.cur_damage_state != old_state {
@@ -487,6 +509,10 @@ impl<T: SimApi + ?Sized> SimContainForward for T {
 impl BehaviorModule for ActiveBody {
     fn module_name_key(&self) -> NameKeyType {
         self.base.module_name_key
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     fn on_object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
@@ -842,7 +868,8 @@ impl BodyFacet for ActiveBody {
             self.sync_sidecar_to_sim(sim, ctx);
 
             if self.current_health > self.prev_health {
-                sim.dispatch_on_healing(ctx.owner_slot, healing);
+                let owner = ctx.owner_slot;
+                self.run_damage_callbacks(sim, ctx, |s| s.dispatch_on_healing(owner, healing));
             }
 
             if self.cur_damage_state != old_state {

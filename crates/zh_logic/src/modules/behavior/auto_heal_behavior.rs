@@ -6,7 +6,7 @@ use crate::combat::damage::DamageInfo;
 use crate::modules::behavior::behavior_module::{
     resolve_optional_asset_name, xfer_module_version, UpdateScheduleTracker,
 };
-use crate::modules::module::{
+use crate::modules::module::{AutoHealFacet, 
     BehaviorModule, DamageFacet, ModuleData, UpdateFacet, UpgradeFacet,
 };
 use crate::modules::module_factory::ModuleParseContext;
@@ -256,12 +256,22 @@ impl BehaviorModule for AutoHealBehavior {
         Some(self)
     }
 
+    fn as_auto_heal_mut(&mut self) -> Option<&mut dyn AutoHealFacet> {
+        Some(self)
+    }
+
     fn as_upgrade(&self) -> Option<&dyn UpgradeFacet> {
         Some(self)
     }
 
     fn as_upgrade_mut(&mut self) -> Option<&mut dyn UpgradeFacet> {
         Some(self)
+    }
+}
+
+impl AutoHealFacet for AutoHealBehavior {
+    fn stop_healing(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+        AutoHealBehavior::stop_healing(self, sim, ctx);
     }
 }
 

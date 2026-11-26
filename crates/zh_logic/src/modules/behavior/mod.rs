@@ -8,9 +8,11 @@ pub mod bridge_tower_behavior;
 pub mod bunker_buster_behavior;
 pub mod fire_weapon_when_damaged_behavior;
 pub mod fire_weapon_when_dead_behavior;
+pub mod generate_minefield_behavior;
 pub mod grant_stealth_behavior;
 pub mod instant_death_behavior;
 pub mod jet_slow_death_behavior;
+pub mod minefield_behavior;
 pub mod neuton_blast_behavior;
 pub mod overcharge_behavior;
 pub mod poisoned_behavior;
@@ -57,6 +59,26 @@ pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGener
         false,
         fire_weapon_when_dead_behavior::parse_fire_weapon_when_dead_behavior_data,
         fire_weapon_when_dead_behavior::create_fire_weapon_when_dead_behavior,
+    );
+    reg.register_module(
+        nk,
+        "GenerateMinefieldBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x083),
+        SleepyUpdatePhase::Normal,
+        false,
+        generate_minefield_behavior::parse_generate_minefield_behavior_data,
+        generate_minefield_behavior::create_generate_minefield_behavior,
+    );
+    reg.register_module(
+        nk,
+        "MinefieldBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x017 | FacetMask::LAND_MINE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        minefield_behavior::parse_minefield_behavior_data,
+        minefield_behavior::create_minefield_behavior,
     );
     reg.register_module(
         nk,

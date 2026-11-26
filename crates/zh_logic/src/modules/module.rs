@@ -16,6 +16,7 @@ use crate::gamelogic::global_data::{BodyDamageType, WeaponBonusConditionType};
 use crate::modules::update::dock_update::DockUpdateState;
 use crate::modules::update::horde_update::HordeActionType;
 use crate::object::weapon_set::WeaponSlotType;
+use crate::object::weapon::WEAPON_ANTI_MINE;
 pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
@@ -676,6 +677,12 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_land_mine_mut(&mut self) -> Option<&mut dyn LandMineFacet> {
+        None
+    }
+    fn as_generate_minefield_mut(&mut self) -> Option<&mut dyn GenerateMinefieldFacet> {
+        None
+    }
+    fn as_auto_heal_mut(&mut self) -> Option<&mut dyn AutoHealFacet> {
         None
     }
     fn as_overcharge(&self) -> Option<&dyn OverchargeFacet> {
@@ -1677,8 +1684,25 @@ pub trait CaveFacet {
 
 /// Land mine arm/disarm facet (`LandMineInterface`).
 pub trait LandMineFacet {
-    fn set_scoot_parms(&mut self, start: &Coord3D, end: &Coord3D);
+    /// `setScootParms`: send the mine from `start` to the ground at `end`.
+    fn set_scoot_parms(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        start: &Coord3D,
+        end: &Coord3D,
+    );
     fn disarm(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+}
+
+/// `GenerateMinefieldBehavior::setMinefieldTarget`, which `DeliverPayloadAIUpdate` calls.
+pub trait GenerateMinefieldFacet {
+    fn set_minefield_target(&mut self, pos: Option<&Coord3D>);
+}
+
+/// `AutoHealBehavior::stopHealing`, which `MinefieldBehavior` calls.
+pub trait AutoHealFacet {
+    fn stop_healing(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
 }
 
 /// Reactor overcharge facet (`OverchargeBehaviorInterface`).
@@ -1719,6 +1743,26 @@ pub trait DestroyFacet {
 
 /// AI state-machine / locomotor facet (`AIUpdateInterface`).
 pub trait AiUpdateFacet {
+    /// `AIUpdateInterface::isClearingMines`: attacking with an anti-mine weapon.
+    fn is_clearing_mines(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool {
+        let Some(obj) = sim.object(ctx.owner_slot) else {
+            return FALSE;
+        };
+        let weapons = &obj.weapon_set;
+        if obj.status.test(ObjectStatusType::IsAttacking.as_i32()) == FALSE
+            || weapons.has_any_weapon() == FALSE
+        {
+            return FALSE;
+        }
+        let anti_mine = weapons
+            .get_weapon_in_weapon_slot(weapons.get_cur_weapon_slot())
+            .is_some_and(|w| w.template.anti_mask & WEAPON_ANTI_MINE != 0);
+        if anti_mine {
+            TRUE
+        } else {
+            FALSE
+        }
+    }
     /// `getSupplyTruckAIInterface`.
     fn supply_truck(&mut self) -> Option<&mut dyn SupplyTruckAiFacet> {
         None

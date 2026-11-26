@@ -20,7 +20,7 @@ pub use module::{
     AiUpdateFacet, AttitudeType, BehaviorModule, BodyFacet, BridgeFacet, BridgeScaffoldFacet,
     BridgeTowerFacet, BridgeTowerType, CaveFacet, CollideFacet, CommandSourceType, ContainFacet,
     CountermeasuresFacet, CreateFacet, DamageFacet, DestroyFacet, DieFacet, EvacDisposition,
-    ExitDoorType, ExitFacet, HelperFacet, LandMineFacet, MaxHealthChangeType, ModuleData,
+    ExitDoorType, ExitFacet, GenerateMinefieldFacet, HelperFacet, LandMineFacet, MaxHealthChangeType, ModuleData,
     ModuleSnapshotHeader, ModuleType, ObjectEnterExitType, OverchargeFacet, ParkingPlaceFacet,
     ParkingPlaceInfo, PhysicsFacet, ProjectileFacet, RebuildHoleFacet, RunwayReservationType,
     ScaffoldTargetMotion, SlavedUpdateFacet, SlowDeathFacet, SlowDeathPhaseType,

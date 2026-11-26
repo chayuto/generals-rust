@@ -255,3 +255,23 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 - **What happens:** the laser object is put at `from`, but the client update takes its start from the parent's drawable (always the assistant). Only the object position is logic state.
 - **Related:** `TransportContain::isPassengerAllowedToFire(getID())`, as `isAbleToAttack` asks it about the object's own hold, tests the holder itself, so only an infantry holder can attack through its passengers.
 - **Guard:** `golden_pkt336_370_306_304_leaves` compares the laser object, its parent and its end.
+### Historic damage lists are trimmed by every shot in the first minutes
+
+- **Where:** `WeaponTemplate::trimOldHistoricDamage` (`RETAIL_COMPATIBLE_CRC=0` branch), `currentFrame - m_historicBonusTime`.
+- **What happens:** the subtraction is unsigned. While the frame is below `HistoricBonusTime`, it wraps and every older entry is erased, so a harness that counts shots through `m_historicDamage` sees only the last one.
+- **Guard:** `gen_pkt272_279_minefield.cpp` sets `HistoricBonusTime` to one frame and collects after every operation and every stepped frame.
+
+### Device-library code can be called from an oracle
+
+- **What is needed:** `build_oracle.py` has no include path for the device headers. Set `CPATH=vendor/GeneralsX/GeneralsMD/Code/GameEngineDevice/Include:vendor/GeneralsX/Core/GameEngineDevice/Include`; the libraries already link.
+- **Use:** `gen_pkt272_279_minefield.cpp` runs `BaseHeightMapRenderObjClass::isCliffCell` over a `WorldHeightMap` built in zeroed memory. `TerrainLogic::getHighestLayerForDestination` is not virtual; a real bridge (`addBridgeToLogic` with an unknown template name) gives a second layer.
+
+### Minefield quirks
+
+- `MinefieldBehavior::setScootParms` never assigns `m_scootVel.z`, so a second scoot starts with the fall speed of the first.
+- `MinefieldBehavior` does not save its detonator list; after a load, a unit standing on a mine sets it off again. With all three immunity slots taken, a fourth mine clearer neither gets immunity nor sets the mine off.
+- `GenerateMinefieldBehavior::xfer` calls `BehaviorModule::xfer`, not `UpdateModule::xfer`, so its wake frame is not saved. The mine count is saved as a byte but every ID is written, so a save with more than 255 upgradable mines cannot be read back.
+- `placeMinesAroundRect` takes its corners from the object's transform and ignores the target set by `setMinefieldTarget`; circles and footprints use the target.
+- `UpgradedTriggeredBy` is parsed and never read; `update()` always waits for `Upgrade_ChinaEMPMines`.
+- A footprint with no room between mines (a box with a zero radius) never finishes placing them.
+- **Guard:** `golden_pkt272_279_minefield`.

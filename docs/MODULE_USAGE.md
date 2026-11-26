@@ -8,8 +8,8 @@ or weapon code outside modules). The replays do not match their recordings
 (`BASELINE.md`), so they are a sample of play, not the original games.
 
 - Classes created: 104; in every replay: 50.
-- Classes with a ported packet: 82 of 104; in every replay: 43 of 50.
-- Instances with a ported packet: 13180 of 14355.
+- Classes with a ported packet: 84 of 104; in every replay: 44 of 50.
+- Instances with a ported packet: 13370 of 14355.
 
 ## Not ported
 
@@ -17,12 +17,10 @@ or weapon code outside modules). The replays do not match their recordings
 |---|---|---|---|---|
 | `ProductionUpdate` | `PKT-354` | 6 | 347 | 60927 |
 | `AIUpdateInterface` | `PKT-301` | 6 | 178 | 221431 |
-| `GenerateMinefieldBehavior` | `PKT-272` | 6 | 137 | 26449 |
 | `SpecialAbilityUpdate` | `PKT-368` | 6 | 123 | 85607 |
 | `CommandButtonHuntUpdate` | `PKT-314` | 6 | 108 | 19021 |
 | `DozerAIUpdate` | `PKT-321` | 6 | 45 | 105594 |
 | `SpawnBehavior` | `PKT-296` | 6 | 23 | 46341 |
-| `MinefieldBehavior` | `PKT-279` | 5 | 53 | 29795 |
 | `SupplyTruckAIUpdate` | `PKT-380` | 4 | 26 | 40352 |
 | `ChinookAIUpdate` | `PKT-312` | 4 | 18 | 61770 |
 | `HelicopterSlowDeathBehavior` | `PKT-334` | 4 | 18 | 26512 |

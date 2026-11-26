@@ -234,6 +234,12 @@ impl SimView for EngineSim<'_> {
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
         not_wired("find_objects_in_range")
     }
+    fn find_potential_collisions( &self, pos: &Coord3D, geom: &GeometryInfo, angle: Real, use_2d: Bool, ) -> Vec<ObjectSlot> {
+        not_wired("find_potential_collisions")
+    }
+    fn ai_is_clearing_mines(&self, owner: ObjectSlot) -> Bool {
+        not_wired("ai_is_clearing_mines")
+    }
     fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot> {
         not_wired("find_objects_in_range_of")
     }
@@ -554,6 +560,21 @@ impl SimApi for EngineSim<'_> {
     }
     fn dispatch_on_damage(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo) {
         not_wired("dispatch_on_damage")
+    }
+    fn lend_module( &mut self, slot: ModuleSlot, module: Box<dyn BehaviorModule>, f: &mut dyn FnMut(&mut dyn SimApi), ) -> Option<Box<dyn BehaviorModule>> {
+        not_wired("lend_module")
+    }
+    fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real) {
+        not_wired("body_internal_change_health")
+    }
+    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D) {
+        not_wired("random_offset_within_footprint")
+    }
+    fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D) {
+        not_wired("set_land_mine_scoot_parms")
+    }
+    fn stop_auto_healing(&mut self, owner: ObjectSlot) {
+        not_wired("stop_auto_healing")
     }
     fn attempt_damage_watching( &mut self, target: ObjectSlot, dmg: &mut DamageInfo, watch: ModuleSlot, ) -> Option<ObjectStatusMaskType> {
         not_wired("attempt_damage_watching")
