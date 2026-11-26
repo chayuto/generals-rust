@@ -47,10 +47,11 @@ class BuildRustEngineTest(unittest.TestCase):
 
     def test_every_forwarder_calls_a_declared_and_exported_symbol(self) -> None:
         header = (FFI / "include/zh_ffi.h").read_text()
-        lib = (FFI / "src/lib.rs").read_text()
+        lib = "".join(path.read_text() for path in sorted((FFI / "src").glob("*.rs")))
         for name, prefix, count in (
             ("zh_ffi_random_value.inc", "zh_random_", 12),
             ("zh_ffi_experience_tracker.inc", "zh_exp_tracker_", 7),
+            ("zh_ffi_lifetime_update.inc", "zh_lifetime_", 3),
         ):
             inc = (FFI / "include" / name).read_text()
             called = set(re.findall(rf"\b({prefix}[a-z_]+)\(", inc))

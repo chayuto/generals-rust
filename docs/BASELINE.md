@@ -27,10 +27,15 @@ A full check takes about 10 seconds. The baseline is `docs/baselines/replay_crc.
 |---|---|---|
 | Random number generator (logic, client, audio) | `Core/GameEngine/Source/Common/RandomValue.cpp` | `PKT-002` |
 | Experience and veterancy (members, `crc` and `xfer` stay in C++) | `GeneralsMD/.../GameLogic/Object/ExperienceTracker.cpp` | `PKT-003` |
+| `LifetimeUpdate`, a behavior module (`m_dieFrame`, `crc` and `xfer` stay in C++) | `GeneralsMD/.../GameLogic/Object/Update/LifetimeUpdate.cpp` | `PKT-339` |
 
 Nothing else. `zh_ffi` also exports the byte CRC, but the engine does not call it.
 
 A swapped function that tells the engine about a change must store the change first and write nothing afterwards, because C++ reads the object's state inside that call. `zh_ffi`'s tracker got this wrong until it was wired in; two tests in `crates/zh_ffi/src/lib.rs` now hold it.
+
+## Running a ported module in the engine
+
+Behavior modules are written against the `SimView`/`SimApi` traits. `zh_ffi::engine_sim::EngineSim` implements both over C++ callbacks, bound to one object for one call. `scripts/gen_engine_sim.py` writes the impl; a method it does not connect aborts the game with its name. To connect one, add it to `WIRED` in the script, write `engine_<name>` in `engine_sim.rs`, extend `ZhEngineSimCallbacks` and rerun the script. The trait methods that return references (`object`, `rules` and so on) cannot be connected this way; see `OPEN_DECISIONS.md` item 10.
 
 ## The fault test
 
@@ -39,6 +44,7 @@ A check that passes proves nothing until a wrong build fails it. Each swap has a
 ```bash
 python3 scripts/build_rust_engine.py --mutate random       # one extra logic draw
 python3 scripts/build_rust_engine.py --mutate experience   # one experience point too many
+python3 scripts/build_rust_engine.py --mutate lifetime     # every lifetime one frame too long
 python3 scripts/check_replays.py --check --expect-rust \
   --binary vendor/GeneralsX/build/macos-vulkan/GeneralsMD/GeneralsXZH-rust-mutant-<swap>   # must FAIL
 ```
@@ -47,8 +53,9 @@ python3 scripts/check_replays.py --check --expect-rust \
 |---|---|
 | `random` | all six, at frame 100 |
 | `experience` | `macos_2p_custom_map` (frame 14700) and `macos_6p_custom_map` (frame 17600) only |
+| `lifetime` | `linux_2p_custom_map` (frame 2000) only |
 
-So the experience swap is exercised by two replays, and the other four say nothing about it. A first generator fault that only changed one returned value passed, because the CRC covers the generator state and whatever the value goes on to change. Add a fault for every new swap and record which replays catch it.
+So the experience swap is exercised by two replays, and the other four say nothing about it. The lifetime swap is exercised by one. One-off faults showed that replay also reaches the other two entry points: removing the kill in `update` diverges at frame 1800, and an extra random draw after `setLifetimeRange` diverges at frame 2000. A first generator fault that only changed one returned value passed, because the CRC covers the generator state and whatever the value goes on to change. Add a fault for every new swap and record which replays catch it.
 
 ## How the swap is built
 

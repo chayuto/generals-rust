@@ -252,6 +252,9 @@
 | `zh_common` | `crates/zh_common/src/io/compression.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/math/gamemath.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/types.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/engine_sim.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/engine_sim_generated.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/lifetime_update.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/special_power_types.rs` | `implemented` |

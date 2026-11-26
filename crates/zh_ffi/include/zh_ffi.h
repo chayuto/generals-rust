@@ -146,6 +146,36 @@ void         zh_module_crc(ZhModuleSlot slot, void* cxx_xfer_ptr);
 void         zh_module_xfer(ZhModuleSlot slot, void* cxx_xfer_ptr);
 void         zh_module_load_post_process(ZhModuleSlot slot);
 
+/* ============================================================================
+ * Engine-backed module adapter (scripts/gen_engine_sim.py, src/engine_sim.rs)
+ * ============================================================================ */
+
+/* Enum numbers that cross the boundary; asserted on both sides. */
+#define ZH_KINDOF_HULK 77
+#define ZH_DAMAGE_UNRESISTABLE 11
+#define ZH_DEATH_NORMAL 0
+#define ZH_SLEEP_FOREVER 1073741823
+
+/* The engine, as seen by the one module being run. */
+typedef struct ZhEngineSimCallbacks {
+    void*    ctx;
+    uint32_t (*frame)(void* ctx);
+    int32_t  (*rng_logic_int)(void* ctx, int32_t lo, int32_t hi);
+    void     (*set_wake_frame)(void* ctx, uint32_t sleep);
+    int32_t  (*hulk_max_lifetime_override)(void* ctx);
+    uint8_t  (*object_is_kind_of)(void* ctx, int32_t kindof);
+    float    (*object_max_health)(void* ctx);
+    void     (*attempt_damage)(void* ctx, int32_t damage_type, int32_t death_type,
+                               int32_t source_id, float amount, uint8_t kill);
+} ZhEngineSimCallbacks;
+
+/* PKT-339 LifetimeUpdate. Construct and set_range return the die frame. */
+uint32_t zh_lifetime_construct(const ZhEngineSimCallbacks* callbacks,
+                               uint32_t min_frames, uint32_t max_frames);
+uint32_t zh_lifetime_set_range(const ZhEngineSimCallbacks* callbacks,
+                               uint32_t min_frames, uint32_t max_frames);
+uint32_t zh_lifetime_update(const ZhEngineSimCallbacks* callbacks);
+
 #ifdef __cplusplus
 }
 #endif

@@ -24,7 +24,9 @@ cargo test -p zh_common --test golden_pkt087   # one suite (suites are crates/*/
 cargo test -p zh_logic --test golden_sleepy_heap <name_filter>
 ```
 
-Script self-tests (AGENTS.md §1.3 requires one per script in `scripts/`): `python3 scripts/test_lint_determinism.py`, `scripts/test_prep_packet.py`, `scripts/test_apply_ffi_seam.py`, `scripts/test_port_map.py`, `scripts/validate_manifest.py`.
+Script self-tests (AGENTS.md §1.3 requires one per script in `scripts/`): `python3 scripts/test_lint_determinism.py`, `scripts/test_prep_packet.py`, `scripts/test_apply_ffi_seam.py`, `scripts/test_port_map.py`, `scripts/test_gen_engine_sim.py`, `scripts/validate_manifest.py`.
+
+After changing a `SimView` or `SimApi` method, run `python3 scripts/gen_engine_sim.py`: `zh_ffi` implements both traits from a generated file, and its self-test fails when the file is stale.
 
 These need `vendor/GeneralsX` (`env:local-full` only):
 - `python3 scripts/prep_packet.py PKT-077` (or a module name) runs the Tier 0 slicer. It writes `packets/phase<N>/<PKT>_<Module>.md` from `docs/MODULE_MANIFEST.json`, the vendor C++ and the worker cheat sheet in `docs/RUST_CONVENTIONS.md`.

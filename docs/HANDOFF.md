@@ -1,4 +1,4 @@
-# Handoff note (2026-11-26)
+# Handoff note (2026-11-27)
 
 For the next session. Rules are in `AGENTS.md`; this note only records where work stopped. Update or delete it once it is stale.
 
@@ -6,7 +6,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
-- The Rust random generator and experience tracker now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
+- The Rust random generator, experience tracker and one behavior module (`LifetimeUpdate`) now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
 - Packets: 219 of 463 implemented, 244 unported (Phase 2: 102, Phase 4: 4, Phase 5: 92, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
@@ -23,13 +23,13 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Not verified
 
-- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the two swapped files; the Rust sim has no frame driver or game-wide CRC.
+- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the three swapped files; the Rust sim has no frame driver or game-wide CRC.
 - `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
 - No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
 
 ## Next
 
-- **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game). It decides whether more module ports are the best use of effort.
+- **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game). The one-module trial is done and its measured cost is recorded there. It decides whether more module ports are the best use of effort.
 - Cheap further swaps: the byte CRC (inline in a header, so it forces a large rebuild) and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
 - If module porting continues: `PKT-348 PhysicsUpdate` (read, not started; it needs a `set_object_transform` on `SimApi`, Matrix3D X/Y rotations, a deferred op for re-entrant forces, and `get_mass` to include contained items), or the now unblocked `PKT-264`, `PKT-284`, `PKT-300`.
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.

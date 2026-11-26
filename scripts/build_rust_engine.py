@@ -12,8 +12,9 @@ link line, so the linker never pulls the original member.
   python3 scripts/build_rust_engine.py
   python3 scripts/check_replays.py --check --expect-rust --binary <printed path>
 
-Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002) and
-experience and veterancy (`ExperienceTracker.cpp`, PKT-003).
+Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002),
+experience and veterancy (`ExperienceTracker.cpp`, PKT-003) and the first behavior
+module (`LifetimeUpdate.cpp`, PKT-339, through `scripts/gen_engine_sim.py`'s adapter).
 `--mutate <swap>` builds a deliberately wrong variant to prove the replay check fails.
 """
 
@@ -71,6 +72,22 @@ SWAPS = (
                 "void ExperienceTracker::setMinVeterancyLevel(",
                 "void ExperienceTracker::crc(",
                 "// the veterancy functions are in the included file above",
+            ),
+        ),
+    ),
+    Swap(
+        "lifetime",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/LifetimeUpdate.cpp",
+        (
+            (
+                "LifetimeUpdate::LifetimeUpdate(",
+                "LifetimeUpdate::~LifetimeUpdate()",
+                '#include "zh_ffi_lifetime_update.inc"',
+            ),
+            (
+                "void LifetimeUpdate::setLifetimeRange(",
+                "void LifetimeUpdate::crc(",
+                "// the other functions are in the included file above",
             ),
         ),
     ),
@@ -137,6 +154,7 @@ def build(mutate: str | None) -> pathlib.Path:
     """Builds the swapped engine; `mutate` names one swap to compile with a fault."""
     if not (BUILD_DIR / "compile_commands.json").is_file():
         raise BuildError(f"no reference build tree at {BUILD_DIR}")
+    run([sys.executable, str(REPO_ROOT / "scripts/gen_engine_sim.py"), "--check"], REPO_ROOT)
     run(["cargo", "build", "--release", "-p", "zh_ffi"], REPO_ROOT)
 
     suffix = f"-mutant-{mutate}" if mutate else ""
