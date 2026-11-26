@@ -19,6 +19,7 @@ use zh_logic::economy::MAX_PLAYER_COUNT;
 use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use zh_logic::modules::module_factory::ModuleParseContext;
 use zh_logic::modules::update::deletion_update::DeletionUpdate;
+use zh_logic::modules::update::physics_behavior::{self, PhysicsState};
 use zh_logic::modules::update::spy_vision_update::SpyVisionUpdate;
 use zh_logic::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
@@ -66,7 +67,7 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{
-    div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D,
+    div_safe_f32, gm_cosf, gm_sinf, real_to_int_ceil, real_to_int_floor, Coord3D, Matrix3D,
     Region3D,
 };
 use zh_common::random_value::PrngState;
@@ -361,6 +362,18 @@ impl SimView for EngineSim<'_> {
     }
     fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real {
         not_wired("physics_center_of_mass_offset")
+    }
+    fn object_crushed_ends(&self, owner: ObjectSlot) -> (Bool, Bool) {
+        not_wired("object_crushed_ends")
+    }
+    fn contain_items_for_mass(&self, owner: ObjectSlot) -> Vec<ObjectId> {
+        not_wired("contain_items_for_mass")
+    }
+    fn ai_ignored_obstacle_id(&self, owner: ObjectSlot) -> ObjectId {
+        not_wired("ai_ignored_obstacle_id")
+    }
+    fn carrier_deck_height(&self, owner: ObjectSlot) -> Real {
+        not_wired("carrier_deck_height")
     }
     fn has_ai(&self, owner: ObjectSlot) -> Bool {
         not_wired("has_ai")
@@ -817,6 +830,15 @@ impl SimApi for EngineSim<'_> {
     }
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
         not_wired("set_object_orientation")
+    }
+    fn set_object_transform_matrix(&mut self, owner: ObjectSlot, mtx: &Matrix3D) {
+        not_wired("set_object_transform_matrix")
+    }
+    fn ai_process_collision(&mut self, owner: ObjectSlot, other: ObjectSlot) -> Bool {
+        not_wired("ai_process_collision")
+    }
+    fn projectile_handle_collision(&mut self, owner: ObjectSlot, other: Option<ObjectSlot>) -> Bool {
+        not_wired("projectile_handle_collision")
     }
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
         not_wired("set_object_layer")

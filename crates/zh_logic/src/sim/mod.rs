@@ -22,6 +22,7 @@ use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::update::deletion_update::DeletionUpdate;
+use crate::modules::update::physics_behavior::{self, PhysicsState};
 use crate::modules::update::spy_vision_update::SpyVisionUpdate;
 use crate::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
@@ -69,7 +70,7 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{
-    div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D,
+    div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D, Matrix3D,
     Region3D,
 };
 use zh_common::random_value::PrngState;
@@ -660,22 +661,8 @@ pub struct ObjectRecord {
     pub ai_goal_object: Option<ObjectSlot>,
     pub ai_dead: Bool,
     pub ai_enter_target: Option<ObjectSlot>,
-    pub physics_allow_to_fall: Bool,
-    pub physics_allow_bouncing: Bool,
-    pub physics_extra_bounciness: Real,
-    pub physics_extra_friction: Real,
-    pub physics_last_collidee: ObjectId,
-    pub physics_velocity: Coord3D,
-    pub physics_mass: Real,
-    pub physics_center_of_mass_offset: Real,
-    pub physics_pitch_rate: Real,
-    pub physics_roll_rate: Real,
-    pub physics_yaw_rate: Real,
-    pub physics_is_in_free_fall: Bool,
-    pub physics_stick_to_ground: Bool,
-    pub physics_shock_max_yaw: Real,
-    pub physics_shock_max_pitch: Real,
-    pub physics_shock_max_roll: Real,
+    /// `Object::m_physics`: the members of the object's `PhysicsBehavior`.
+    pub physics: Option<Box<PhysicsState>>,
     pub ai_attitude: AttitudeType,
     pub ai_free_to_exit: Bool,
     pub ai_current_victim: Option<ObjectSlot>,
@@ -770,22 +757,7 @@ impl ObjectRecord {
             ai_goal_object: None,
             ai_dead: FALSE,
             ai_enter_target: None,
-            physics_allow_to_fall: FALSE,
-            physics_allow_bouncing: FALSE,
-            physics_extra_bounciness: 0.0,
-            physics_extra_friction: 0.0,
-            physics_last_collidee: ObjectId::INVALID,
-            physics_velocity: Coord3D::default(),
-            physics_mass: 1.0,
-            physics_center_of_mass_offset: 0.0,
-            physics_pitch_rate: 0.0,
-            physics_roll_rate: 0.0,
-            physics_yaw_rate: 0.0,
-            physics_is_in_free_fall: FALSE,
-            physics_stick_to_ground: FALSE,
-            physics_shock_max_yaw: 0.05,
-            physics_shock_max_pitch: 0.025,
-            physics_shock_max_roll: 0.025,
+            physics: None,
             ai_attitude: AttitudeType::Normal,
             ai_free_to_exit: TRUE,
             ai_current_victim: None,
@@ -1155,6 +1127,14 @@ pub trait SimView {
     fn physics_velocity(&self, owner: ObjectSlot) -> Coord3D;
     fn physics_mass(&self, owner: ObjectSlot) -> Real;
     fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real;
+    /// `BodyModuleInterface::getFrontCrushed` and `getBackCrushed`.
+    fn object_crushed_ends(&self, owner: ObjectSlot) -> (Bool, Bool);
+    /// `OpenContain::m_containList`, which tunnels and caves leave empty.
+    fn contain_items_for_mass(&self, owner: ObjectSlot) -> Vec<ObjectId>;
+    /// `AIUpdateInterface::getIgnoredObstacleID`; invalid without an AI.
+    fn ai_ignored_obstacle_id(&self, owner: ObjectSlot) -> ObjectId;
+    /// `Object::getCarrierDeckHeight`.
+    fn carrier_deck_height(&self, owner: ObjectSlot) -> Real;
     fn has_ai(&self, owner: ObjectSlot) -> Bool;
     fn ai_free_to_exit(&self, owner: ObjectSlot) -> Bool;
     fn ai_current_victim(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
@@ -1511,6 +1491,13 @@ pub trait SimApi: SimView {
     fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType);
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D);
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real);
+    /// `Object::setTransformMatrix`.
+    fn set_object_transform_matrix(&mut self, owner: ObjectSlot, mtx: &Matrix3D);
+    /// `AIUpdateInterface::processCollision`: whether the collision still pushes.
+    fn ai_process_collision(&mut self, owner: ObjectSlot, other: ObjectSlot) -> Bool;
+    /// `ProjectileUpdateInterface::projectileHandleCollision`.
+    fn projectile_handle_collision(&mut self, owner: ObjectSlot, other: Option<ObjectSlot>)
+        -> Bool;
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum);
     fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState;
     fn cave_register(&mut self, cave_index: Int);
@@ -1749,7 +1736,6 @@ pub struct SimWorld {
     pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
     pub ai_commands: Vec<(ObjectId, String)>,
-    pub physics_events: Vec<(ObjectId, String)>,
     pub pathfind_map_objects: BTreeSet<ObjectId>,
     pub pathfind_goals: BTreeMap<ObjectId, (Coord3D, PathfindLayerEnum)>,
     pub blocked_pathfind_cells: BTreeMap<(Int, Int, Int), PathfindCellType>,
@@ -1846,7 +1832,6 @@ impl SimWorld {
             slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
             ai_commands: Vec::new(),
-            physics_events: Vec::new(),
             pathfind_map_objects: BTreeSet::new(),
             pathfind_goals: BTreeMap::new(),
             blocked_pathfind_cells: BTreeMap::new(),
@@ -4149,10 +4134,7 @@ impl SimView for SimContext {
     }
 
     fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId {
-        self.world
-            .objects
-            .get(owner)
-            .map_or(ObjectId::INVALID, |o| o.physics_last_collidee)
+        physics_behavior::physics(self, owner).map_or(ObjectId::INVALID, |p| p.last_collidee)
     }
 
     fn object_has_drawable(&self, owner: ObjectSlot) -> Bool {
@@ -4285,54 +4267,63 @@ impl SimView for SimContext {
     }
 
     fn physics_velocity(&self, owner: ObjectSlot) -> Coord3D {
-        let Some(obj) = self.world.objects.get(owner) else {
-            return Coord3D::default();
-        };
-        if let Some(ps) = obj.physics_slot {
-            if let ModuleSidecar::Physics { velocity, .. } = self.world.modules.sidecar(ps) {
-                return velocity;
-            }
-            if let Some(p) = self.world.modules.payload(ps).and_then(|m| m.as_physics()) {
-                let v = p.velocity();
-                if v != Coord3D::default() {
-                    return v;
-                }
-            }
-        }
-        obj.physics_velocity
+        physics_behavior::physics(self, owner).map_or_else(Coord3D::default, |p| p.vel)
     }
 
     fn physics_mass(&self, owner: ObjectSlot) -> Real {
-        let Some(obj) = self.world.objects.get(owner) else {
-            return 1.0;
-        };
-        if let Some(ps) = obj.physics_slot {
-            if let ModuleSidecar::Physics { mass, .. } = self.world.modules.sidecar(ps) {
-                return mass;
-            }
-            if let Some(p) = self.world.modules.payload(ps).and_then(|m| m.as_physics()) {
-                let m = p.get_mass();
-                if m != 1.0 {
-                    return m;
-                }
-            }
-        }
-        obj.physics_mass
+        physics_behavior::get_mass(self, owner)
     }
 
     fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real {
-        let Some(obj) = self.world.objects.get(owner) else {
+        physics_behavior::physics(self, owner).map_or(0.0, |p| p.data.center_of_mass_offset)
+    }
+
+    fn object_crushed_ends(&self, owner: ObjectSlot) -> (Bool, Bool) {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.body_slot)
+            .and_then(|bs| self.world.modules.payload(bs))
+            .and_then(|m| m.as_body())
+            .map_or((FALSE, FALSE), |b| (b.get_front_crushed(), b.get_back_crushed()))
+    }
+
+    fn contain_items_for_mass(&self, owner: ObjectSlot) -> Vec<ObjectId> {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return Vec::new();
+        };
+        self.world
+            .modules
+            .payload(cs)
+            .and_then(|p| p.as_contain())
+            .map_or_else(Vec::new, |c| c.contain_list_for_mass().to_vec())
+    }
+
+    fn ai_ignored_obstacle_id(&self, owner: ObjectSlot) -> ObjectId {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .map_or(ObjectId::INVALID, |ai| ai.get_ignored_obstacle_id())
+    }
+
+    fn carrier_deck_height(&self, owner: ObjectSlot) -> Real {
+        let Some(obj) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| self.world.objects.slot_by_id(o.producer_id))
+            .and_then(|producer| self.world.objects.get(producer))
+        else {
             return 0.0;
         };
-        if let Some(ps) = obj.physics_slot {
-            if let Some(p) = self.world.modules.payload(ps).and_then(|m| m.as_physics()) {
-                let off = p.get_center_of_mass_offset();
-                if off != 0.0 {
-                    return off;
-                }
-            }
-        }
-        obj.physics_center_of_mass_offset
+        obj.behaviors
+            .iter()
+            .filter_map(|&(ms, _)| self.world.modules.payload(ms))
+            .find_map(|m| m.as_parking_place())
+            .map_or(0.0, |pp| pp.get_landing_deck_height_offset())
     }
 
     fn has_ai(&self, owner: ObjectSlot) -> Bool {
@@ -6505,6 +6496,12 @@ impl SimApi for SimContext {
             }) {
                 break;
             }
+            // `PhysicsBehavior` keeps its members on the object, so it also answers
+            // from inside its own update (the landing collision).
+            if physics_behavior::physics(self, owner).is_some_and(|p| p.mod_slot == ms) {
+                physics_behavior::on_collide(self, owner, other, loc, normal);
+                continue;
+            }
             let _ = self.dispatch_module(ms, |m, sim, ctx| {
                 if let Some(c) = m.as_collide_mut() {
                     c.on_collide(sim, ctx, other, loc, normal);
@@ -6883,6 +6880,48 @@ impl SimApi for SimContext {
         }
     }
 
+    fn set_object_transform_matrix(&mut self, owner: ObjectSlot, mtx: &Matrix3D) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let old_pos = *obj.thing.get_position();
+        let old_angle = obj.thing.get_orientation();
+        let mut dummy = crate::object::thing::NoopTransformReactor;
+        obj.thing.set_transform_matrix(mtx, &mut dummy);
+        let pos = *obj.thing.get_position();
+        // `Object::reactToTransformChange` deletes an object at a NaN position.
+        if pos.x.is_nan() || pos.y.is_nan() || pos.z.is_nan() {
+            self.destroy_object_now(owner);
+        }
+        self.react_to_transform_change(owner, &old_pos, old_angle);
+    }
+
+    fn ai_process_collision(&mut self, owner: ObjectSlot, other: ObjectSlot) -> Bool {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return FALSE;
+        };
+        self.dispatch_module(ms, |m, sim, ctx| {
+            m.as_ai_mut()
+                .map_or(FALSE, |ai| ai.process_collision(sim, ctx, other))
+        })
+        .unwrap_or(FALSE)
+    }
+
+    fn projectile_handle_collision(
+        &mut self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+    ) -> Bool {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.projectile_slot) else {
+            return FALSE;
+        };
+        self.dispatch_module(ms, |m, sim, ctx| {
+            m.as_projectile_mut()
+                .map_or(FALSE, |p| p.projectile_handle_collision(sim, ctx, other))
+        })
+        .unwrap_or(FALSE)
+    }
+
     fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState {
         self.world.tunnel_trackers.entry(player_index).or_default()
     }
@@ -7195,31 +7234,17 @@ impl SimApi for SimContext {
     }
 
     fn apply_fling_physics(&mut self, owner: ObjectSlot, force: &Coord3D, orientation: Real) {
-        let friction = -3.0_f32 * (1.0_f32 / 30.0_f32);
-        let ps = match self.world.objects.get_mut(owner) {
-            Some(obj) => {
-                obj.physics_allow_to_fall = TRUE;
-                obj.physics_allow_bouncing = TRUE;
-                obj.physics_extra_bounciness = -1.0;
-                obj.physics_extra_friction = friction;
-                obj.physics_slot
-            }
-            None => return,
-        };
-        if let Some(ps_slot) = ps {
-            if !self.world.modules.is_executing(ps_slot) {
-                let _ = self.dispatch_module(ps_slot, |m, sim, ctx| {
-                    if let Some(p) = m.as_physics_mut() {
-                        p.set_allow_to_fall(TRUE);
-                        p.apply_force(sim, ctx, force);
-                        p.set_extra_bounciness(-1.0);
-                        p.set_extra_friction(friction);
-                        p.set_allow_bouncing(TRUE);
-                        p.set_angles(orientation, 0.0, 0.0);
-                    }
-                });
-            }
+        if physics_behavior::physics(self, owner).is_none() {
+            return;
         }
+        self.set_physics_allow_to_fall(owner, TRUE);
+        physics_behavior::apply_force(self, owner, force);
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.extra_bounciness = -1.0;
+            p.extra_friction = -3.0_f32 * (1.0_f32 / 30.0_f32);
+            p.set_flag(physics_behavior::ALLOW_BOUNCE, TRUE);
+        }
+        physics_behavior::set_angles(self, owner, orientation, 0.0, 0.0);
     }
 
     fn notify_slaver_die(&mut self, owner: ObjectSlot) {
@@ -7355,265 +7380,54 @@ impl SimApi for SimContext {
     }
 
     fn set_physics_allow_to_fall(&mut self, owner: ObjectSlot, allow: Bool) {
-        let Some(obj) = self.world.objects.get_mut(owner) else {
-            return;
-        };
-        obj.physics_allow_to_fall = allow;
-        let Some(ps) = obj.physics_slot else {
-            return;
-        };
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, _, _| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.set_allow_to_fall(allow);
-                }
-            });
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.set_flag(physics_behavior::ALLOW_TO_FALL, allow);
         }
     }
 
     fn physics_clear_acceleration(&mut self, owner: ObjectSlot) {
-        let Some((obj_id, ps)) = self
-            .world
-            .objects
-            .get(owner)
-            .and_then(|o| o.physics_slot.map(|p| (o.id, p)))
-        else {
-            return;
-        };
-        self.world
-            .physics_events
-            .push((obj_id, "clearAcceleration".to_owned()));
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, _, _| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.clear_acceleration();
-                }
-            });
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.accel = Coord3D::default();
         }
     }
 
     fn physics_scrub_velocity_2d(&mut self, owner: ObjectSlot, desired_velocity: Real) {
-        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
-            let ps = o.physics_slot?;
-            if desired_velocity < 0.001_f32 {
-                o.physics_velocity.x = 0.0;
-                o.physics_velocity.y = 0.0;
-            } else {
-                let cur_vel = gm_sqrtf(
-                    o.physics_velocity.x * o.physics_velocity.x
-                        + o.physics_velocity.y * o.physics_velocity.y,
-                );
-                if desired_velocity <= cur_vel && cur_vel > 0.0 {
-                    let scale = desired_velocity / cur_vel;
-                    o.physics_velocity.x *= scale;
-                    o.physics_velocity.y *= scale;
-                }
-            }
-            Some((o.id, ps))
-        }) else {
-            return;
-        };
-        self.world
-            .physics_events
-            .push((obj_id, "scrubVelocity2D".to_owned()));
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, _, _| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.scrub_velocity_2d(desired_velocity);
-                }
-            });
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.scrub_velocity_2d(desired_velocity);
         }
     }
 
     fn physics_apply_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
-        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
-            let ps = o.physics_slot?;
-            let inv_mass = if o.physics_mass > 0.0 {
-                1.0 / o.physics_mass
-            } else {
-                0.0
-            };
-            o.physics_velocity.x += force.x * inv_mass;
-            o.physics_velocity.y += force.y * inv_mass;
-            o.physics_velocity.z += force.z * inv_mass;
-            Some((o.id, ps))
-        }) else {
-            return;
-        };
-        self.world
-            .physics_events
-            .push((obj_id, "applyForce".to_owned()));
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, sim, ctx| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.apply_force(sim, ctx, force);
-                }
-            });
-        }
+        physics_behavior::apply_force(self, owner, force);
     }
 
     fn physics_apply_shock(&mut self, owner: ObjectSlot, force: &Coord3D) {
-        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
-            let ps = o.physics_slot?;
-            let inv_mass = if o.physics_mass > 0.0 {
-                1.0 / o.physics_mass
-            } else {
-                0.0
-            };
-            o.physics_velocity.x += force.x * inv_mass;
-            o.physics_velocity.y += force.y * inv_mass;
-            o.physics_velocity.z += force.z * inv_mass;
-            Some((o.id, ps))
-        }) else {
-            return;
-        };
-        self.world
-            .physics_events
-            .push((obj_id, "applyShock".to_owned()));
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, sim, ctx| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.apply_shock(sim, ctx, force);
-                }
-            });
-        }
+        physics_behavior::apply_shock(self, owner, force);
     }
 
     fn physics_apply_motive_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
-        let Some((obj_id, ps)) = self.world.objects.get_mut(owner).and_then(|o| {
-            let ps = o.physics_slot?;
-            let inv_mass = if o.physics_mass > 0.0 {
-                1.0 / o.physics_mass
-            } else {
-                0.0
-            };
-            o.physics_velocity.x += force.x * inv_mass;
-            o.physics_velocity.y += force.y * inv_mass;
-            o.physics_velocity.z += force.z * inv_mass;
-            Some((o.id, ps))
-        }) else {
-            return;
-        };
-        self.world
-            .physics_events
-            .push((obj_id, "applyMotiveForce".to_owned()));
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, sim, ctx| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.apply_motive_force(sim, ctx, force);
-                }
-            });
-        }
+        physics_behavior::apply_motive_force(self, owner, force);
     }
 
     fn physics_apply_random_rotation(&mut self, owner: ObjectSlot) {
-        let Some((obj_id, ps_opt, stick_flag, sy, sp, sr)) = self.world.objects.get(owner).map(|o| {
-            (
-                o.id,
-                o.physics_slot,
-                o.physics_stick_to_ground,
-                o.physics_shock_max_yaw,
-                o.physics_shock_max_pitch,
-                o.physics_shock_max_roll,
-            )
-        }) else {
-            return;
-        };
-        let Some(ps) = ps_opt else {
-            return;
-        };
-        let mod_stick = self
-            .world
-            .modules
-            .payload(ps)
-            .and_then(|m| m.as_physics())
-            .map_or(FALSE, |p| p.is_stick_to_ground());
-        if stick_flag != FALSE || mod_stick != FALSE {
-            return;
-        }
-        let handled_by_mod = if !self.world.modules.is_executing(ps) {
-            self.dispatch_module(ps, |m, sim, ctx| {
-                m.as_physics_mut()
-                    .map_or(FALSE, |p| p.apply_random_rotation(sim, ctx))
-            })
-            .unwrap_or(FALSE)
-        } else {
-            FALSE
-        };
-        if handled_by_mod == FALSE {
-            if let Some(obj) = self.world.objects.get_mut(owner) {
-                obj.physics_allow_bouncing = TRUE;
-            }
-            if !self.world.modules.is_executing(ps) {
-                let _ = self.dispatch_module(ps, |m, _, _| {
-                    if let Some(p) = m.as_physics_mut() {
-                        p.set_allow_bouncing(TRUE);
-                    }
-                });
-            }
-            // C++ passes `-1.0f, 1.0f` to the integer `GameLogicRandomValue`.
-            let ry = self.rng_logic_int(-1, 1) as Real;
-            let rp = self.rng_logic_int(-1, 1) as Real;
-            let rr = self.rng_logic_int(-1, 1) as Real;
-            if let Some(obj) = self.world.objects.get_mut(owner) {
-                obj.physics_yaw_rate += sy * ry;
-                obj.physics_pitch_rate += sp * rp;
-                obj.physics_roll_rate += sr * rr;
-            }
-        }
-        self.world
-            .physics_events
-            .push((obj_id, "applyRandomRotation".to_owned()));
+        physics_behavior::apply_random_rotation(self, owner);
     }
 
     fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real) {
-        let Some(obj) = self.world.objects.get_mut(owner) else {
-            return;
-        };
-        obj.physics_roll_rate = rate;
-        let Some(ps) = obj.physics_slot else {
-            return;
-        };
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, _, _| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.set_roll_rate(rate);
-                }
-            });
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.set_roll_rate(rate);
         }
     }
 
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
-        let Some(obj) = self.world.objects.get_mut(owner) else {
-            return;
-        };
-        obj.physics_pitch_rate = rate;
-        let Some(ps) = obj.physics_slot else {
-            return;
-        };
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, _, _| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.set_pitch_rate(rate);
-                }
-            });
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.set_pitch_rate(rate);
         }
     }
 
     fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool) {
-        let Some(obj) = self.world.objects.get_mut(owner) else {
-            return;
-        };
-        obj.physics_is_in_free_fall = in_free_fall;
-        let Some(ps) = obj.physics_slot else {
-            return;
-        };
-        if !self.world.modules.is_executing(ps) {
-            let _ = self.dispatch_module(ps, |m, _, _| {
-                if let Some(p) = m.as_physics_mut() {
-                    p.set_is_in_free_fall(in_free_fall);
-                }
-            });
+        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+            p.set_flag(physics_behavior::IS_IN_FREEFALL, in_free_fall);
         }
     }
 
@@ -8446,6 +8260,22 @@ impl SimView for MockSimApi {
         self.ctx.physics_center_of_mass_offset(owner)
     }
 
+    fn object_crushed_ends(&self, owner: ObjectSlot) -> (Bool, Bool) {
+        self.ctx.object_crushed_ends(owner)
+    }
+
+    fn contain_items_for_mass(&self, owner: ObjectSlot) -> Vec<ObjectId> {
+        self.ctx.contain_items_for_mass(owner)
+    }
+
+    fn ai_ignored_obstacle_id(&self, owner: ObjectSlot) -> ObjectId {
+        self.ctx.ai_ignored_obstacle_id(owner)
+    }
+
+    fn carrier_deck_height(&self, owner: ObjectSlot) -> Real {
+        self.ctx.carrier_deck_height(owner)
+    }
+
     fn has_ai(&self, owner: ObjectSlot) -> Bool {
         self.ctx.has_ai(owner)
     }
@@ -9259,6 +9089,22 @@ impl SimApi for MockSimApi {
 
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
         self.ctx.set_object_orientation(owner, angle);
+    }
+
+    fn set_object_transform_matrix(&mut self, owner: ObjectSlot, mtx: &Matrix3D) {
+        self.ctx.set_object_transform_matrix(owner, mtx);
+    }
+
+    fn ai_process_collision(&mut self, owner: ObjectSlot, other: ObjectSlot) -> Bool {
+        self.ctx.ai_process_collision(owner, other)
+    }
+
+    fn projectile_handle_collision(
+        &mut self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+    ) -> Bool {
+        self.ctx.projectile_handle_collision(owner, other)
     }
 
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {

@@ -1061,7 +1061,10 @@ pub fn exit_object_via_door<C: ContainBehavior + ?Sized>(
     };
     let mut end_position = me_pos;
     let has_physics = sim.has_physics(exit_obj) != FALSE;
-    let can_fall = sim.object(exit_obj).map_or(FALSE, |o| o.physics_allow_to_fall);
+    let can_fall = Bool::from(
+        crate::modules::update::physics_behavior::physics(sim, exit_obj)
+            .is_some_and(|p| p.flag(crate::modules::update::physics_behavior::ALLOW_TO_FALL)),
+    );
 
     sim.set_object_position(exit_obj, &me_pos);
     sim.set_object_orientation(exit_obj, me_angle);
@@ -1558,6 +1561,9 @@ macro_rules! impl_contain_module {
                     check_capacity: Bool,
                 ) -> Bool {
                     self.is_valid_container(sim, ctx, obj, check_capacity)
+                }
+                fn contain_list_for_mass(&self) -> &[ObjectId] {
+                    &self.open_core().contain_list
                 }
                 fn get_contained_items<'a>(
                     &'a self,

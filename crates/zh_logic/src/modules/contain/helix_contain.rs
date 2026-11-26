@@ -609,6 +609,9 @@ impl ExitFacet for HelixContain {
 }
 
 impl ContainFacet for HelixContain {
+    fn contain_list_for_mass(&self) -> &[ObjectId] {
+        self.0.contain_list_for_mass()
+    }
     fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
         self.0.is_weapon_bonus_passed_to_passengers()
     }

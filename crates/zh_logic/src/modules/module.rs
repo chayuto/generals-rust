@@ -956,6 +956,10 @@ pub trait CollideFacet {
 
 /// Container facet (`ContainModuleInterface`).
 pub trait ContainFacet {
+    /// `OpenContain::m_containList`, for `getContainedItemsMass`.
+    fn contain_list_for_mass(&self) -> &[ObjectId] {
+        &[]
+    }
     /// `isWeaponBonusPassedToPassengers`.
     fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
         FALSE
@@ -1678,6 +1682,19 @@ pub trait AiUpdateFacet {
     fn is_ai_in_dead_state(&self) -> Bool {
         FALSE
     }
+    fn get_ignored_obstacle_id(&self) -> ObjectId {
+        ObjectId::INVALID
+    }
+    /// `AIUpdateInterface::processCollision` (unported). The reference answers `FALSE`
+    /// except for blocked panicking infantry and squishable dead infantry.
+    fn process_collision(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _other: ObjectSlot,
+    ) -> Bool {
+        FALSE
+    }
     fn mark_as_dead(&mut self) {}
     fn get_enter_target(&self) -> Option<ObjectSlot> {
         None
@@ -1741,44 +1758,9 @@ pub trait AiUpdateFacet {
     fn set_locomotor_close_enough_dist_3d(&mut self, _is_3d: Bool) {}
 }
 
-/// Rigid-body physics facet (`PhysicsBehavior`).
-pub trait PhysicsFacet {
-    fn apply_force(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, force: &Coord3D);
-    fn velocity(&self) -> Coord3D {
-        Coord3D::default()
-    }
-    fn is_airborne(&self) -> Bool {
-        FALSE
-    }
-    fn set_allow_to_fall(&mut self, _allow: Bool) {}
-    fn set_extra_bounciness(&mut self, _bounciness: Real) {}
-    fn set_extra_friction(&mut self, _friction: Real) {}
-    fn set_allow_bouncing(&mut self, _allow: Bool) {}
-    fn set_angles(&mut self, _yaw: Real, _pitch: Real, _roll: Real) {}
-    fn get_last_collidee(&self) -> ObjectId {
-        ObjectId::INVALID
-    }
-    fn clear_acceleration(&mut self) {}
-    fn scrub_velocity_2d(&mut self, _desired_velocity: Real) {}
-    fn apply_shock(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _force: &Coord3D) {}
-    /// Returns `TRUE` if the module executed its own 3 `rng_logic_real(-1.0, 1.0)` draws.
-    fn apply_random_rotation(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) -> Bool {
-        FALSE
-    }
-    fn apply_motive_force(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _force: &Coord3D) {}
-    fn set_roll_rate(&mut self, _rate: Real) {}
-    fn set_pitch_rate(&mut self, _rate: Real) {}
-    fn set_is_in_free_fall(&mut self, _in_free_fall: Bool) {}
-    fn get_mass(&self) -> Real {
-        1.0
-    }
-    fn get_center_of_mass_offset(&self) -> Real {
-        0.0
-    }
-    fn is_stick_to_ground(&self) -> Bool {
-        FALSE
-    }
-}
+/// Marks a physics module (`PhysicsBehavior`). Its members are on the object
+/// (`ObjectRecord::physics`); call the functions in `modules::update::physics_behavior`.
+pub trait PhysicsFacet {}
 
 /// `DockUpdateInterface`. A dock keeps its state in the module; the provided methods
 /// are `DockUpdate`'s own, which a derived dock may override. A docker is named by

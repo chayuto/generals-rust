@@ -1176,6 +1176,87 @@ impl Matrix3D {
     }
 
     #[inline]
+    pub fn adjust_x_translation(&mut self, x: Real) {
+        self.rows[0][3] += x;
+    }
+
+    #[inline]
+    pub fn adjust_y_translation(&mut self, y: Real) {
+        self.rows[1][3] += y;
+    }
+
+    #[inline]
+    pub fn adjust_z_translation(&mut self, z: Real) {
+        self.rows[2][3] += z;
+    }
+
+    /// `Matrix3D::Rotate_X` (`matrix3d.h`): post-multiplies a rotation about X.
+    #[inline]
+    pub fn rotate_x(&mut self, theta: Real) {
+        let s = gm_sinf(theta);
+        let c = gm_cosf(theta);
+        for row in &mut self.rows {
+            let t1 = row[1];
+            let t2 = row[2];
+            row[1] = c * t1 + s * t2;
+            row[2] = -s * t1 + c * t2;
+        }
+    }
+
+    /// `Matrix3D::Rotate_Y`: post-multiplies a rotation about Y.
+    #[inline]
+    pub fn rotate_y(&mut self, theta: Real) {
+        let s = gm_sinf(theta);
+        let c = gm_cosf(theta);
+        for row in &mut self.rows {
+            let t1 = row[0];
+            let t2 = row[2];
+            row[0] = c * t1 - s * t2;
+            row[2] = s * t1 + c * t2;
+        }
+    }
+
+    /// `Matrix3D::In_Place_Pre_Rotate_X`: rotates the 3x3 part about the world X axis,
+    /// leaving the translation.
+    #[inline]
+    pub fn in_place_pre_rotate_x(&mut self, theta: Real) {
+        let c = gm_cosf(theta);
+        let s = gm_sinf(theta);
+        for col in 0..3 {
+            let t1 = self.rows[1][col];
+            let t2 = self.rows[2][col];
+            self.rows[1][col] = c * t1 - s * t2;
+            self.rows[2][col] = s * t1 + c * t2;
+        }
+    }
+
+    /// `Matrix3D::In_Place_Pre_Rotate_Y`.
+    #[inline]
+    pub fn in_place_pre_rotate_y(&mut self, theta: Real) {
+        let c = gm_cosf(theta);
+        let s = gm_sinf(theta);
+        for col in 0..3 {
+            let t1 = self.rows[0][col];
+            let t2 = self.rows[2][col];
+            self.rows[0][col] = c * t1 + s * t2;
+            self.rows[2][col] = -s * t1 + c * t2;
+        }
+    }
+
+    /// `Matrix3D::In_Place_Pre_Rotate_Z`.
+    #[inline]
+    pub fn in_place_pre_rotate_z(&mut self, theta: Real) {
+        let c = gm_cosf(theta);
+        let s = gm_sinf(theta);
+        for col in 0..3 {
+            let t1 = self.rows[0][col];
+            let t2 = self.rows[1][col];
+            self.rows[0][col] = c * t1 - s * t2;
+            self.rows[1][col] = s * t1 + c * t2;
+        }
+    }
+
+    #[inline]
     pub fn translate(&mut self, x: Real, y: Real, z: Real) {
         for row in &mut self.rows {
             row[3] += row[0] * x + row[1] * y + row[2] * z;

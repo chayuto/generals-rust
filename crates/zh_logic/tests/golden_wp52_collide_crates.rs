@@ -17,18 +17,19 @@ use zh_common::types::{
     FALSE, TRUE,
 };
 use zh_common::xfer::{Snapshot, Xfer, XferCrc, XferError, XferLoad, XferSave};
-use zh_logic::arena::{FacetMask, ModuleContext, ModuleDataId, ModuleSidecar, ModuleSlot, ObjectSlot};
+use zh_logic::arena::{FacetMask, ModuleDataId, ModuleSidecar, ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::DamageInfo;
 use zh_logic::combat::locomotor::LocomotorTemplate;
 use zh_logic::combat::locomotor_set::LocomotorSetType;
 use zh_logic::modules::module::{
-    AiUpdateFacet, BehaviorModule, ModuleSnapshotHeader, ModuleType, PhysicsFacet,
+    AiUpdateFacet, BehaviorModule, ModuleSnapshotHeader, ModuleType, 
 };
 use zh_logic::object::weapon::{Weapon, WeaponTemplate};
 use zh_logic::object::weapon_set::WeaponSlotType;
 use zh_logic::rules::combat_types::{ArmorSetType, DamageType, DeathType, WeaponSetType};
 use zh_logic::rules::object_status_types::ObjectStatusType;
 use zh_logic::scheduler::SleepyUpdatePhase;
+use zh_logic::modules::update::physics_behavior::physics_mut;
 use zh_logic::sim::{armor_set_flags_from_u8, MockSimApi, SimApi, SimView};
 
 const STATIC_OBJS_INI: &str = "\
@@ -444,45 +445,6 @@ impl BehaviorModule for StubHijackerBehavior {
     }
 }
 
-struct StubPhysicsBehavior {
-    key: NameKeyType,
-    velocity: Coord3D,
-}
-
-impl PhysicsFacet for StubPhysicsBehavior {
-    fn apply_force(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, force: &Coord3D) {
-        self.velocity.x += force.x;
-        self.velocity.y += force.y;
-        self.velocity.z += force.z;
-    }
-
-    fn velocity(&self) -> Coord3D {
-        self.velocity
-    }
-}
-
-impl BehaviorModule for StubPhysicsBehavior {
-    fn module_name_key(&self) -> NameKeyType {
-        self.key
-    }
-
-    fn sync_sidecar(&self) -> ModuleSidecar {
-        ModuleSidecar::Physics {
-            velocity: self.velocity,
-            mass: 10.0,
-            airborne: FALSE,
-        }
-    }
-
-    fn xfer(&mut self, _xfer: &mut dyn Xfer, _sim: &dyn SimView) -> Result<(), XferError> {
-        Ok(())
-    }
-
-    fn as_physics_mut(&mut self) -> Option<&mut dyn PhysicsFacet> {
-        Some(self)
-    }
-}
-
 fn attach_stub_ai(api: &mut MockSimApi, slot: ObjectSlot) {
     let key = api.ctx.rules.name_keys.name_to_key("AIUpdateInterface");
     api.ctx.world.attach_module(
@@ -510,16 +472,11 @@ fn attach_stub_hijacker(api: &mut MockSimApi, slot: ObjectSlot) {
     );
 }
 
-fn attach_stub_physics(api: &mut MockSimApi, slot: ObjectSlot, velocity: Coord3D) {
-    let key = api.ctx.rules.name_keys.name_to_key("PhysicsBehavior");
-    api.ctx.world.attach_module(
-        slot,
-        NameKeyType(905),
-        ModuleDataId::INVALID,
-        FacetMask::PHYSICS_UPDATE,
-        SleepyUpdatePhase::Physics,
-        Box::new(StubPhysicsBehavior { key, velocity }),
-    );
+/// `if (PhysicsBehavior* phys = obj->getPhysics()) phys->addVelocityTo(&vel);`
+fn add_velocity(api: &mut MockSimApi, slot: ObjectSlot, velocity: Coord3D) {
+    if let Some(p) = physics_mut(api, slot) {
+        p.add_velocity(&velocity);
+    }
 }
 
 fn spawn(api: &mut MockSimApi, name: &str, team: TeamId, pos: Coord3D, angle: Real) -> ObjectSlot {
@@ -1588,7 +1545,7 @@ fn wp52_collide_crates_golden_vectors() {
             1 => Coord3D { x: -8.0, y: -4.0, z: 0.0 },
             _ => Coord3D::default(),
         };
-        attach_stub_physics(&mut api, sq_crusher, sq_vel_vec);
+        add_velocity(&mut api, sq_crusher, sq_vel_vec);
         let sq_decoy = spawn(
             &mut api,
             "Cr52_Decoy",

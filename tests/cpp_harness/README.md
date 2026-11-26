@@ -114,6 +114,28 @@ A small object normally spans at most two cells per axis, and its cell array has
 
 `TunnelTracker::removeFromContain` takes `exposeStealthUnits` and never reads it, so leaving a tunnel or cave detects nobody. Mutating that argument in the port changes nothing, which is correct. `golden_pkt264_cave` forces stealthed passengers out and records that none is detected.
 
+### Loading a live update module drops it from the sleepy heap
+
+- **Where:** `UpdateModule::xfer` in load mode (`snapshot_load_bytes`).
+- **What happens:** the module forgets its heap index. A later `processDestroyList` erases index -1 and segfaults.
+- **How the oracle handles it:** `gen_pkt348_physics.cpp` saves `friend_getIndexInLogic()` before a load and restores it afterwards.
+
+### `PhysicsBehavior` reads members it never assigns
+
+- **Where:** `m_originalAllowBounce` (never written) and `m_turning` (not set by the constructor).
+- **What happens:** both rely on the memory pool zeroing the block. So once a bounce dies out, `ALLOW_BOUNCE` is cleared for good, whatever the INI says.
+- **Port contract:** both start at zero. `golden_pkt348_physics` covers it.
+
+### A weapon's `FireSound` is not played by the logic
+
+- **What happens:** firing a weapon does not reach `TheAudio`, so an audio spy sees nothing. `gen_pkt348_physics.cpp` counts fires through `WeaponTemplate::m_historicDamage` (`HistoricBonusCount` set far out of reach).
+- **Related:** above frame 2^24, `frame + reloadTime` is computed in `float` and can round up, so a freshly loaded temporary weapon refuses to fire. The Rust `fire_weapon_template` stand-in does not model this, and that harness keeps its frames below 2^24.
+
+### Host `std::cos` in a harness differs between optimisation levels
+
+- **What happens:** constant folding gives other bits than the run-time call, so `-O0` and `-O2` outputs differ although the module is fine.
+- **Rule:** build harness inputs with `WWMath::Cosf` / `Sinf`.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault.

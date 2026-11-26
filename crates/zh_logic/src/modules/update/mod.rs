@@ -14,6 +14,7 @@ pub mod fire_spread_update;
 pub mod fire_weapon_update;
 pub mod flammable_update;
 pub mod lifetime_update;
+pub mod physics_behavior;
 pub mod projectile_stream_update;
 pub mod power_plant_update;
 pub mod prone_update;
@@ -61,6 +62,16 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         repair_dock_update::parse_repair_dock_update_data,
         repair_dock_update::create_repair_dock_update,
+    );
+    reg.register_module(
+        nk,
+        "PhysicsBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x011 | FacetMask::PHYSICS_UPDATE.0),
+        SleepyUpdatePhase::Physics,
+        false,
+        physics_behavior::parse_physics_behavior_data,
+        physics_behavior::create_physics_behavior,
     );
     reg.register_module(
         nk,

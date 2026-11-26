@@ -1,6 +1,6 @@
 //! `PKT-246`: `SquishCollide` (`SquishCollide.h` / `SquishCollide.cpp`).
 
-use crate::arena::{ModuleContext, ModuleSidecar, ObjectSlot};
+use crate::arena::{ModuleContext, ObjectSlot};
 use crate::combat::damage::{DamageInfo, HUGE_DAMAGE_AMOUNT};
 use crate::modules::collide::collide_module::{
     impl_collide_behavior, parse_collide_module_data, CollideBehaviorImpl, CollideModule,
@@ -204,12 +204,10 @@ impl CollideBehaviorImpl for SquishCollide {
         let Some(other_obj) = sim.object(other_slot) else {
             return;
         };
-        let Some(phys_slot) = other_obj.physics_slot else {
+        if other_obj.physics_slot.is_none() {
             return;
-        };
-        let ModuleSidecar::Physics { velocity, .. } = sim.module_sidecar(phys_slot) else {
-            return;
-        };
+        }
+        let velocity = sim.physics_velocity(other_slot);
         let other_id = other_obj.id;
         let other_pos = *other_obj.thing.get_position();
         let other_angle = other_obj.thing.get_orientation();

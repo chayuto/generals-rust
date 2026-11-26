@@ -24,7 +24,7 @@ use zh_logic::modules::behavior::register_behavior_modules;
 use zh_logic::modules::behavior::slow_death_behavior::SlowDeathBehavior;
 use zh_logic::modules::contain::register_contain_modules;
 use zh_logic::modules::module::{
-    AiUpdateFacet, BehaviorModule, ModuleData, ModuleType, ObjectEnterExitType, PhysicsFacet,
+    AiUpdateFacet, BehaviorModule, ModuleData, ModuleType, ObjectEnterExitType, 
     StealthFacet, UpdateFacet,
 };
 use zh_logic::modules::module_factory::ModuleParseContext;
@@ -453,73 +453,6 @@ fn create_test_stealth(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn Be
     })
 }
 
-struct TestPhysicsBehavior {
-    data: TestModuleData,
-    schedule: UpdateScheduleTracker,
-}
-
-impl BehaviorModule for TestPhysicsBehavior {
-    fn module_name_key(&self) -> NameKeyType {
-        self.data.module_name_key
-    }
-    fn on_object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        self.schedule.bind(ctx);
-        sim.set_wake_frame(ctx.mod_slot, UpdateSleepTime::FOREVER);
-    }
-    fn crc(&self, xfer: &mut dyn Xfer) {
-        self.schedule.crc(xfer);
-    }
-    fn xfer(&mut self, xfer: &mut dyn Xfer, sim: &dyn SimView) -> Result<(), XferError> {
-        self.schedule.xfer_update_header(xfer, sim)
-    }
-    fn load_post_process(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        self.schedule.load_post_process(sim, ctx);
-    }
-    fn as_update(&self) -> Option<&dyn UpdateFacet> {
-        Some(self)
-    }
-    fn as_update_mut(&mut self) -> Option<&mut dyn UpdateFacet> {
-        Some(self)
-    }
-    fn as_physics_mut(&mut self) -> Option<&mut dyn PhysicsFacet> {
-        Some(self)
-    }
-}
-
-impl UpdateFacet for TestPhysicsBehavior {
-    fn update(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) -> UpdateSleepTime {
-        UpdateSleepTime::FOREVER
-    }
-}
-
-impl PhysicsFacet for TestPhysicsBehavior {
-    fn apply_force(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _force: &Coord3D) {}
-}
-
-fn parse_test_physics_data(
-    reader: &mut IniReader<'_>,
-    tag_key: NameKeyType,
-    module_name_key: NameKeyType,
-    _parse_ctx: &mut ModuleParseContext<'_>,
-) -> Result<Box<dyn ModuleData>, IniError> {
-    reader.read_block_fields(|_f, _r| Ok(()))?;
-    Ok(Box::new(TestModuleData {
-        tag_key,
-        module_name_key,
-        facet_mask: FacetMask(0x011 | FacetMask::PHYSICS_UPDATE.0),
-        innate_stealth: FALSE,
-        granted_by_sp: FALSE,
-    }))
-}
-
-fn create_test_physics(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
-    let d = data.as_any().downcast_ref::<TestModuleData>().unwrap().clone();
-    Box::new(TestPhysicsBehavior {
-        data: d,
-        schedule: UpdateScheduleTracker::new(),
-    })
-}
-
 // -----------------------------------------------------------------------------
 // Shared INI & Harness Helpers
 // -----------------------------------------------------------------------------
@@ -834,16 +767,6 @@ fn build_rules() -> RulesRegistry {
         false,
         parse_test_stealth_data,
         create_test_stealth,
-    );
-    rules.module_registry.register_module(
-        &mut rules.name_keys,
-        "PhysicsBehavior",
-        ModuleType::Behavior,
-        FacetMask(0x011 | FacetMask::PHYSICS_UPDATE.0),
-        SleepyUpdatePhase::Physics,
-        false,
-        parse_test_physics_data,
-        create_test_physics,
     );
 
     rules

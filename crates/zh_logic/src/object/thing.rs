@@ -29,6 +29,9 @@ pub trait ThingTerrainAccess {
         stick_to_ground: Bool,
         mtx: &mut Matrix3D,
     ) -> PathfindLayerEnum;
+    fn is_cliff_cell(&self, _x: Real, _y: Real) -> Bool {
+        FALSE
+    }
     fn is_underwater(
         &self,
         x: Real,

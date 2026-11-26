@@ -7,7 +7,7 @@
 //! `PKT-289 PrisonBehavior` is compiled out of the reference library, so it only has the
 //! contract test at the bottom of this file.
 //!
-//! The AI, physics and stealth modules are not ported yet. The stand-ins below only parse
+//! The AI and stealth modules are not ported yet. The stand-ins below only parse
 //! their inputs and forward lifecycle events; every compared value is computed by `zh_logic`.
 
 use std::any::Any;
@@ -37,8 +37,8 @@ use zh_logic::modules::contain::mob_nexus_contain::MobNexusContain;
 use zh_logic::modules::contain::parachute_contain::ParachuteContain;
 use zh_logic::modules::contain::transport_contain::TransportContain;
 use zh_logic::modules::module::{
-    AiUpdateFacet, BehaviorModule, CollideFacet, EvacDisposition, ExitDoorType, ModuleData,
-    ModuleType, PhysicsFacet, StealthFacet, UpdateFacet,
+    AiUpdateFacet, BehaviorModule, EvacDisposition, ExitDoorType, ModuleData,
+    ModuleType, StealthFacet, UpdateFacet,
 };
 use zh_logic::modules::module_factory::ModuleParseContext;
 use zh_logic::object::weapon::WeaponTemplate;
@@ -47,6 +47,7 @@ use zh_logic::rules::disabled_types::DisabledType;
 use zh_logic::rules::model_state::ModelConditionFlagType;
 use zh_logic::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
 use zh_logic::scheduler::{SleepyUpdatePhase, UPDATE_SLEEP_FOREVER};
+use zh_logic::modules::update::physics_behavior::{physics, ALLOW_TO_FALL};
 use zh_logic::sim::{RulesRegistry, SimApi, SimContext, SimView, SimWorld};
 
 // -----------------------------------------------------------------------------
@@ -181,8 +182,6 @@ struct StubData {
     module_name_key: NameKeyType,
     facet_mask: FacetMask,
     innate_stealth: Bool,
-    mass: Real,
-    shock_max: [Real; 3],
 }
 
 impl StubData {
@@ -192,8 +191,6 @@ impl StubData {
             module_name_key,
             facet_mask,
             innate_stealth: FALSE,
-            mass: 1.0,
-            shock_max: [0.05, 0.025, 0.025],
         }
     }
 }
@@ -216,7 +213,6 @@ impl ModuleData for StubData {
 #[derive(Clone, Copy, PartialEq)]
 enum StubKind {
     Ai,
-    Physics,
     Stealth,
 }
 
@@ -239,14 +235,6 @@ impl BehaviorModule for StubModule {
         self.schedule.bind(ctx);
         match self.kind {
             StubKind::Ai => sim.ai_init_state_machine(ctx.owner_slot),
-            StubKind::Physics => {
-                if let Some(o) = sim.object_mut(ctx.owner_slot) {
-                    o.physics_mass = self.data.mass;
-                    o.physics_shock_max_yaw = self.data.shock_max[0];
-                    o.physics_shock_max_pitch = self.data.shock_max[1];
-                    o.physics_shock_max_roll = self.data.shock_max[2];
-                }
-            }
             StubKind::Stealth => {
                 if self.data.innate_stealth != FALSE {
                     sim.set_status(ctx.owner_slot, ObjectStatusType::CanStealth);
@@ -269,14 +257,8 @@ impl BehaviorModule for StubModule {
     fn as_ai_mut(&mut self) -> Option<&mut dyn AiUpdateFacet> {
         (self.kind == StubKind::Ai).then_some(self as &mut dyn AiUpdateFacet)
     }
-    fn as_physics_mut(&mut self) -> Option<&mut dyn PhysicsFacet> {
-        (self.kind == StubKind::Physics).then_some(self as &mut dyn PhysicsFacet)
-    }
     fn as_stealth_mut(&mut self) -> Option<&mut dyn StealthFacet> {
         (self.kind == StubKind::Stealth).then_some(self as &mut dyn StealthFacet)
-    }
-    fn as_collide_mut(&mut self) -> Option<&mut dyn CollideFacet> {
-        (self.kind == StubKind::Physics).then_some(self as &mut dyn CollideFacet)
     }
 }
 
@@ -288,54 +270,13 @@ impl UpdateFacet for StubModule {
 
 impl AiUpdateFacet for StubModule {}
 
-impl PhysicsFacet for StubModule {
-    fn apply_force(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _force: &Coord3D) {}
-}
-
 impl StealthFacet for StubModule {}
 
-impl CollideFacet for StubModule {
-    /// The part of `PhysicsBehavior::onCollide` the jet depends on: reject bounding volumes
-    /// that do not overlap (3D when airborne, else 2D), otherwise remember the collidee.
-    fn on_collide(
-        &mut self,
-        sim: &mut dyn SimApi,
-        ctx: ModuleContext,
-        other: Option<ObjectSlot>,
-        _loc: Option<&Coord3D>,
-        _normal: Option<&Coord3D>,
-    ) {
-        let airborne = sim.object_is_above_terrain(ctx.owner_slot) != FALSE;
-        let (Some(me), Some(them)) = (
-            sim.object(ctx.owner_slot),
-            other.and_then(|o| sim.object(o)),
-        ) else {
-            return;
-        };
-        let (a, b) = (me.thing.get_position(), them.thing.get_position());
-        let (dx, dy) = (b.x - a.x, b.y - a.y);
-        let (dist_sqr, reach) = if airborne {
-            let dz = (b.z + them.geometry.get_z_delta_to_center_position())
-                - (a.z + me.geometry.get_z_delta_to_center_position());
-            let reach = me.geometry.get_bounding_sphere_radius()
-                + them.geometry.get_bounding_sphere_radius();
-            (dx * dx + dy * dy + dz * dz, reach)
-        } else {
-            let reach = me.geometry.get_bounding_circle_radius()
-                + them.geometry.get_bounding_circle_radius();
-            (dx * dx + dy * dy, reach)
-        };
-        let id = them.id;
-        if dist_sqr <= reach * reach {
-            if let Some(me) = sim.object_mut(ctx.owner_slot) {
-                me.physics_last_collidee = id;
-            }
-        }
-    }
+fn allow_to_fall(sim: &SimContext, slot: ObjectSlot) -> Bool {
+    Bool::from(physics(sim, slot).is_some_and(|p| p.flag(ALLOW_TO_FALL)))
 }
 
 const AI_MASK: FacetMask = FacetMask(0x001 | FacetMask::AI_UPDATE.0);
-const PHYSICS_MASK: FacetMask = FacetMask(0x011 | FacetMask::PHYSICS_UPDATE.0);
 const STEALTH_MASK: FacetMask = FacetMask(0x001 | FacetMask::STEALTH_UPDATE.0);
 
 fn parse_stub(
@@ -347,14 +288,6 @@ fn parse_stub(
             r.parse_bool(&mut data.innate_stealth)
         } else if field.eq_ignore_ascii_case("StealthDelay") {
             r.parse_duration_unsigned_int(&mut 0)
-        } else if field.eq_ignore_ascii_case("Mass") {
-            r.parse_real(&mut data.mass)
-        } else if field.eq_ignore_ascii_case("ShockMaxYaw") {
-            r.parse_real(&mut data.shock_max[0])
-        } else if field.eq_ignore_ascii_case("ShockMaxPitch") {
-            r.parse_real(&mut data.shock_max[1])
-        } else if field.eq_ignore_ascii_case("ShockMaxRoll") {
-            r.parse_real(&mut data.shock_max[2])
         } else {
             Err(IniError::UnknownToken)
         }
@@ -379,15 +312,6 @@ fn parse_ai(
     parse_stub(r, StubData::new(t, n, AI_MASK))
 }
 
-fn parse_physics(
-    r: &mut IniReader<'_>,
-    t: NameKeyType,
-    n: NameKeyType,
-    _c: &mut ModuleParseContext<'_>,
-) -> Result<Box<dyn ModuleData>, IniError> {
-    parse_stub(r, StubData::new(t, n, PHYSICS_MASK))
-}
-
 fn parse_stealth(
     r: &mut IniReader<'_>,
     t: NameKeyType,
@@ -399,10 +323,6 @@ fn parse_stealth(
 
 fn create_ai(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
     create_stub(data, StubKind::Ai)
-}
-
-fn create_physics(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
-    create_stub(data, StubKind::Physics)
 }
 
 fn create_stealth(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
@@ -920,16 +840,6 @@ fn build_rules() -> RulesRegistry {
     );
     rules.module_registry.register_module(
         &mut rules.name_keys,
-        "PhysicsBehavior",
-        ModuleType::Behavior,
-        PHYSICS_MASK,
-        SleepyUpdatePhase::Physics,
-        false,
-        parse_physics,
-        create_physics,
-    );
-    rules.module_registry.register_module(
-        &mut rules.name_keys,
         "StealthUpdate",
         ModuleType::Behavior,
         STEALTH_MASK,
@@ -1422,7 +1332,7 @@ fn transport(sim: &mut SimContext, case: &Case<'_>, out: &mut Out) {
         "tc_nb_f",
         module_ref::<TransportContain>(sim, slot).state.frame_exit_not_busy,
     );
-    out.put("tc_h_fall", sim.object(heavy).unwrap().physics_allow_to_fall);
+    out.put("tc_h_fall", allow_to_fall(sim, heavy));
 
     if mode == 1 {
         let (a, b) = (case.teams.a, case.teams.b);
@@ -1650,7 +1560,7 @@ fn parachute(sim: &mut SimContext, case: &Case<'_>, out: &mut Out) {
     }
     out.put("pc_post_cnt", sim.contain_count(chute));
     out.put("pc_rhp", health_bits(sim, rider));
-    out.put("pc_rfall", sim.object(rider).unwrap().physics_allow_to_fall);
+    out.put("pc_rfall", allow_to_fall(sim, rider));
     out.put("pc_dead", sim.object(chute).unwrap().is_effectively_dead());
     out.put("pc_rng", rng_crc(sim));
 }
