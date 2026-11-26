@@ -14,6 +14,7 @@ use crate::rules::combat_types::{
 };
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::{kindof_mask_fs, KindOfType};
+use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
 use crate::rules::object_status_types::ObjectStatusType;
 use crate::sim::{armor_set_flags_to_u8, SimApi, SimView};
 use zh_common::ini::{convert_duration_from_msecs_to_frames, IniError, IniReader};
@@ -1179,6 +1180,26 @@ impl BodyFacet for ActiveBody {
     }
 
     fn evaluate_visual_condition(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+        // `Drawable::reactToBodyDamageStateChange`: these flags are saved and read by logic.
+        let mut damage_flags = ModelConditionFlags::default();
+        for flag in [
+            ModelConditionFlagType::Damaged,
+            ModelConditionFlagType::ReallyDamaged,
+            ModelConditionFlagType::Rubble,
+        ] {
+            damage_flags.set(flag.as_i32(), 1);
+        }
+        let flag = match self.cur_damage_state {
+            BodyDamageType::Pristine => None,
+            BodyDamageType::Damaged => Some(ModelConditionFlagType::Damaged),
+            BodyDamageType::ReallyDamaged => Some(ModelConditionFlagType::ReallyDamaged),
+            BodyDamageType::Rubble => Some(ModelConditionFlagType::Rubble),
+        };
+        let mut new_damage = ModelConditionFlags::default();
+        if let Some(flag) = flag {
+            new_damage.set(flag.as_i32(), 1);
+        }
+        sim.clear_and_set_model_condition_flags(ctx.owner_slot, &damage_flags, &new_damage);
         self.update_body_particle_systems(sim, ctx);
     }
 

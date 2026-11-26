@@ -1827,6 +1827,45 @@ impl SimContext {
             .unwrap_or(team_id.0)
     }
 
+    /// Whether `PartitionManager` would not hold `slot`, so that range scans cannot see it.
+    /// `OpenContain::addOrRemoveObjFromWorld` unregisters a rider of an enclosing container (the
+    /// `Masked` status set by `Object::onContainedBy`) and, with it, anything riding that rider
+    /// in a non-enclosing way.
+    fn is_out_of_partition(&self, slot: ObjectSlot) -> bool {
+        let mut current = slot;
+        // Bounded so that a containment cycle cannot hang the scan.
+        for _ in 0..8 {
+            let Some(obj) = self.world.objects.get(current) else {
+                return false;
+            };
+            let Some(container) = obj.contained_by else {
+                return false;
+            };
+            if obj.status.test(ObjectStatusType::Masked.as_i32()) != FALSE {
+                return true;
+            }
+            current = container;
+        }
+        false
+    }
+
+    /// The `aiIdle` at the top of `Object::onCapture`. Retail always idles on a change of owner;
+    /// later builds let a unit carry on when the new owner is an ally.
+    fn idle_on_capture(&mut self, owner: ObjectSlot, old_team: TeamId, new_team: TeamId) {
+        let old_player = self.player_index_for_team(old_team);
+        let new_player = self.player_index_for_team(new_team);
+        if old_player == new_player {
+            return;
+        }
+        #[cfg(not(feature = "retail-crc"))]
+        if self.world.player_relationships.get(&(old_player, new_player))
+            == Some(&Relationship::Allies)
+        {
+            return;
+        }
+        self.ai_idle(owner, CommandSourceType::FromAi);
+    }
+
     /// Dispatches `f` on `mod_slot` via Take-and-Restore, draining any re-entrant [`DeferredSelfOp`]s
     /// and refreshing [`ModuleSidecar`] before restoring ownership to `world.modules`.
     pub fn dispatch_module<R>(
@@ -2871,7 +2910,7 @@ impl SimView for SimContext {
             .world_iter()
             .filter(|&slot| {
                 self.world.objects.get(slot).is_some_and(|obj| {
-                    if obj.is_destroyed() {
+                    if obj.is_destroyed() || self.is_out_of_partition(slot) {
                         return false;
                     }
                     let pos = obj.thing.get_position();
@@ -2889,7 +2928,7 @@ impl SimView for SimContext {
             .world_iter()
             .filter(|&slot| {
                 self.world.objects.get(slot).is_some_and(|obj| {
-                    if obj.is_destroyed() {
+                    if obj.is_destroyed() || self.is_out_of_partition(slot) {
                         return false;
                     }
                     let pos = obj.thing.get_position();
@@ -5118,6 +5157,7 @@ impl SimApi for SimContext {
         }) else {
             return;
         };
+        self.idle_on_capture(owner, old_team, new_team);
         *self.world.player_captured_objects.entry(new_team).or_insert(0) += 1;
         for ms in beh_slots {
             if self.world.modules.is_alive(ms) {
@@ -5901,10 +5941,14 @@ impl SimApi for SimContext {
         }
     }
 
+    /// `Object::setTeam`: a dead player's team is redirected to the neutral default team.
     fn set_object_team(&mut self, owner: ObjectSlot, new_team: TeamId) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.team_id = new_team;
-        }
+        let team = if self.player_is_active(new_team) == FALSE {
+            self.player_default_team(self.neutral_team_id())
+        } else {
+            new_team
+        };
+        self.capture_object(owner, team);
     }
 
     fn set_physics_allow_to_fall(&mut self, owner: ObjectSlot, allow: Bool) {
@@ -6188,9 +6232,11 @@ impl SimApi for SimContext {
             });
         }
         // `AIUpdateInterface::privateIdle`: re-enter `AI_IDLE` (one PRNG draw), then idle
-        // everything this object contains.
+        // everything this object contains. `isAllowedToRespondToAiCommands` drops commands to
+        // the dead first.
         let ready = self.world.objects.get(owner).is_some_and(|o| {
             o.ai_state_machine_ready != FALSE
+                && o.is_effectively_dead() == FALSE
                 && o.thing
                     .is_kind_of(&self.rules.thing_factory, KindOfType::Projectile)
                     == FALSE

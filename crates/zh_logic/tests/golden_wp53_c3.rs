@@ -9,8 +9,7 @@
 //! upgrades.
 //!
 //! The saved `PropagandaTowerBehavior` ids are compared sorted: the reference saves them in
-//! partition scan order. No vector has a tower scan for a unit inside an enclosing container
-//! (see `docs/OPEN_DECISIONS.md`).
+//! partition scan order (see `docs/OPEN_DECISIONS.md`).
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -1478,4 +1477,25 @@ fn propaganda_load_reverses_the_tracked_ids() {
     reversed.extend_from_slice(&saved[fixed + 4..]);
     reversed.extend_from_slice(&saved[fixed..fixed + 4]);
     assert_eq!(hex(resave.as_bytes()), hex(&reversed));
+}
+
+/// Contract test, not an oracle vector: `OpenContain::addOrRemoveObjFromWorld` also takes the
+/// non-enclosed riders of a unit that is shut inside an enclosing container out of range scans.
+#[test]
+fn range_scan_skips_riders_nested_in_an_enclosed_container() {
+    let mut sim = SimContext::new();
+    sim.rules = build_rules();
+    reset_world(&mut sim, 100, 1, 1);
+    let transport = spawn(&mut sim, "P53C3_Trans", TEAM_A);
+    let open = spawn(&mut sim, "P53C3_OpenGarr", TEAM_A);
+    let rider = spawn(&mut sim, "P53C3_URifle", TEAM_A);
+    let seen = |sim: &SimContext| {
+        let found = sim.find_objects_in_range(&Coord3D::default(), 10.0);
+        [open, rider].map(|slot| found.contains(&slot))
+    };
+
+    sim.contain_add(open, rider);
+    assert_eq!(seen(&sim), [true, true], "an open garrison hides nothing");
+    sim.contain_add(transport, open);
+    assert_eq!(seen(&sim), [false, false], "both leave with the transport");
 }

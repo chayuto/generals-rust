@@ -14,8 +14,8 @@
 // shroud test passes). The bunker buster shockwave is observed through its weapon's `FireFX`.
 //
 // `PropagandaTowerBehavior` saves its tracked ids in partition scan order, which the port does
-// not reproduce, so the ids are sorted before the bytes are recorded. No vector puts a unit that
-// a tower scans for inside an enclosing container (see `docs/OPEN_DECISIONS.md`).
+// not reproduce, so the ids are sorted before the bytes are recorded (see
+// `docs/OPEN_DECISIONS.md`).
 
 #include "oracle_wp51_world.h"
 
@@ -449,9 +449,6 @@ static void gen_propaganda(Vec& v, int i) {
     uint32_t container = 0;
     if (i != 0 && v.variant >= 4 && pick(3) == 0) container = 1 + pick(2);
     uint32_t second = i == 0 ? 0u : (pick(5) == 0 ? 1u : 0u);
-    // The port's range query still returns objects shut inside a transport, which the reference
-    // partition does not hold, so no second tower scans for an enclosed one.
-    if (container == 1) second = 0;
     const uint32_t count = i == 0 ? 4u : 1u + pick(4);
     v.p = {i == 0 ? 1u : 1u + pick(2), container, second, count};
     static const uint32_t first[4] = {0, 1, 5, 3};

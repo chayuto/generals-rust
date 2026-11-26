@@ -408,25 +408,6 @@ struct Actual {
     rng: u32,
 }
 
-/// Stands in for `Drawable::reactToBodyDamageStateChange`, which the port does not have yet
-/// (`docs/OPEN_DECISIONS.md`). `OpenContain` saves these client flags and redeploys when they
-/// change, so the helix needs them to follow its body.
-fn mirror_damage_condition(sim: &mut SimContext, o: ObjectSlot) {
-    let flags = [
-        ModelConditionFlagType::Damaged,
-        ModelConditionFlagType::ReallyDamaged,
-        ModelConditionFlagType::Rubble,
-    ];
-    let state = sim.object_body_damage_state(o) as usize;
-    for (i, flag) in flags.into_iter().enumerate() {
-        if i + 1 == state {
-            sim.set_model_condition_state(o, flag);
-        } else {
-            sim.clear_model_condition_state(o, flag);
-        }
-    }
-}
-
 fn team_index(team: TeamId) -> u32 {
     match team {
         TEAM_A => 0,
@@ -667,7 +648,6 @@ fn run(sim: &mut SimContext, v: &Input) -> Actual {
             }
             _ => panic!("unknown op {code}"),
         }
-        mirror_damage_condition(sim, o);
         rows.push(observe(sim, o, m, &riders, door));
     }
     let crc = module_crc(sim, m);

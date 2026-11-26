@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`202` implemented, `0` seeded skeletons, `261` unported)
-- **Golden Vector Oracles:** `53` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `52` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `54` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `53` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -235,6 +235,7 @@
 | `zh_common` | `crates/zh_common/src/io/compression.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/math/gamemath.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/types.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/behavior/neutron_blast_behavior.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/special_power_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/scheduler/sleepy_heap.rs` | `implemented` |
@@ -293,6 +294,7 @@
 | `docs/golden_vectors/WP53_C1.json` | 1000 | yes |
 | `docs/golden_vectors/WP53_C2.json` | 1000 | yes |
 | `docs/golden_vectors/WP53_C3.json` | 1000 | yes |
+| `docs/golden_vectors/WP53_C4.json` | 1000 | yes |
 | `docs/golden_vectors/WP5_0_SleepyHeap.json` | 1000 | no |
 | `docs/golden_vectors/WP7_2_BigVfs.json` | 1000 | yes |
 | `docs/golden_vectors/WP7_2b_Compression.json` | 1000 | no |
@@ -353,3 +355,4 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_wp53_c1.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp53_c2.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp53_c3.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_wp53_c4.rs` | `active` |
