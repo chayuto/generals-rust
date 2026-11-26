@@ -402,6 +402,15 @@ impl SimView for EngineSim<'_> {
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
         not_wired("get_layer_height")
     }
+    fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {
+        not_wired("pathfinder_snap_position")
+    }
+    fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
+        not_wired("ai_is_doing_ground_movement")
+    }
+    fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
+        not_wired("pristine_bone_transforms")
+    }
     fn get_highest_layer_for_destination( &self, pos: &Coord3D, only_healthy_bridges: Bool, ) -> PathfindLayerEnum {
         not_wired("get_highest_layer_for_destination")
     }
@@ -1049,6 +1058,12 @@ impl SimApi for EngineSim<'_> {
     }
     fn pathfinder_add_object(&mut self, owner: ObjectSlot) {
         not_wired("pathfinder_add_object")
+    }
+    fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool {
+        not_wired("pathfinder_adjust_destination")
+    }
+    fn ai_follow_exit_production_path( &mut self, owner: ObjectSlot, path: &[Coord3D], ignore_obj: Option<ObjectSlot>, cmd_source: CommandSourceType, ) {
+        not_wired("ai_follow_exit_production_path")
     }
     fn pathfinder_adjust_to_possible_destination( &mut self, owner: ObjectSlot, dest: &mut Coord3D, ) -> Bool {
         not_wired("pathfinder_adjust_to_possible_destination")

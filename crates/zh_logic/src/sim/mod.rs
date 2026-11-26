@@ -1155,6 +1155,12 @@ pub trait SimView {
     ) -> PathfindCellType;
     fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum;
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real;
+    /// `Pathfinder::snapPosition`: moves `pos` onto the owner's footprint grid.
+    fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D);
+    /// `AIUpdateInterface::isDoingGroundMovement`.
+    fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool;
+    /// `Drawable::getPristineBonePositions` transforms from `SimWorld::pristine_bones`.
+    fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D>;
     fn get_highest_layer_for_destination(
         &self,
         pos: &Coord3D,
@@ -1651,6 +1657,16 @@ pub trait SimApi: SimView {
         options: &FindPositionOptions,
     ) -> Option<Coord3D>;
     fn pathfinder_add_object(&mut self, owner: ObjectSlot);
+    /// `Pathfinder::adjustDestination` as on open ground; the pathfinder is unported.
+    fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool;
+    /// `AIUpdateInterface::aiFollowExitProductionPath`. Recorded only.
+    fn ai_follow_exit_production_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    );
     fn pathfinder_adjust_to_possible_destination(
         &mut self,
         owner: ObjectSlot,
@@ -1669,6 +1685,63 @@ pub trait SimApi: SimView {
     /// `AIUpdateInterface::chooseLocomotorSet`.
     fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType);
     fn client(&mut self) -> &mut dyn ClientSink;
+}
+
+/// An `aiFollowExitProductionPath` order; the AI state it drives is unported.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExitPathOrder {
+    pub object: ObjectId,
+    pub path: Vec<Coord3D>,
+    pub ignore: ObjectId,
+    pub cmd_source: CommandSourceType,
+}
+
+impl SimContext {
+    /// `Pathfinder::getRadiusAndCenter` and `worldToCell`: the grid cell a goal for
+    /// `owner` at `pos` falls in, and whether the unit centers in it.
+    fn pathfind_goal_cell(&self, owner: ObjectSlot, pos: &Coord3D) -> (Int, Int, bool) {
+        let cell = crate::pathfinder::pathfind_constants::PATHFIND_CELL_SIZE_F;
+        let mut center = true;
+        if let Some(obj) = self.world.objects.get(owner) {
+            let mut diameter = 2.0 * obj.geometry.get_bounding_circle_radius();
+            if diameter > cell && diameter < 2.0 * cell {
+                diameter = 2.0 * cell;
+            }
+            let radius = real_to_int_floor(diameter / cell + 0.3).max(1);
+            // An odd cell count centers; so does a footprint clipped to the maximum.
+            center = radius & 1 != 0 || radius / 2 > 2;
+        }
+        let shift = if center { 0.0 } else { cell / 2.0 };
+        let hi = self.world.map_extent_hi;
+        let index = |v: Real, hi: Real| {
+            let last = real_to_int_floor(hi / cell).wrapping_sub(1);
+            real_to_int_floor((v + shift) / cell).min(last).max(0)
+        };
+        (index(pos.x, hi.x), index(pos.y, hi.y), center)
+    }
+
+    /// `Pathfinder::adjustCoordToCell`.
+    fn adjust_coord_to_cell(
+        &self,
+        cell_x: Int,
+        cell_y: Int,
+        center: bool,
+        pos: &mut Coord3D,
+        layer: PathfindLayerEnum,
+    ) {
+        let size = crate::pathfinder::pathfind_constants::PATHFIND_CELL_SIZE_F;
+        let coord = |c: Int| {
+            if center {
+                (c as Real + 0.5) * size
+            } else {
+                // The 0.05 is a double in the reference.
+                ((f64::from(c as Real) + 0.05) * f64::from(size)) as Real
+            }
+        };
+        pos.x = coord(cell_x);
+        pos.y = coord(cell_y);
+        pos.z = self.get_layer_height(pos.x, pos.y, layer);
+    }
 }
 
 /// The smallest change of position or angle `Object::reactToTransformChange` acts on.
@@ -1774,6 +1847,10 @@ pub struct SimWorld {
     pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
     pub ai_commands: Vec<(ObjectId, String)>,
+    pub exit_path_orders: Vec<ExitPathOrder>,
+    /// Pristine model bones by template name and bone prefix, as a model loader would
+    /// report them. No entry means the model has no such bones.
+    pub pristine_bones: BTreeMap<(String, String), Vec<Matrix3D>>,
     pub pathfind_map_objects: BTreeSet<ObjectId>,
     pub pathfind_goals: BTreeMap<ObjectId, (Coord3D, PathfindLayerEnum)>,
     pub blocked_pathfind_cells: BTreeMap<(Int, Int, Int), PathfindCellType>,
@@ -1870,6 +1947,8 @@ impl SimWorld {
             slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
             ai_commands: Vec::new(),
+            exit_path_orders: Vec::new(),
+            pristine_bones: BTreeMap::new(),
             pathfind_map_objects: BTreeSet::new(),
             pathfind_goals: BTreeMap::new(),
             blocked_pathfind_cells: BTreeMap::new(),
@@ -1955,7 +2034,12 @@ impl SimWorld {
             {
                 obj.countermeasures_slot = Some(mod_slot);
             }
-            if facet_mask.contains(FacetMask::EXIT_INTERFACE) && obj.exit_slot.is_none() {
+            // `getObjectExitInterface` asks the update modules first; a container's exit
+            // is reached through `contain_slot` when there is none.
+            if facet_mask.contains(FacetMask::EXIT_INTERFACE)
+                && !facet_mask.contains(FacetMask::CONTAIN)
+                && obj.exit_slot.is_none()
+            {
                 obj.exit_slot = Some(mod_slot);
             }
             if facet_mask.contains(FacetMask::REBUILD_HOLE) && obj.rebuild_hole_slot.is_none() {
@@ -4468,6 +4552,69 @@ impl SimView for SimContext {
 
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
         self.terrain.get_layer_height(x, y, layer, None, TRUE)
+    }
+
+    fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {
+        let (cell_x, cell_y, center) = self.pathfind_goal_cell(owner, pos);
+        self.adjust_coord_to_cell(cell_x, cell_y, center, pos, PathfindLayerEnum::Ground);
+    }
+
+    fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return FALSE;
+        };
+        if obj.is_disabled_by_type(DisabledType::Unmanned) != FALSE
+            && self.object_is_kind_of(owner, KindOfType::ProducedAtHelipad) != FALSE
+        {
+            return TRUE;
+        }
+        let air = crate::rules::combat_types::LocomotorSurfaceType::Air.as_i32();
+        // `LocomotorSet::getValidSurfaces` of the chosen set.
+        let valid_surfaces = obj.ai_locomotor_set.map_or(0, |set| {
+            obj.thing
+                .template_override()
+                .get_final(&self.rules.thing_factory)
+                .map_or(0, |t| {
+                    t.get_locomotor_set(set)
+                        .iter()
+                        .filter_map(|name| self.rules.locomotor_store.find_by_name(name))
+                        .fold(0, |mask, l| mask | l.surfaces)
+                })
+        });
+        if valid_surfaces == air {
+            return FALSE;
+        }
+        let Some(loco) = obj.ai_locomotor.as_ref() else {
+            return FALSE;
+        };
+        if loco.get_legal_surfaces() & air != 0
+            || obj.is_disabled_by_type(DisabledType::Held) != FALSE
+        {
+            return FALSE;
+        }
+        let allowed_to_fall =
+            crate::modules::update::physics_update::physics(self, owner).is_some_and(|p| {
+                p.flag(crate::modules::update::physics_update::ALLOW_TO_FALL)
+            });
+        Bool::from(!(allowed_to_fall && self.object_is_above_terrain(owner) != FALSE))
+    }
+
+    fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| {
+                o.thing
+                    .template_override()
+                    .get_final(&self.rules.thing_factory)
+            })
+            .and_then(|t| {
+                self.world
+                    .pristine_bones
+                    .get(&(t.get_name().to_owned(), bone_prefix.to_owned()))
+            })
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn get_highest_layer_for_destination(
@@ -7893,6 +8040,44 @@ impl SimApi for SimContext {
         }
     }
 
+    fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool {
+        if self.object_is_kind_of(owner, KindOfType::Projectile) != FALSE {
+            return TRUE;
+        }
+        let layer = self.get_layer_for_destination(dest);
+        let (cell_x, cell_y, center) = self.pathfind_goal_cell(owner, dest);
+        // Only the goal cell is tried: no spiral search, unit footprints or zones.
+        if self.pathfind_cell_type(layer, cell_x, cell_y) != PathfindCellType::Clear {
+            return FALSE;
+        }
+        self.adjust_coord_to_cell(cell_x, cell_y, center, dest, layer);
+        TRUE
+    }
+
+    fn ai_follow_exit_production_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    ) {
+        let Some(obj_id) = self.world.objects.id_of(owner) else {
+            return;
+        };
+        let ignore = ignore_obj
+            .and_then(|slot| self.world.objects.id_of(slot))
+            .unwrap_or(ObjectId::INVALID);
+        self.world
+            .ai_commands
+            .push((obj_id, "aiFollowExitProductionPath".to_owned()));
+        self.world.exit_path_orders.push(ExitPathOrder {
+            object: obj_id,
+            path: path.to_vec(),
+            ignore,
+            cmd_source,
+        });
+    }
+
     fn pathfinder_adjust_to_possible_destination(
         &mut self,
         owner: ObjectSlot,
@@ -8479,6 +8664,18 @@ impl SimView for MockSimApi {
 
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
         self.ctx.get_layer_height(x, y, layer)
+    }
+
+    fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {
+        self.ctx.pathfinder_snap_position(owner, pos);
+    }
+
+    fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.ai_is_doing_ground_movement(owner)
+    }
+
+    fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
+        self.ctx.pristine_bone_transforms(owner, bone_prefix)
     }
 
     fn get_highest_layer_for_destination(
@@ -9618,6 +9815,21 @@ impl SimApi for MockSimApi {
 
     fn pathfinder_add_object(&mut self, owner: ObjectSlot) {
         self.ctx.pathfinder_add_object(owner);
+    }
+
+    fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool {
+        self.ctx.pathfinder_adjust_destination(owner, dest)
+    }
+
+    fn ai_follow_exit_production_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    ) {
+        self.ctx
+            .ai_follow_exit_production_path(owner, path, ignore_obj, cmd_source);
     }
 
     fn pathfinder_adjust_to_possible_destination(

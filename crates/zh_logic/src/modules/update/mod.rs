@@ -1,6 +1,7 @@
 //! `WP-5.4`: `UpdateModule` leaf modules.
 
 pub mod base_renerate_update;
+pub mod default_production_exit_update;
 pub mod deletion_update;
 pub mod dock_update;
 pub mod repair_dock_update;
@@ -18,13 +19,16 @@ pub mod physics_update;
 pub mod projectile_stream_update;
 pub mod power_plant_update;
 pub mod prone_update;
+pub mod queue_production_exit_update;
 pub mod radar_update;
 pub mod radius_decal_update;
 pub mod smart_bomb_target_homing_update;
+pub mod spawn_point_production_exit_update;
 pub mod special_power_update_module;
 pub mod spy_vision_update;
 pub mod stealth_detector_update;
 pub mod stealth_update;
+pub mod supply_center_production_exit_update;
 pub mod weapon_bonus_update;
 
 use crate::arena::FacetMask;
@@ -64,6 +68,46 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         repair_dock_update::parse_repair_dock_update_data,
         repair_dock_update::create_repair_dock_update,
+    );
+    reg.register_module(
+        nk,
+        "DefaultProductionExitUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        default_production_exit_update::parse_default_production_exit_update_data,
+        default_production_exit_update::create_default_production_exit_update,
+    );
+    reg.register_module(
+        nk,
+        "SupplyCenterProductionExitUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        supply_center_production_exit_update::parse_supply_center_production_exit_update_data,
+        supply_center_production_exit_update::create_supply_center_production_exit_update,
+    );
+    reg.register_module(
+        nk,
+        "QueueProductionExitUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        queue_production_exit_update::parse_queue_production_exit_update_data,
+        queue_production_exit_update::create_queue_production_exit_update,
+    );
+    reg.register_module(
+        nk,
+        "SpawnPointProductionExitUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        spawn_point_production_exit_update::parse_spawn_point_production_exit_update_data,
+        spawn_point_production_exit_update::create_spawn_point_production_exit_update,
     );
     reg.register_module(
         nk,

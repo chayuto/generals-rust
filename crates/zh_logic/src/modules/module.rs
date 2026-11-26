@@ -1345,7 +1345,7 @@ pub trait ExitFacet {
         _sim: &mut dyn SimApi,
         _ctx: ModuleContext,
         _new_obj: ObjectSlot,
-        _bud_host: ObjectSlot,
+        _bud_host: Option<ObjectSlot>,
     ) {
     }
     fn unreserve_door_for_exit(&mut self, _exit_door: ExitDoorType) {}
@@ -1363,21 +1363,25 @@ pub trait ExitFacet {
     fn use_spawn_rally_point(&self) -> Bool {
         FALSE
     }
+    /// The `ExitInterface` default clears the point and reports none.
     fn get_natural_rally_point(
         &self,
         _sim: &dyn SimView,
         _ctx: ModuleContext,
-        _rally_point: &mut Coord3D,
+        rally_point: &mut Coord3D,
         _offset: Bool,
     ) -> Bool {
+        *rally_point = Coord3D::default();
         FALSE
     }
+    /// The `ExitInterface` default clears the point and reports none.
     fn get_exit_position(
         &self,
         _sim: &dyn SimView,
         _ctx: ModuleContext,
-        _exit_pos: &mut Coord3D,
+        exit_pos: &mut Coord3D,
     ) -> Bool {
+        *exit_pos = Coord3D::default();
         FALSE
     }
 }

@@ -193,3 +193,19 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 
 - **What happens:** `action` ends in `InGameUI::addFloatingText`, which needs fonts and a display and crashes headless.
 - **How the oracle handles it:** `TheGameLogic->setDrawIconUI(FALSE)` in `gen_pkt320_381_378_363_docks.cpp`.
+
+### A queue exit throws units it has already put on the ground
+
+- **Where:** `QueueProductionExitUpdate::exitObjectViaDoor`.
+- **What happens:** `creationInAir` stays set after the create point is dropped to the ground, so without `AllowAirborneCreation` a unit placed on the ground still gets the producer's velocity as a motive force and a pitch rate. A point below the ground also counts as "in the air".
+- **Guard:** `golden_pkt315_379_357_367_exits` compares the unit's whole physics state after each exit.
+
+### A stealthed supply center assumes the new unit can stealth
+
+- **Where:** `SupplyCenterProductionExitUpdate::exitObjectViaDoor` with `GrantTemporaryStealth`.
+- **What happens:** `newObj->getStealth()` is dereferenced without a null test. The constructor also leaves `m_rallyPoint` unset; it is zero only because pool memory is.
+- **How the oracle handles it:** only units with a `StealthUpdate` leave a stealthed center. The port grants nothing to a unit without one.
+
+### Observing orders and model bones without an AI or models
+
+- **How the oracle handles it:** `gen_pkt315_379_357_367_exits.cpp` registers `AIUpdateInterface` subclasses that override `aiDoCommand` to record the order, which also avoids the AI refusing it (a disabled unit is not `isMobile`). Bones come from a `DrawModule` swapped into the drawable's module array, so `getPristineBonePositions` and `convertBonePosToWorldPos` run unmodified.
