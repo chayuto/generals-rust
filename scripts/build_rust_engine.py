@@ -13,8 +13,10 @@ link line, so the linker never pulls the original member.
   python3 scripts/check_replays.py --check --expect-rust --binary <printed path>
 
 Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002),
-experience and veterancy (`ExperienceTracker.cpp`, PKT-003) and the first behavior
-module (`LifetimeUpdate.cpp`, PKT-339, through `scripts/gen_engine_sim.py`'s adapter).
+experience and veterancy (`ExperienceTracker.cpp`, PKT-003), money and energy
+(`Money.cpp`, `Energy.cpp`), the first behavior module (`LifetimeUpdate.cpp`, PKT-339,
+through `scripts/gen_engine_sim.py`'s adapter) and the sleepy-update heap (part of
+`GameLogic.cpp`, WP-7.1).
 `--mutate <swap>` builds a deliberately wrong variant to prove the replay check fails.
 
 The stock CRC does not cover money or energy. `--witness` builds two engines that
@@ -116,6 +118,24 @@ SWAPS = (
                 "void LifetimeUpdate::setLifetimeRange(",
                 "void LifetimeUpdate::crc(",
                 "// the other functions are in the included file above",
+            ),
+        ),
+    ),
+    Swap(
+        "sleepy",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/System/GameLogic.cpp",
+        (
+            (
+                "void GameLogic::eraseSleepyUpdate(",
+                "UpdateModulePtr GameLogic::peekSleepyUpdate() const",
+                '#include "zh_ffi_sleepy_heap.inc"',
+            ),
+            (
+                "\tif (u == m_curUpdateModule)",
+                "\tInt idx = u->friend_getIndexInLogic();",
+                "\tif (zh_sleepy_awaken_ignored(u == m_curUpdateModule, u->friend_getNextCallFrame(),\n"
+                "\t\t\tnow, whenToWakeUp))\n"
+                "\t\treturn;",
             ),
         ),
     ),

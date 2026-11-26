@@ -56,6 +56,14 @@ The other hits only choose include files, find the executable or user-data direc
 
 A small object normally spans at most two cells per axis, and its cell array has at least four slots. Float rounding of `(x - r)` and `(x + r)` can make the span three cells wide; with a four-slot array the C++ then writes past the end. `gen_partition_grid.cpp` tests each pending small fill before `update()` (`small_fill_overflows()`), discards a script that would overrun, and records the count as `small_overflow_dropped`. Any harness that places small objects on cell boundaries needs the same check.
 
+### The sleepy-update loop rebalances slot 0, not the module that ran
+
+- **Where:** `GameLogic.cpp`, the sleepy loop in `GameLogic::update()`: `u->friend_setNextCallFrame(now + sleepLen); rebalanceSleepyUpdate(0);`.
+- **What goes wrong:** `update()` can put another module in slot 0, by creating an object whose module runs in an earlier phase, or by waking one for the current frame. C++ still rebalances slot 0, so the module that ran keeps its old slot with a new, later priority and the heap order stays broken until something moves it. Later modules run in a different order than a repaired heap would give.
+- **How it was missed:** `gen_sleepy_heap_vectors.cpp` only woke other modules for `now + 1`, and the Rust port repaired the heap by rebalancing the module's own slot. 1,000 vectors passed.
+- **Guard:** `WP5_0_SleepyHeap_displaced.json` (the harness's second output) and `test_sleepy_heap_displaced_root_golden_vectors`. The six local replays never displace slot 0 (about 40 million updates, measured 2026-11-27), so a replay check cannot see this.
+- **Lesson for new harnesses:** inputs chosen to be "safe" for the reference are inputs the port is never held to.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault.

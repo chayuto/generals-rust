@@ -4,7 +4,7 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`219` implemented, `0` seeded skeletons, `244` unported)
-- **Golden Vector Oracles:** `66` JSON suites (`docs/golden_vectors/`)
+- **Golden Vector Oracles:** `67` JSON suites (`docs/golden_vectors/`)
 - **Golden Test Suites:** `65` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
@@ -256,6 +256,7 @@
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim_generated.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/lifetime_update.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/sleepy_heap.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/special_power_types.rs` | `implemented` |
@@ -333,6 +334,7 @@
 | `docs/golden_vectors/WP54_C.json` | 450 | no |
 | `docs/golden_vectors/WP55_FIRE.json` | 1050 | yes |
 | `docs/golden_vectors/WP5_0_SleepyHeap.json` | 1000 | no |
+| `docs/golden_vectors/WP5_0_SleepyHeap_displaced.json` | - | no |
 | `docs/golden_vectors/WP7_2_BigVfs.json` | 1000 | yes |
 | `docs/golden_vectors/WP7_2b_Compression.json` | 1000 | no |
 

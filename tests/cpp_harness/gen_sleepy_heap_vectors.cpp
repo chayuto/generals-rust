@@ -1,4 +1,7 @@
 // WP-5.0 / WP-7.1 C++ Golden Vector Generator for GameLogic::m_sleepyUpdates & UpdateModule scheduling.
+// Standalone. Build at -O0, -O2 and -O2 -fsanitize=address,undefined; outputs must be identical:
+//   clang++ -std=c++17 -O2 tests/cpp_harness/gen_sleepy_heap_vectors.cpp -o gen_heap
+//   ./gen_heap docs/golden_vectors/WP5_0_SleepyHeap.json docs/golden_vectors/WP5_0_SleepyHeap_displaced.json
 // Embeds verbatim heap & scheduler logic from GameLogic.cpp (3073-3359, 4062-4113) and UpdateModule.h/.cpp.
 
 #include <cstdint>
@@ -99,7 +102,11 @@ public:
     std::vector<UpdateModulePtr> m_sleepyUpdates;
     UpdateModulePtr m_curUpdateModule = nullptr;
 
+    // The engine's checks compile out of release builds; the displaced-root scenario needs that.
+    bool m_validate = true;
+
     void validateSleepyUpdate() const {
+        if (!m_validate) return;
         int sz = static_cast<int>(m_sleepyUpdates.size());
         if (sz == 0) return;
         for (int i = 0; i < sz; ++i) {
@@ -245,9 +252,110 @@ struct Op {
     UnsignedInt a2;
 };
 
+// Second output (argv[2]): update() hands slot 0 to another module, by waking it to the
+// current frame or registering a new one. GameLogic.cpp:4108-4109 then still sets the
+// updated module's frame and rebalances slot 0, not the slot that module moved to.
+static bool emit_displaced(const char* path) {
+    FILE* fp = std::fopen(path, "wb");
+    if (!fp) { std::perror(path); return false; }
+    std::fprintf(fp, "{\n  \"oracle\": \"GameLogic.cpp (4062-4113) with update() displacing the heap root\",\n  \"vectors\": [\n");
+
+    constexpr uint32_t SEEDS = 300u;
+    uint32_t total_displaced = 0;
+    for (uint32_t seed = 0; seed < SEEDS; ++seed) {
+        uint32_t rng = seed * 7919u + 13u;
+        HarnessLogic logic;
+        logic.m_validate = false;
+        const UnsignedInt first_frame = 1u + splitmix32(rng) % 40u;
+        logic.m_frame = first_frame;
+        const int live = 4 + static_cast<int>(splitmix32(rng) % 12u);
+        const int total = live + 4;  // the last four are registered during an update
+        std::vector<MockModule> mods(total);
+        for (int i = 0; i < total; ++i) {
+            mods[i].id = static_cast<UnsignedInt>(i);
+            mods[i].m_phase = static_cast<SleepyUpdatePhase>(splitmix32(rng) % 4u);
+        }
+        std::vector<UnsignedInt> frames;
+        for (int i = 0; i < live; ++i) {
+            frames.push_back(first_frame + splitmix32(rng) % 3u);
+            mods[i].friend_setNextCallFrame(frames[i]);
+            mods[i].m_inObjList = true;
+            logic.pushSleepyUpdate(&mods[i]);
+        }
+
+        std::vector<Int> steps;  // run id, action, target, sleep; run id -1 starts a new frame
+        uint32_t layout_crc = 0;
+        uint32_t displaced = 0;
+        int next_spare = live;
+        for (int frame = 0; frame < 3; ++frame) {
+            if (frame > 0) {
+                ++logic.m_frame;
+                steps.insert(steps.end(), {-1, 0, 0, 0});
+            }
+            const UnsignedInt now = logic.m_frame;
+            for (int guard = 0; guard < 40; ++guard) {
+                UpdateModulePtr u = logic.peekSleepyUpdate();
+                if (u->friend_getNextCallFrame() > now) break;
+                logic.m_curUpdateModule = u;
+
+                Int action = static_cast<Int>(splitmix32(rng) % 3u);
+                Int target = -1;
+                if (action == 1) {  // wake another registered module for this frame
+                    Int pick = static_cast<Int>(splitmix32(rng) % static_cast<uint32_t>(next_spare));
+                    if (&mods[pick] != u) {
+                        target = pick;
+                        logic.friend_awakenUpdateModule(&mods[pick], now);
+                    } else {
+                        action = 0;
+                    }
+                } else if (action == 2) {  // an object created inside update()
+                    if (next_spare < total) {
+                        target = next_spare++;
+                        mods[target].friend_setNextCallFrame(now);
+                        mods[target].m_inObjList = true;
+                        logic.pushSleepyUpdate(&mods[target]);
+                    } else {
+                        action = 0;
+                    }
+                }
+                const Int sleep = static_cast<Int>(1u + splitmix32(rng) % 4u);
+                logic.m_curUpdateModule = nullptr;
+                if (logic.m_sleepyUpdates[0] != u) ++displaced;
+                steps.insert(steps.end(), {static_cast<Int>(u->id), action, target, sleep});
+
+                u->friend_setNextCallFrame(now + static_cast<UnsignedInt>(sleep));
+                logic.rebalanceSleepyUpdate(0);
+                for (UpdateModulePtr m : logic.m_sleepyUpdates) {
+                    layout_crc = rot_crc(layout_crc, m->id);
+                    layout_crc = rot_crc(layout_crc, m->friend_getPriority());
+                }
+            }
+        }
+        total_displaced += displaced;
+
+        std::fprintf(fp, "    {\"seed\":%u,\"first_frame\":%u,\"phases\":[", seed, first_frame);
+        for (int i = 0; i < total; ++i)
+            std::fprintf(fp, "%d%s", static_cast<Int>(mods[i].m_phase), (i + 1 < total) ? "," : "");
+        std::fprintf(fp, "],\"frames\":[");
+        for (size_t i = 0; i < frames.size(); ++i)
+            std::fprintf(fp, "%u%s", frames[i], (i + 1 < frames.size()) ? "," : "");
+        std::fprintf(fp, "],\"steps\":[");
+        for (size_t i = 0; i < steps.size(); ++i)
+            std::fprintf(fp, "%d%s", steps[i], (i + 1 < steps.size()) ? "," : "");
+        std::fprintf(fp, "],\"displaced\":%u,\"layout_crc\":%u,\"final_heap\":[", displaced, layout_crc);
+        for (size_t i = 0; i < logic.m_sleepyUpdates.size(); ++i)
+            std::fprintf(fp, "%u%s", logic.m_sleepyUpdates[i]->id, (i + 1 < logic.m_sleepyUpdates.size()) ? "," : "");
+        std::fprintf(fp, "]}%s\n", (seed + 1u < SEEDS) ? "," : "");
+    }
+    std::fprintf(fp, "  ]\n}\n");
+    std::fclose(fp);
+    std::fprintf(stderr, "Generated %u displaced-root vectors (%u displacements) to %s\n", SEEDS, total_displaced, path);
+    return total_displaced > 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "Usage: %s <out.json>\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s <out.json> [displaced_root.json]\n", argv[0]);
         return 1;
     }
 
@@ -447,5 +555,7 @@ int main(int argc, char** argv) {
     std::fprintf(fp, "  ]\n}\n");
     std::fclose(fp);
     std::fprintf(stderr, "Generated 1000 WP-5.0/WP-7.1 SleepyUpdateHeap vectors to %s\n", argv[1]);
+    if (argc > 2 && !emit_displaced(argv[2]))
+        return 1;
     return 0;
 }

@@ -17,6 +17,8 @@ use zh_logic::scheduler::{
 };
 
 const WP5_0_JSON: &str = include_str!("../../../docs/golden_vectors/WP5_0_SleepyHeap.json");
+const DISPLACED_JSON: &str =
+    include_str!("../../../docs/golden_vectors/WP5_0_SleepyHeap_displaced.json");
 
 #[inline]
 fn rot_crc(crc: u32, word: u32) -> u32 {
@@ -594,7 +596,8 @@ fn test_sleepy_heap_root_displacement_and_erase_for_owner() {
     heap.register_update_module(&mut modules, m_other, now);
 
     // m_norm (frame 5, Normal) is at root; during its update, m_init (Initial) is awakened to frame 5,
-    // displacing m_norm from index 0. finish_due_update_at_root must reschedule m_norm, not m_init!
+    // displacing m_norm from index 0. finish_due_update_at_root must reschedule m_norm, not m_init,
+    // and rebalance slot 0 as C++ does (see the displaced-root vectors below).
     assert_eq!(heap.peek_due(&modules, now), Some(m_norm));
     heap.set_cur_update_module(Some(m_norm));
     assert!(heap.awaken_module(&mut modules, m_init, true, now, now));
@@ -690,4 +693,94 @@ fn test_module_arena_reentered_error_and_deferred_ops() {
 
     let _ = arena.free(slot);
     assert_eq!(arena.take_payload(slot).err(), Some(TakeError::Dead));
+}
+
+/// `update()` takes slot 0 away from its own module, by waking another one to the
+/// current frame or by registering a new one. C++ then rebalances slot 0 all the
+/// same (`GameLogic.cpp:4108-4109`), and the replayed layout must match that.
+#[test]
+fn test_sleepy_heap_displaced_root_golden_vectors() {
+    let lines = extract_vector_lines(DISPLACED_JSON);
+    assert_eq!(lines.len(), 300);
+    let mut nk = NameKeyGenerator::new();
+    nk.init();
+    let tag_key = nk.name_to_key("MockUpdate");
+    let mut displaced_total = 0;
+
+    for line in lines {
+        let seed = get_u32(line, "seed").expect("seed");
+        let mut now = get_u32(line, "first_frame").expect("first_frame");
+        let phases = get_i32_vec(line, "phases").expect("phases");
+        let frames = get_i32_vec(line, "frames").expect("frames");
+        let steps = get_i32_vec(line, "steps").expect("steps");
+
+        let mut objects: ObjectArena<()> = ObjectArena::new();
+        let mut modules: ModuleArena<u32> = ModuleArena::new();
+        let slots: Vec<ModuleSlot> = (0..phases.len())
+            .map(|i| {
+                let oid = ObjectId(i as i32 + 1);
+                let oslot = objects.spawn(oid, (), false);
+                let phase = SleepyUpdatePhase::from_bits(phases[i] as u32);
+                let meta = ModuleMeta::new(
+                    oslot,
+                    oid,
+                    tag_key,
+                    ModuleDataId(i as u32 + 1),
+                    FacetMask::UPDATE,
+                    phase,
+                );
+                modules.allocate(meta, i as u32)
+            })
+            .collect();
+
+        let mut heap: SleepyUpdateHeap<ModuleSlot> = SleepyUpdateHeap::new();
+        for (i, &frame) in frames.iter().enumerate() {
+            modules
+                .schedule_mut(slots[i])
+                .set_next_call_frame(frame as u32);
+            heap.push(&mut modules, slots[i]);
+        }
+
+        let mut layout_crc = 0;
+        let mut displaced = 0;
+        for (step_index, step) in steps.chunks_exact(4).enumerate() {
+            let (run, action, target, sleep) = (step[0], step[1], step[2], step[3]);
+            if run < 0 {
+                now += 1;
+                continue;
+            }
+            let u = heap.peek_due(&modules, now).expect("a module is due");
+            assert_eq!(
+                u, slots[run as usize],
+                "seed {seed} step {step_index}: wrong module runs"
+            );
+            heap.set_cur_update_module(Some(u));
+            match action {
+                1 => {
+                    heap.awaken_module(&mut modules, slots[target as usize], true, now, now);
+                }
+                2 => heap.register_update_module(&mut modules, slots[target as usize], now),
+                _ => {}
+            }
+            if heap.peek() != Some(u) {
+                displaced += 1;
+            }
+            heap.finish_due_update(&mut modules, u, now, UpdateSleepTime(sleep as u32));
+            for &h in heap.as_slice() {
+                layout_crc = rot_crc(layout_crc, *modules.payload(h).expect("payload"));
+                layout_crc = rot_crc(layout_crc, modules.schedule(h).priority());
+            }
+        }
+
+        let final_heap: Vec<i32> = heap
+            .as_slice()
+            .iter()
+            .map(|&h| *modules.payload(h).expect("payload") as i32)
+            .collect();
+        assert_eq!(displaced, get_u32(line, "displaced").unwrap(), "seed {seed}");
+        assert_eq!(final_heap, get_i32_vec(line, "final_heap").unwrap(), "seed {seed}");
+        assert_eq!(layout_crc, get_u32(line, "layout_crc").unwrap(), "seed {seed}");
+        displaced_total += displaced;
+    }
+    assert!(displaced_total > 500, "the vectors no longer displace the root");
 }
