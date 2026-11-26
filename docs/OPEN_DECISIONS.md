@@ -27,6 +27,8 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `ProneUpdate` skips the model condition for an object without a drawable, where C++ would crash.
 - `PKT-307`, `PKT-343` and `PKT-364` are header-only manifest entries for modules ported under another packet (`PKT-308`, `PKT-281`, `PKT-233`). `PORT_MAP.md` still lists them as unported.
 - `WeaponTemplate::fireWeaponTemplate` is unported. `fire_weapon_template` only records the shot, so range checks, projectiles, damage and the two logic PRNG draws for a weapon with `ScatterRadius` or infantry inaccuracy are missing. `golden_wp55_fire` replaces the C++ function the same way, so no vector covers it.
+- `player_relationship` ignores undetected defectors, which C++ `Object::getRelationship` treats as neutral when asking and as allies when asked about. `WeaponBonusUpdate` applies the rule itself; other callers do not.
+- `FiringTracker` is not attached as a module, so the sleepy update heap holds one entry fewer per armed object than in C++. `golden_pkt388` adds a sleeping stand-in to compare heap layouts.
 - `Weapon::onWeaponBonusChange` is unported. C++ retimes the weapons in a set when bonus flags change, which can draw from the logic PRNG.
 - `set_weapon_set_flag` does not rebuild the weapon set, and spawn picks the set with empty flags. C++ `updateWeaponSet` uses the object's flags and runs again on every change.
 - A weapon that sits in a weapon set has to be fired on a copy and written back. No production code does this yet.
@@ -45,4 +47,3 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly`.
 - `PKT-327 FireSpreadUpdate`, `PKT-330 FlammableUpdate`: they call each other (`tryToIgnite`, `wouldIgnite`, `startFireSpreading`), and no facet carries those calls.
 - `PKT-372 SpyVisionUpdate`: the player vision-spied state (`setUnitsVisionSpied`).
-- `PKT-388 WeaponBonusUpdate`: was waiting on the partition scan order, which is now ported. Ready to retry.

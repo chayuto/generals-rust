@@ -12,6 +12,7 @@ pub mod prone_update;
 pub mod radius_decal_update;
 pub mod smart_bomb_target_homing_update;
 pub mod special_power_update_module;
+pub mod weapon_bonus_update;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;
@@ -130,5 +131,15 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         height_die_update::parse_height_die_update_data,
         height_die_update::create_height_die_update,
+    );
+    reg.register_module(
+        nk,
+        "WeaponBonusUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        weapon_bonus_update::parse_weapon_bonus_update_data,
+        weapon_bonus_update::create_weapon_bonus_update,
     );
 }

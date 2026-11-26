@@ -106,7 +106,8 @@ impl HelperFacet for TempWeaponBonusHelper {
         }
         sim.set_weapon_bonus_condition(ctx.owner_slot, bonus_type);
         self.current_bonus = target_raw;
-        self.frame_to_remove = sim.frame().saturating_add(duration);
-        sim.set_wake_frame(ctx.mod_slot, UpdateSleepTime(duration.max(1)));
+        self.frame_to_remove = sim.frame().wrapping_add(duration);
+        // A zero duration wakes the helper on this frame, not the next.
+        sim.set_wake_frame(ctx.mod_slot, UpdateSleepTime(duration));
     }
 }
