@@ -2,9 +2,11 @@
 
 pub mod base_renerate_update;
 pub mod deletion_update;
+pub mod dynamic_geometry_info_update;
 pub mod float_update;
 pub mod fire_weapon_update;
 pub mod lifetime_update;
+pub mod projectile_stream_update;
 pub mod prone_update;
 pub mod smart_bomb_target_homing_update;
 
@@ -85,5 +87,25 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         smart_bomb_target_homing_update::parse_smart_bomb_target_homing_update_data,
         smart_bomb_target_homing_update::create_smart_bomb_target_homing_update,
+    );
+    reg.register_module(
+        nk,
+        "DynamicGeometryInfoUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        dynamic_geometry_info_update::parse_dynamic_geometry_info_update_data,
+        dynamic_geometry_info_update::create_dynamic_geometry_info_update,
+    );
+    reg.register_module(
+        nk,
+        "ProjectileStreamUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        projectile_stream_update::parse_projectile_stream_update_data,
+        projectile_stream_update::create_projectile_stream_update,
     );
 }
