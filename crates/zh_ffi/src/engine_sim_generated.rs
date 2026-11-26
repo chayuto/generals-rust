@@ -19,7 +19,7 @@ use zh_logic::economy::MAX_PLAYER_COUNT;
 use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use zh_logic::modules::module_factory::ModuleParseContext;
 use zh_logic::modules::update::deletion_update::DeletionUpdate;
-use zh_logic::modules::update::physics_behavior::{self, PhysicsState};
+use zh_logic::modules::update::physics_update::{self, PhysicsState};
 use zh_logic::modules::update::spy_vision_update::SpyVisionUpdate;
 use zh_logic::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
@@ -67,7 +67,7 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{
-    div_safe_f32, gm_cosf, gm_sinf, real_to_int_ceil, real_to_int_floor, Coord3D, Matrix3D,
+    div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D, Matrix3D,
     Region3D,
 };
 use zh_common::random_value::PrngState;

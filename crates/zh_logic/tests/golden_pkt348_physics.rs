@@ -17,7 +17,7 @@ use zh_logic::modules::module::{
     AiUpdateFacet, BehaviorModule, ModuleData, ModuleType, ProjectileFacet,
 };
 use zh_logic::modules::module_factory::ModuleParseContext;
-use zh_logic::modules::update::physics_behavior::{self as pb, physics, physics_mut};
+use zh_logic::modules::update::physics_update::{self as pb, physics, physics_mut};
 use zh_logic::object::thing::ThingTerrainAccess;
 use zh_logic::object::weapon::WeaponTemplate;
 use zh_logic::pathfinder::pathfind_constants::PathfindLayerEnum;

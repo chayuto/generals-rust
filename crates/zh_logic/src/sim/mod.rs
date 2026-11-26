@@ -22,7 +22,7 @@ use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::update::deletion_update::DeletionUpdate;
-use crate::modules::update::physics_behavior::{self, PhysicsState};
+use crate::modules::update::physics_update::{self, PhysicsState};
 use crate::modules::update::spy_vision_update::SpyVisionUpdate;
 use crate::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
@@ -4134,7 +4134,7 @@ impl SimView for SimContext {
     }
 
     fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId {
-        physics_behavior::physics(self, owner).map_or(ObjectId::INVALID, |p| p.last_collidee)
+        physics_update::physics(self, owner).map_or(ObjectId::INVALID, |p| p.last_collidee)
     }
 
     fn object_has_drawable(&self, owner: ObjectSlot) -> Bool {
@@ -4267,15 +4267,15 @@ impl SimView for SimContext {
     }
 
     fn physics_velocity(&self, owner: ObjectSlot) -> Coord3D {
-        physics_behavior::physics(self, owner).map_or_else(Coord3D::default, |p| p.vel)
+        physics_update::physics(self, owner).map_or_else(Coord3D::default, |p| p.vel)
     }
 
     fn physics_mass(&self, owner: ObjectSlot) -> Real {
-        physics_behavior::get_mass(self, owner)
+        physics_update::get_mass(self, owner)
     }
 
     fn physics_center_of_mass_offset(&self, owner: ObjectSlot) -> Real {
-        physics_behavior::physics(self, owner).map_or(0.0, |p| p.data.center_of_mass_offset)
+        physics_update::physics(self, owner).map_or(0.0, |p| p.data.center_of_mass_offset)
     }
 
     fn object_crushed_ends(&self, owner: ObjectSlot) -> (Bool, Bool) {
@@ -6498,8 +6498,8 @@ impl SimApi for SimContext {
             }
             // `PhysicsBehavior` keeps its members on the object, so it also answers
             // from inside its own update (the landing collision).
-            if physics_behavior::physics(self, owner).is_some_and(|p| p.mod_slot == ms) {
-                physics_behavior::on_collide(self, owner, other, loc, normal);
+            if physics_update::physics(self, owner).is_some_and(|p| p.mod_slot == ms) {
+                physics_update::on_collide(self, owner, other, loc, normal);
                 continue;
             }
             let _ = self.dispatch_module(ms, |m, sim, ctx| {
@@ -7234,17 +7234,17 @@ impl SimApi for SimContext {
     }
 
     fn apply_fling_physics(&mut self, owner: ObjectSlot, force: &Coord3D, orientation: Real) {
-        if physics_behavior::physics(self, owner).is_none() {
+        if physics_update::physics(self, owner).is_none() {
             return;
         }
         self.set_physics_allow_to_fall(owner, TRUE);
-        physics_behavior::apply_force(self, owner, force);
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+        physics_update::apply_force(self, owner, force);
+        if let Some(p) = physics_update::physics_mut(self, owner) {
             p.extra_bounciness = -1.0;
             p.extra_friction = -3.0_f32 * (1.0_f32 / 30.0_f32);
-            p.set_flag(physics_behavior::ALLOW_BOUNCE, TRUE);
+            p.set_flag(physics_update::ALLOW_BOUNCE, TRUE);
         }
-        physics_behavior::set_angles(self, owner, orientation, 0.0, 0.0);
+        physics_update::set_angles(self, owner, orientation, 0.0, 0.0);
     }
 
     fn notify_slaver_die(&mut self, owner: ObjectSlot) {
@@ -7380,54 +7380,54 @@ impl SimApi for SimContext {
     }
 
     fn set_physics_allow_to_fall(&mut self, owner: ObjectSlot, allow: Bool) {
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
-            p.set_flag(physics_behavior::ALLOW_TO_FALL, allow);
+        if let Some(p) = physics_update::physics_mut(self, owner) {
+            p.set_flag(physics_update::ALLOW_TO_FALL, allow);
         }
     }
 
     fn physics_clear_acceleration(&mut self, owner: ObjectSlot) {
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+        if let Some(p) = physics_update::physics_mut(self, owner) {
             p.accel = Coord3D::default();
         }
     }
 
     fn physics_scrub_velocity_2d(&mut self, owner: ObjectSlot, desired_velocity: Real) {
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+        if let Some(p) = physics_update::physics_mut(self, owner) {
             p.scrub_velocity_2d(desired_velocity);
         }
     }
 
     fn physics_apply_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
-        physics_behavior::apply_force(self, owner, force);
+        physics_update::apply_force(self, owner, force);
     }
 
     fn physics_apply_shock(&mut self, owner: ObjectSlot, force: &Coord3D) {
-        physics_behavior::apply_shock(self, owner, force);
+        physics_update::apply_shock(self, owner, force);
     }
 
     fn physics_apply_motive_force(&mut self, owner: ObjectSlot, force: &Coord3D) {
-        physics_behavior::apply_motive_force(self, owner, force);
+        physics_update::apply_motive_force(self, owner, force);
     }
 
     fn physics_apply_random_rotation(&mut self, owner: ObjectSlot) {
-        physics_behavior::apply_random_rotation(self, owner);
+        physics_update::apply_random_rotation(self, owner);
     }
 
     fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real) {
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+        if let Some(p) = physics_update::physics_mut(self, owner) {
             p.set_roll_rate(rate);
         }
     }
 
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
+        if let Some(p) = physics_update::physics_mut(self, owner) {
             p.set_pitch_rate(rate);
         }
     }
 
     fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool) {
-        if let Some(p) = physics_behavior::physics_mut(self, owner) {
-            p.set_flag(physics_behavior::IS_IN_FREEFALL, in_free_fall);
+        if let Some(p) = physics_update::physics_mut(self, owner) {
+            p.set_flag(physics_update::IS_IN_FREEFALL, in_free_fall);
         }
     }
 

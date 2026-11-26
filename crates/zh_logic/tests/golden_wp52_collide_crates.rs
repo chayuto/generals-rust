@@ -29,7 +29,7 @@ use zh_logic::object::weapon_set::WeaponSlotType;
 use zh_logic::rules::combat_types::{ArmorSetType, DamageType, DeathType, WeaponSetType};
 use zh_logic::rules::object_status_types::ObjectStatusType;
 use zh_logic::scheduler::SleepyUpdatePhase;
-use zh_logic::modules::update::physics_behavior::physics_mut;
+use zh_logic::modules::update::physics_update::physics_mut;
 use zh_logic::sim::{armor_set_flags_from_u8, MockSimApi, SimApi, SimView};
 
 const STATIC_OBJS_INI: &str = "\

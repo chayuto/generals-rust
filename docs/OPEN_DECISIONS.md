@@ -4,7 +4,7 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 
 ## Decisions
 
-1. **Where dock state lives.** The dock updates are unported. `setDockOpen` / `setDockCrippled` are recorded in `SimWorld::dock_closed` and `SimWorld::dock_crippled` as stand-ins (used by `PKT-292`, `PKT-297`). Options: a dock facet, or a side table.
+1. **Where dock state lives. Settled 2026-11-27 (follow the C++):** in the dock module, reached through `DockFacet`. The `dock_closed` / `dock_crippled` stand-ins are gone.
 2. **Default `XferSave` version.** The reference library is built with `RETAIL_COMPATIBLE_XFER_SAVE=1`, so `PoisonedBehavior` saves version 2. With `retail-xfer-save` off, the crate writes version 3. `golden_wp53_c1` strips the appended source id and compares it separately; `FlammableUpdate` (version 1 against 2) is handled the same way in `golden_pkt330_327_fire`. Should default features match 0 or 1?
 3. **AI random-number draws.** `AIUpdateInterface` is unported. Its draws are imitated in `sim/mod.rs` (`ai_construct`, `ai_init_state_machine`, `ai_idle`). The real port must take them over.
 4. **Shared and redirected passenger lists. Decided 2026-11-26 (owner: do what a faithful port does).** The contain getters now take `(sim, ctx)`, as the C++ virtuals reach the tunnel tracker and the rider's contain module. `PKT-300` and `PKT-264` are ported; `PKT-284` is unblocked.
@@ -27,7 +27,6 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - An unknown `PulseFX` name stays set in Rust but becomes null in C++.
 - `capture_object` / `set_object_team` leave out the rest of `Object::onCapture`: `cancelAllTasks` on a dozer, clearing the `SCRIPT_UNSELLABLE` status and a skirmish AI selling a captured faction building.
 - With `retail-crc`, `WeaponTemplate::get_delay_between_shots` returns the maximum when the minimum exceeds it; the retail PRNG helper draws a value there. The default build matches.
-- `physics_apply_force` and `physics_apply_motive_force` are stand-ins: they add force over mass to velocity. C++ adds to acceleration, keeps only the lateral part while motive, and ignores NaN.
 - `FloatUpdate` over dry ground: C++ writes an uninitialised `waterZ` to the object, so there is no value to match. The port writes 0.
 - `ProneUpdate` skips the model condition for an object without a drawable, where C++ would crash.
 - `PKT-307`, `PKT-343` and `PKT-364` are header-only manifest entries for modules ported under another packet (`PKT-308`, `PKT-281`, `PKT-233`). `PORT_MAP.md` still lists them as unported.
@@ -59,10 +58,17 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `FlammableUpdate` plays no burning sound (client audio).
 - `FlammableUpdate` takes its own aflame damage while executing. `attempt_damage_watching` replays that one `onDamage`; further damage to the same object from inside that call chain would not reach the module.
 - `set_wake_frame` saturates where C++ wraps, and the scheduler does not read a sleep above `0x7fffffff` as negative, as the signed `UpdateSleepTime` does. No fire-module INI duration reaches either.
+- Docks: no models are loaded, so every dock behaves as boneless. Enter, dock, exit and waiting positions differ from retail, and they are saved. Loading a retail save re-zeroes the fixed waiting positions.
+- `RailedTransportDockUpdate` and `PrisonDockUpdate` are unported: `set_dock_open` / `set_dock_crippled` do nothing on them and they read as open.
+- No supply truck AI is ported, so nothing drives a dock. An AI port must implement `supply_truck()`. The warehouse's `getBoxesStored` / `setCashValue` have no `SimApi` route yet. `player_money_earned` and `stealth_frames_granted` are stand-ins (no score keeper). A dock whose module is executing is not found by `dock_slot`.
+- `find_position_around` lacks the cliff-cell and path-exists checks.
+- `PhysicsBehavior`: `processCollision` always answers FALSE and the ignored obstacle defaults to invalid (no AI); `carrier_deck_height` is always 0; a contain module's own mass omits its passengers while it executes; `MinFallHeightForDamage` is converted with the gravity at object construction, not at INI parse; no bounce sound or `transferObjectName`. Not covered by vectors: a real AI or projectile update, non-ground layer heights, crash-weapon effects, frames above 2^24, ordering between modules.
+- `object_can_crush` differs from C++ `canCrushOrSquish`: it requires a level above 1 and has no ally or unmanned check. Found while porting physics, not fixed.
+- `fire_weapon_template` records a shot even when the C++ temporary weapon would refuse (frames above 2^24).
 
 ## Waiting on unported code
 
-- `PKT-266 CountermeasuresBehavior`: `PhysicsBehavior` (`getVelocityMagnitude`, `transferVelocityTo`, a real `applyMotiveForce`) and the `Vector2` normalise and rotate math. Its constructor also leaves `m_reloadFrame` unset.
+- `PKT-266 CountermeasuresBehavior`: the `Vector2` normalise and rotate math (`PhysicsBehavior` is now ported and exposes what it needs). Its constructor also leaves `m_reloadFrame` unset.
 - `PKT-267 DumbProjectileBehavior`: `Weapon::positionProjectileForLaunch`, `PartitionManager::estimateTerrainExtremesAlongLine`, `WeaponTemplate::shouldProjectileCollideWith` and `WeaponStore::handleProjectileDetonation`.
 - `PKT-305 AutoDepositUpdate`: a hook for `Player::becomingTeamMember`, a per-player `ScoreKeeper`, construction percent on objects, and a home for the upgrade template that `getUpgradedSupplyBoost` caches across all instances.
 - `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly`.

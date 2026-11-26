@@ -8,17 +8,15 @@ or weapon code outside modules). The replays do not match their recordings
 (`BASELINE.md`), so they are a sample of play, not the original games.
 
 - Classes created: 104; in every replay: 50.
-- Classes with a ported packet: 65 of 104; in every replay: 33 of 50.
-- Instances with a ported packet: 11142 of 14355.
+- Classes with a ported packet: 69 of 104; in every replay: 37 of 50.
+- Instances with a ported packet: 11786 of 14355.
 
 ## Not ported
 
 | Module | Packet | Replays | Instances | C++ bytes in packet |
 |---|---|---|---|---|
 | `StealthUpdate` | `PKT-374` | 6 | 610 | 46745 |
-| `PhysicsBehavior` | `PKT-348` | 6 | 379 | 77122 |
 | `ProductionUpdate` | `PKT-354` | 6 | 347 | 60927 |
-| `SupplyWarehouseDockUpdate` | `PKT-381` | 6 | 224 | 11137 |
 | `AIUpdateInterface` | `PKT-301` | 6 | 178 | 221431 |
 | `AutoDepositUpdate` | `PKT-305` | 6 | 156 | 15532 |
 | `DefaultProductionExitUpdate` | `PKT-315` | 6 | 138 | 12787 |
@@ -27,9 +25,7 @@ or weapon code outside modules). The replays do not match their recordings
 | `StealthDetectorUpdate` | `PKT-373` | 6 | 119 | 21447 |
 | `CommandButtonHuntUpdate` | `PKT-314` | 6 | 108 | 19021 |
 | `DozerAIUpdate` | `PKT-321` | 6 | 45 | 105594 |
-| `RepairDockUpdate` | `PKT-363` | 6 | 23 | 9941 |
 | `SpawnBehavior` | `PKT-296` | 6 | 23 | 46341 |
-| `SupplyCenterDockUpdate` | `PKT-378` | 6 | 18 | 11395 |
 | `SupplyCenterProductionExitUpdate` | `PKT-379` | 6 | 18 | 13279 |
 | `QueueProductionExitUpdate` | `PKT-357` | 6 | 11 | 16553 |
 | `MinefieldBehavior` | `PKT-279` | 5 | 53 | 29795 |

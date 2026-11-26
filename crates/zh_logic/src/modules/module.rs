@@ -1759,7 +1759,7 @@ pub trait AiUpdateFacet {
 }
 
 /// Marks a physics module (`PhysicsBehavior`). Its members are on the object
-/// (`ObjectRecord::physics`); call the functions in `modules::update::physics_behavior`.
+/// (`ObjectRecord::physics`); call the functions in `modules::update::physics_update`.
 pub trait PhysicsFacet {}
 
 /// `DockUpdateInterface`. A dock keeps its state in the module; the provided methods

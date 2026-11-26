@@ -47,7 +47,7 @@ use zh_logic::rules::disabled_types::DisabledType;
 use zh_logic::rules::model_state::ModelConditionFlagType;
 use zh_logic::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
 use zh_logic::scheduler::{SleepyUpdatePhase, UPDATE_SLEEP_FOREVER};
-use zh_logic::modules::update::physics_behavior::{physics, ALLOW_TO_FALL};
+use zh_logic::modules::update::physics_update::{physics, ALLOW_TO_FALL};
 use zh_logic::sim::{RulesRegistry, SimApi, SimContext, SimView, SimWorld};
 
 // -----------------------------------------------------------------------------
