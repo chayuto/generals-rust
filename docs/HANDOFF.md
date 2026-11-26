@@ -43,6 +43,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Next
 
+- `AI_PORT_PLAN.md` slices the unit AI port; see `OPEN_DECISIONS.md` item 11 before going past S0. Packet counts overstate completeness (see the known gaps).
 - `MODULE_USAGE.md` (from `python3 scripts/module_census.py`) ranks the unported behavior modules by how much the replays create them. Pick from the top.
 - **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game). The one-module trial is done and its measured cost is recorded there. It decides whether more module ports are the best use of effort.
 - Cheap further swaps: the byte CRC (inline in a header, so it forces a large rebuild) and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
