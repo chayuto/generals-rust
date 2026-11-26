@@ -15,7 +15,7 @@ use zh_logic::combat::damage_fx::DamageFXStore;
 use zh_logic::combat::locomotor::{Locomotor, LocomotorStore};
 use zh_logic::combat::locomotor_set::LocomotorSetType;
 use zh_logic::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
-use zh_logic::economy::score_keeper::ScoreKeeper;
+use zh_logic::economy::score_keeper::{ScoreKeeper, ScoreObjectView, ScoreTemplateDesc};
 use zh_logic::economy::MAX_PLAYER_COUNT;
 use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use zh_logic::modules::module_factory::ModuleParseContext;
@@ -32,6 +32,8 @@ use zh_logic::modules::module::AiUpdateFacet;
 use zh_logic::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use zh_logic::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
 use zh_logic::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
+use zh_logic::modules::module::SpawnBehaviorFacet;
+use zh_logic::modules::update::prone_update::ProneUpdate;
 use zh_logic::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use zh_logic::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
 use zh_logic::object::thing_factory::ThingFactory;
@@ -40,7 +42,8 @@ use zh_logic::object::thing_template::{
 };
 use zh_logic::object::weapon::WeaponStore;
 use zh_logic::object::weapon_set::{
-    WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType, WEAPONSLOT_COUNT,
+    CanAttackResult, WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType,
+    WEAPONSLOT_COUNT,
 };
 use zh_logic::pathfinder::pathfind_cell::CellType as PathfindCellType;
 use zh_logic::pathfinder::pathfind_constants::PathfindLayerEnum;
@@ -520,8 +523,26 @@ impl SimView for EngineSim<'_> {
     fn contain_is_rider_change(&self, owner: ObjectSlot) -> Bool {
         not_wired("contain_is_rider_change")
     }
-    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool> {
-        not_wired("spawn_all_slaves_stealthed")
+    fn thing_template_exists(&self, name: &str) -> Bool {
+        not_wired("thing_template_exists")
+    }
+    fn spawn_closest_slave(&self, owner: ObjectSlot, pos: &Coord3D) -> Option<Option<ObjectSlot>> {
+        not_wired("spawn_closest_slave")
+    }
+    fn contain_closest_rider(&self, owner: ObjectSlot, pos: &Coord3D) -> Option<Option<ObjectSlot>> {
+        not_wired("contain_closest_rider")
+    }
+    fn slaved_is_self_tasking(&self, owner: ObjectSlot) -> Bool {
+        not_wired("slaved_is_self_tasking")
+    }
+    fn ai_path_destination(&self, owner: ObjectSlot) -> Option<Coord3D> {
+        not_wired("ai_path_destination")
+    }
+    fn able_to_attack_specific_object( &self, owner: ObjectSlot, attack_type: UnsignedInt, target: ObjectSlot, cmd_source: CommandSourceType, ) -> CanAttackResult {
+        not_wired("able_to_attack_specific_object")
+    }
+    fn able_to_use_weapon_against_target( &self, owner: ObjectSlot, attack_type: UnsignedInt, victim: Option<ObjectSlot>, pos: &Coord3D, cmd_source: CommandSourceType, ) -> CanAttackResult {
+        not_wired("able_to_use_weapon_against_target")
     }
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
         not_wired("ai_last_command_source")
@@ -1140,6 +1161,48 @@ impl SimApi for EngineSim<'_> {
     }
     fn spawn_reveal_slaves(&mut self, owner: ObjectSlot) {
         not_wired("spawn_reveal_slaves")
+    }
+    fn spawn_all_slaves_stealthed(&mut self, owner: ObjectSlot) -> Option<Bool> {
+        not_wired("spawn_all_slaves_stealthed")
+    }
+    fn stealth_allowed_to_stealth(&mut self, owner: ObjectSlot) -> Bool {
+        not_wired("stealth_allowed_to_stealth")
+    }
+    fn spawn_give_slaves_stealth_upgrade(&mut self, owner: ObjectSlot, grant_stealth: Bool) {
+        not_wired("spawn_give_slaves_stealth_upgrade")
+    }
+    fn new_object_from_template(&mut self, name: &str, team: TeamId) -> Option<ObjectSlot> {
+        not_wired("new_object_from_template")
+    }
+    fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        not_wired("on_unit_created")
+    }
+    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
+        not_wired("reserve_exit_door")
+    }
+    fn exit_object_by_budding( &mut self, owner: ObjectSlot, new_obj: ObjectSlot, bud_host: Option<ObjectSlot>, ) {
+        not_wired("exit_object_by_budding")
+    }
+    fn slaved_on_enslave(&mut self, slave: ObjectSlot, slaver: ObjectSlot) {
+        not_wired("slaved_on_enslave")
+    }
+    fn slaved_on_slaver_damage(&mut self, slave: ObjectSlot, dmg: &DamageInfo) {
+        not_wired("slaved_on_slaver_damage")
+    }
+    fn set_initial_health(&mut self, owner: ObjectSlot, initial_percent: Int) {
+        not_wired("set_initial_health")
+    }
+    fn ai_force_attack_object( &mut self, owner: ObjectSlot, victim: ObjectSlot, max_shots_to_fire: Int, cmd_source: CommandSourceType, ) {
+        not_wired("ai_force_attack_object")
+    }
+    fn ai_attack_position( &mut self, owner: ObjectSlot, pos: &Coord3D, max_shots_to_fire: Int, cmd_source: CommandSourceType, ) {
+        not_wired("ai_attack_position")
+    }
+    fn ai_go_prone(&mut self, owner: ObjectSlot, dmg: &DamageInfo, cmd_source: CommandSourceType) {
+        not_wired("ai_go_prone")
+    }
+    fn set_locomotor_use_precise_z_pos(&mut self, owner: ObjectSlot, precise: Bool) {
+        not_wired("set_locomotor_use_precise_z_pos")
     }
     fn stealth_disguise_as_object(&mut self, owner: ObjectSlot, target: Option<ObjectSlot>) {
         not_wired("stealth_disguise_as_object")

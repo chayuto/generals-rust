@@ -5,6 +5,7 @@ pub mod base_renerate_update;
 pub mod assisted_targeting_update;
 pub mod auto_find_healing_update;
 pub mod command_button_hunt_update;
+pub mod slaved_update;
 pub mod special_ability_update;
 pub mod spectre_gunship_deployment_update;
 pub mod horde_update;
@@ -48,6 +49,16 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "SlavedUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::SLAVED_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        slaved_update::parse_slaved_update_data,
+        slaved_update::create_slaved_update,
+    );
     reg.register_module(
         nk,
         "SpecialAbilityUpdate",

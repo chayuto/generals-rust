@@ -18,6 +18,7 @@ use crate::modules::update::dock_update::DockUpdateState;
 use crate::modules::update::horde_update::HordeActionType;
 use crate::object::weapon_set::WeaponSlotType;
 use crate::object::weapon::WEAPON_ANTI_MINE;
+use crate::object::weapon_set::CanAttackResult;
 pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
@@ -1589,7 +1590,12 @@ pub trait ParkingPlaceFacet {
 
 /// Master/slave spawn manager facet (`SpawnBehaviorInterface`).
 pub trait SpawnBehaviorFacet {
-    fn may_spawn_self_task_ai(&self, _max_self_taskers_ratio: Real) -> Bool {
+    fn may_spawn_self_task_ai(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _max_self_taskers_ratio: Real,
+    ) -> Bool {
         FALSE
     }
     fn on_spawn_death(
@@ -1621,6 +1627,25 @@ pub trait SpawnBehaviorFacet {
         _cmd_source: CommandSourceType,
     ) {
     }
+    fn get_can_any_slaves_attack_specific_target(
+        &self,
+        _sim: &dyn SimView,
+        _attack_type: UnsignedInt,
+        _target: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) -> CanAttackResult {
+        CanAttackResult::NotPossible
+    }
+    fn get_can_any_slaves_use_weapon_against_target(
+        &self,
+        _sim: &dyn SimView,
+        _attack_type: UnsignedInt,
+        _victim: Option<ObjectSlot>,
+        _pos: &Coord3D,
+        _cmd_source: CommandSourceType,
+    ) -> CanAttackResult {
+        CanAttackResult::NotPossible
+    }
     fn can_any_slaves_attack(&self, _sim: &dyn SimView) -> Bool {
         FALSE
     }
@@ -1645,7 +1670,8 @@ pub trait SpawnBehaviorFacet {
     ) {
     }
     fn give_slaves_stealth_upgrade(&mut self, _sim: &mut dyn SimApi, _grant_stealth: Bool) {}
-    fn are_all_slaves_stealthed(&self, _sim: &dyn SimView) -> Bool {
+    /// Asking a slave's `StealthUpdate` may reveal that slave's own slaves.
+    fn are_all_slaves_stealthed(&self, _sim: &mut dyn SimApi) -> Bool {
         FALSE
     }
     fn reveal_slaves(&mut self, _sim: &mut dyn SimApi) {}
@@ -1655,6 +1681,8 @@ pub trait SpawnBehaviorFacet {
     fn get_slave_count(&self) -> Int {
         0
     }
+    fn stop_spawning(&mut self) {}
+    fn start_spawning(&mut self) {}
 }
 
 /// Bridge span coordination facet (`BridgeBehaviorInterface`).
@@ -1941,6 +1969,30 @@ pub trait AiUpdateFacet {
     fn is_weapon_slot_enabled(&self, _slot: WeaponSlotType) -> Bool {
         TRUE
     }
+
+    fn set_locomotor_use_precise_z_pos(&mut self, _precise: Bool) {}
+    /// The position of the last node of `AIUpdateInterface::getPath`; `None` without a path.
+    fn get_path_destination(&self) -> Option<Coord3D> {
+        None
+    }
+    fn ai_force_attack_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _victim: ObjectSlot,
+        _max_shots_to_fire: Int,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_attack_position(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _pos: &Coord3D,
+        _max_shots_to_fire: Int,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
 }
 
 /// Marks a physics module (`PhysicsBehavior`). Its members are on the object
@@ -2145,12 +2197,23 @@ pub trait SlavedUpdateFacet {
     fn get_slaver_id(&self) -> ObjectId {
         ObjectId::INVALID
     }
+    fn on_enslave(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _slaver: Option<ObjectSlot>,
+    ) {
+    }
     fn on_slaver_die(
         &mut self,
         _sim: &mut dyn SimApi,
         _ctx: ModuleContext,
         _dmg: Option<&DamageInfo>,
     ) {
+    }
+    fn on_slaver_damage(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _dmg: &DamageInfo) {}
+    fn is_self_tasking(&self) -> Bool {
+        FALSE
     }
 }
 

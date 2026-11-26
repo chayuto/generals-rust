@@ -278,7 +278,10 @@ pub enum DeferredSelfOp {
         death_type: u8,
         source_id: ObjectId,
     },
-    SpawnNotifySlaveDied(ObjectId),
+    SpawnNotifySlaveDied {
+        slave_id: ObjectId,
+        source_id: ObjectId,
+    },
     ParkingRelease(ObjectId),
     BridgeSyncTowerState {
         tower_index: u8,

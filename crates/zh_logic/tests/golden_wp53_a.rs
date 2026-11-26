@@ -1007,7 +1007,6 @@ fn destroy_and_flush_all(sim: &mut SimContext) {
     sim.process_destroy_list();
     sim.world.weapon_fires.clear();
     sim.world.stealth_detected_events.clear();
-    sim.world.slaved_die_notifications.clear();
     sim.world.ai_exit_orders.clear();
 }
 

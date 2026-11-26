@@ -19,6 +19,7 @@ pub mod poisoned_behavior;
 pub mod prison_behavior;
 pub mod propaganda_tower_behavior;
 pub mod slow_death_behavior;
+pub mod spawn_behavior;
 pub mod supply_warehouse_crippling_behavior;
 pub mod tech_building_behavior;
 
@@ -30,6 +31,16 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Registers `WP-5.3` concrete `Behavior` module factories into `reg`.
 pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "SpawnBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x007 | FacetMask::SPAWN_BEHAVIOR.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        spawn_behavior::parse_spawn_behavior_data,
+        spawn_behavior::create_spawn_behavior,
+    );
     reg.register_module(
         nk,
         "AutoHealBehavior",

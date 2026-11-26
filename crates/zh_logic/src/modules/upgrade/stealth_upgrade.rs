@@ -7,9 +7,10 @@ use crate::modules::upgrade::upgrade_module::{
     impl_upgrade_behavior, parse_upgrade_module_data, UpgradeBehaviorImpl, UpgradeModule,
     UpgradeModuleData,
 };
+use crate::rules::kind_of::KindOfType;
 use crate::sim::SimApi;
 use zh_common::ini::{IniError, IniReader};
-use zh_common::types::NameKeyType;
+use zh_common::types::{NameKeyType, FALSE, TRUE};
 
 pub fn parse_stealth_upgrade_data(
     ini: &mut IniReader<'_>,
@@ -47,7 +48,11 @@ impl UpgradeBehaviorImpl for StealthUpgrade {
     }
 
     fn upgrade_implementation(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        sim.grant_stealth(ctx.owner_slot);
+        let owner = ctx.owner_slot;
+        sim.grant_stealth(owner);
+        if sim.object_is_kind_of(owner, KindOfType::SpawnsAreTheWeapons) != FALSE {
+            sim.spawn_give_slaves_stealth_upgrade(owner, TRUE);
+        }
     }
 }
 

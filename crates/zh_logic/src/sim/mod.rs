@@ -18,7 +18,7 @@ use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
-use crate::economy::score_keeper::ScoreKeeper;
+use crate::economy::score_keeper::{ScoreKeeper, ScoreObjectView, ScoreTemplateDesc};
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
@@ -35,6 +35,8 @@ use crate::modules::module::AiUpdateFacet;
 use crate::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use crate::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
 use crate::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
+use crate::modules::module::SpawnBehaviorFacet;
+use crate::modules::update::prone_update::ProneUpdate;
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
 use crate::object::thing_factory::ThingFactory;
@@ -43,7 +45,8 @@ use crate::object::thing_template::{
 };
 use crate::object::weapon::WeaponStore;
 use crate::object::weapon_set::{
-    WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType, WEAPONSLOT_COUNT,
+    CanAttackResult, WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType,
+    WEAPONSLOT_COUNT,
 };
 use crate::pathfinder::pathfind_cell::CellType as PathfindCellType;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
@@ -400,6 +403,14 @@ impl GameTextLookup for NoopGameText {
     }
 }
 
+/// The answers of `Object`'s attack queries (`WeaponSet`, unported).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AttackAbility {
+    pub able: Bool,
+    pub specific_object: CanAttackResult,
+    pub weapon_against_target: CanAttackResult,
+}
+
 /// Write-only client/audio notification sink (`GameClient` boundary in `SimContext`).
 pub trait ClientSink: Send {
     /// `Drawable::setTerrainDecal`. A drawable ignores the type it already has.
@@ -424,6 +435,8 @@ pub trait ClientSink: Send {
     fn on_object_destroyed(&mut self, _id: ObjectId) {}
     fn on_damage(&mut self, _target: ObjectId, _amount: Real) {}
     fn on_veterancy_changed(&mut self, _target: ObjectId, _old_level: Int, _new_level: Int) {}
+    /// The welding sparks and sound of a repairing slave (`SlavedUpdate`).
+    fn on_welding_sparks(&mut self, _slave: ObjectId, _system: &str, _bone: &str, _frames: Int) {}
     fn on_body_damage_state_change(
         &mut self,
         _target: ObjectId,
@@ -719,6 +732,8 @@ pub struct ObjectRecord {
     pub ai_state_machine_ready: Bool,
     /// `Object::m_constructionPercent`.
     pub construction_percent: Real,
+    /// `Object::m_healthBoxOffset`.
+    pub health_box_offset: Coord3D,
     /// Copy of the body's last damage type, read while the body is executing.
     pub body_last_damage_type: Option<DamageType>,
 }
@@ -815,6 +830,7 @@ impl ObjectRecord {
             ai_locomotor_set: None,
             ai_locomotor: None,
             ai_state_machine_ready: FALSE,
+            health_box_offset: Coord3D::default(),
             construction_percent: CONSTRUCTION_COMPLETE,
             body_last_damage_type: None,
         }
@@ -1273,8 +1289,34 @@ pub trait SimView {
     fn object_has_contain(&self, owner: ObjectSlot) -> Bool;
     fn contain_stealth_units_contained(&self, owner: ObjectSlot) -> UnsignedInt;
     fn contain_is_rider_change(&self, owner: ObjectSlot) -> Bool;
-    /// `areAllSlavesStealthed`; `None` without a spawn behavior.
-    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool>;
+    /// Whether `ThingFactory::findTemplate` knows the name.
+    fn thing_template_exists(&self, name: &str) -> Bool;
+    /// `SpawnBehaviorInterface::getClosestSlave`; `None` without a spawn behavior.
+    fn spawn_closest_slave(&self, owner: ObjectSlot, pos: &Coord3D) -> Option<Option<ObjectSlot>>;
+    /// `ContainModuleInterface::getClosestRider`; `None` without a contain.
+    fn contain_closest_rider(&self, owner: ObjectSlot, pos: &Coord3D)
+        -> Option<Option<ObjectSlot>>;
+    /// `SlavedUpdateInterface::isSelfTasking`; `FALSE` without a slaved update.
+    fn slaved_is_self_tasking(&self, owner: ObjectSlot) -> Bool;
+    /// The last node of `AIUpdateInterface::getPath`; `None` without a path.
+    fn ai_path_destination(&self, owner: ObjectSlot) -> Option<Coord3D>;
+    /// `Object::getAbleToAttackSpecificObject`, from `SimWorld::attack_abilities`.
+    fn able_to_attack_specific_object(
+        &self,
+        owner: ObjectSlot,
+        attack_type: UnsignedInt,
+        target: ObjectSlot,
+        cmd_source: CommandSourceType,
+    ) -> CanAttackResult;
+    /// `Object::getAbleToUseWeaponAgainstTarget`, from `SimWorld::attack_abilities`.
+    fn able_to_use_weapon_against_target(
+        &self,
+        owner: ObjectSlot,
+        attack_type: UnsignedInt,
+        victim: Option<ObjectSlot>,
+        pos: &Coord3D,
+        cmd_source: CommandSourceType,
+    ) -> CanAttackResult;
     /// `AIUpdateInterface::getLastCommandSource`.
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType;
     /// The controlling player's objects, in `Player::iterateObjects` order.
@@ -1792,6 +1834,50 @@ pub trait SimApi: SimView {
     fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot);
     /// `SpawnBehaviorInterface::revealSlaves`.
     fn spawn_reveal_slaves(&mut self, owner: ObjectSlot);
+    /// `areAllSlavesStealthed`; `None` without a spawn behavior.
+    fn spawn_all_slaves_stealthed(&mut self, owner: ObjectSlot) -> Option<Bool>;
+    /// The owner's `StealthUpdate::allowedToStealth(owner)`; `FALSE` without one.
+    fn stealth_allowed_to_stealth(&mut self, owner: ObjectSlot) -> Bool;
+    fn spawn_give_slaves_stealth_upgrade(&mut self, owner: ObjectSlot, grant_stealth: Bool);
+    /// `ThingFactory::newObject(findTemplate(name), team)`, build variations included.
+    fn new_object_from_template(&mut self, name: &str, team: TeamId) -> Option<ObjectSlot>;
+    /// `Player::onUnitCreated` of the unit's controlling player.
+    fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot);
+    /// `getObjectExitInterface()->reserveDoorForExit(nullptr, nullptr)`; `None` without
+    /// an exit interface.
+    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType>;
+    fn exit_object_by_budding(
+        &mut self,
+        owner: ObjectSlot,
+        new_obj: ObjectSlot,
+        bud_host: Option<ObjectSlot>,
+    );
+    /// `SlavedUpdateInterface::onEnslave`.
+    fn slaved_on_enslave(&mut self, slave: ObjectSlot, slaver: ObjectSlot);
+    /// `SlavedUpdateInterface::onSlaverDamage`.
+    fn slaved_on_slaver_damage(&mut self, slave: ObjectSlot, dmg: &DamageInfo);
+    /// `BodyModuleInterface::setInitialHealth`.
+    fn set_initial_health(&mut self, owner: ObjectSlot, initial_percent: Int);
+    /// `AIUpdateInterface::aiForceAttackObject`.
+    fn ai_force_attack_object(
+        &mut self,
+        owner: ObjectSlot,
+        victim: ObjectSlot,
+        max_shots_to_fire: Int,
+        cmd_source: CommandSourceType,
+    );
+    /// `AIUpdateInterface::aiAttackPosition`.
+    fn ai_attack_position(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        max_shots_to_fire: Int,
+        cmd_source: CommandSourceType,
+    );
+    /// `AIUpdateInterface::aiGoProne`.
+    fn ai_go_prone(&mut self, owner: ObjectSlot, dmg: &DamageInfo, cmd_source: CommandSourceType);
+    /// `Locomotor::setUsePreciseZPos` on the owner's current locomotor.
+    fn set_locomotor_use_precise_z_pos(&mut self, owner: ObjectSlot, precise: Bool);
     /// `StealthUpdate::disguiseAsObject`.
     fn stealth_disguise_as_object(&mut self, owner: ObjectSlot, target: Option<ObjectSlot>);
     /// `setSDEnabled` on the owner's first `StealthDetectorUpdate`.
@@ -2082,7 +2168,6 @@ pub struct SimWorld {
     pub projectile_launches: Vec<(ObjectId, Option<ObjectId>, Coord3D)>,
     pub countermeasure_reports: Vec<(ObjectId, ObjectId)>,
     pub parking_reservations: BTreeMap<ObjectId, ObjectId>,
-    pub spawn_death_notifications: Vec<(ObjectId, ObjectId)>,
     pub passenger_orders: Vec<(ObjectId, String)>,
     pub slow_death_scale: Real,
     pub hulk_max_lifetime_override: Int,
@@ -2090,13 +2175,14 @@ pub struct SimWorld {
     pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
     /// `AcademyStats::m_vehiclesDisguised` by player index (academy stats are not in the world).
     pub vehicles_disguised: BTreeMap<Int, UnsignedInt>,
-    pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
     pub ai_commands: Vec<(ObjectId, String)>,
     /// `GameLogic::m_drawIconUI`.
     pub draw_icon_ui: Bool,
     /// `GameLogic::selectObject` calls: object, new selection, player mask, local.
     pub selected_objects: Vec<(ObjectId, Bool, UnsignedShort, Bool)>,
+    /// What each object's weapons answer; stands in for the unported `WeaponSet` queries.
+    pub attack_abilities: BTreeMap<ObjectId, AttackAbility>,
     pub exit_path_orders: Vec<ExitPathOrder>,
     /// Pristine model bones by template name and bone prefix, as a model loader would
     /// report them. No entry means the model has no such bones.
@@ -2199,18 +2285,17 @@ impl SimWorld {
             projectile_launches: Vec::new(),
             countermeasure_reports: Vec::new(),
             parking_reservations: BTreeMap::new(),
-            spawn_death_notifications: Vec::new(),
             passenger_orders: Vec::new(),
             slow_death_scale: 1.0,
             hulk_max_lifetime_override: -1,
             deselected_objects: Vec::new(),
             stealth_detected_events: Vec::new(),
             vehicles_disguised: BTreeMap::new(),
-            slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
             ai_commands: Vec::new(),
             draw_icon_ui: TRUE,
             selected_objects: Vec::new(),
+            attack_abilities: BTreeMap::new(),
             exit_path_orders: Vec::new(),
             pristine_bones: BTreeMap::new(),
             pathfind_map_objects: BTreeSet::new(),
@@ -2395,6 +2480,60 @@ impl SimContext {
             .get(&team_id)
             .copied()
             .unwrap_or(team_id.0)
+    }
+
+    fn attack_ability(&self, owner: ObjectSlot) -> AttackAbility {
+        self.world
+            .objects
+            .id_of(owner)
+            .and_then(|id| self.world.attack_abilities.get(&id).copied())
+            .unwrap_or_default()
+    }
+
+    /// Sends an order to the owner's AI module, which is where the AI port reacts to it.
+    fn order_ai(
+        &mut self,
+        owner: ObjectSlot,
+        order: &str,
+        f: impl FnOnce(&mut dyn AiUpdateFacet, &mut dyn SimApi, ModuleContext),
+    ) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world.ai_commands.push((obj_id, order.to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    f(ai, sim, ctx);
+                }
+            });
+        }
+    }
+
+    /// Runs `f` on the spawn behavior of an object whose spawns are its weapons.
+    fn with_weapon_slaves(
+        &mut self,
+        owner: ObjectSlot,
+        f: impl FnOnce(&mut dyn SpawnBehaviorFacet, &mut dyn SimApi),
+    ) {
+        if self.object_is_kind_of(owner, KindOfType::SpawnsAreTheWeapons) == FALSE {
+            return;
+        }
+        let Some(ss) = self.world.objects.get(owner).and_then(|o| o.spawn_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, _| {
+                if let Some(s) = m.as_spawn_behavior_mut() {
+                    f(s, sim);
+                }
+            });
+        }
     }
 
     /// The `AutoDepositUpdate` part of `Player::becomingTeamMember(obj, true)`.
@@ -3197,33 +3336,6 @@ impl SimContext {
         }
         if moved {
             self.update_off_map(owner);
-        }
-    }
-
-    /// Marks `slot` destroyed (`GameLogic::destroyObject`), running `DestroyFacet::on_destroy`
-    /// and queueing `slot` for end-of-frame deletion in [`Self::process_destroy_list`].
-    /// Records an AI order and hands it to the owner's AI module.
-    fn order_ai(
-        &mut self,
-        owner: ObjectSlot,
-        order: &str,
-        f: impl FnOnce(&mut dyn AiUpdateFacet, &mut dyn SimApi, ModuleContext),
-    ) {
-        let Some((obj_id, ai_ms)) = self
-            .world
-            .objects
-            .get(owner)
-            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
-        else {
-            return;
-        };
-        self.world.ai_commands.push((obj_id, order.to_owned()));
-        if !self.world.modules.is_executing(ai_ms) {
-            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
-                if let Some(ai) = m.as_ai_mut() {
-                    f(ai, sim, ctx);
-                }
-            });
         }
     }
 
@@ -4774,7 +4886,13 @@ impl SimView for SimContext {
     }
 
     fn object_is_able_to_attack(&self, owner: ObjectSlot) -> Bool {
-        Bool::from(self.is_able_to_attack(owner))
+        // An entry in `attack_abilities` answers for weapons that are not ported;
+        // without one the object is asked.
+        self.world
+            .objects
+            .id_of(owner)
+            .and_then(|id| self.world.attack_abilities.get(&id))
+            .map_or_else(|| Bool::from(self.is_able_to_attack(owner)), |entry| entry.able)
     }
 
     fn object_has_client_update(&self, owner: ObjectSlot, name: &str) -> Bool {
@@ -5504,10 +5622,60 @@ impl SimView for SimContext {
             .map_or(FALSE, |c| c.is_rider_change_contain())
     }
 
-    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool> {
+    fn thing_template_exists(&self, name: &str) -> Bool {
+        Bool::from(self.rules.thing_factory.find_template_id(name).is_some())
+    }
+
+    fn spawn_closest_slave(&self, owner: ObjectSlot, pos: &Coord3D) -> Option<Option<ObjectSlot>> {
         let ss = self.world.objects.get(owner)?.spawn_slot?;
         let spawn = self.world.modules.payload(ss)?.as_spawn_behavior()?;
-        Some(spawn.are_all_slaves_stealthed(self))
+        Some(spawn.get_closest_slave(self, pos))
+    }
+
+    fn contain_closest_rider(
+        &self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+    ) -> Option<Option<ObjectSlot>> {
+        let cs = self.world.objects.get(owner)?.contain_slot?;
+        let contain = self.world.modules.payload(cs)?.as_contain()?;
+        Some(contain.get_closest_rider(self, pos))
+    }
+
+    fn slaved_is_self_tasking(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.slaved_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_slaved_update())
+            .map_or(FALSE, |s| s.is_self_tasking())
+    }
+
+    fn ai_path_destination(&self, owner: ObjectSlot) -> Option<Coord3D> {
+        let ms = self.world.objects.get(owner)?.ai_slot?;
+        self.world.modules.payload(ms)?.as_ai()?.get_path_destination()
+    }
+
+    fn able_to_attack_specific_object(
+        &self,
+        owner: ObjectSlot,
+        _attack_type: UnsignedInt,
+        _target: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) -> CanAttackResult {
+        self.attack_ability(owner).specific_object
+    }
+
+    fn able_to_use_weapon_against_target(
+        &self,
+        owner: ObjectSlot,
+        _attack_type: UnsignedInt,
+        _victim: Option<ObjectSlot>,
+        _pos: &Coord3D,
+        _cmd_source: CommandSourceType,
+    ) -> CanAttackResult {
+        self.attack_ability(owner).weapon_against_target
     }
 
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
@@ -6240,6 +6408,17 @@ impl SimApi for SimContext {
                 }
             });
         }
+        // An object that was spawned tells its spawner that it has died.
+        if let Some((slave_id, producer_id)) = self
+            .world
+            .objects
+            .get(owner)
+            .map(|o| (o.id, o.producer_id))
+        {
+            if let Some(spawner) = self.find_object(producer_id) {
+                self.notify_spawn_slave_died(spawner, slave_id, dmg);
+            }
+        }
         self.handle_partition_cell_maintenance(owner);
     }
 
@@ -6327,12 +6506,18 @@ impl SimApi for SimContext {
         let was_disabled = obj.is_disabled() != FALSE;
         let slot_idx = idx as usize;
         let mut behaviors_to_edge = Vec::new();
-        if obj.disabled_till_frame[slot_idx] != till_frame {
+        let changed = obj.disabled_till_frame[slot_idx] != till_frame;
+        if changed {
             obj.disabled_till_frame[slot_idx] = till_frame;
             obj.disabled_mask.set(idx, i32::from(till_frame > now));
         }
         if !was_disabled && obj.is_disabled() != FALSE {
             behaviors_to_edge = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
+        }
+        if changed {
+            self.with_weapon_slaves(owner, |spawn, sim| {
+                spawn.order_slaves_disabled_until(sim, disabled_type, till_frame);
+            });
         }
         if !behaviors_to_edge.is_empty() {
             for ms in behaviors_to_edge {
@@ -6357,6 +6542,12 @@ impl SimApi for SimContext {
         if obj.is_disabled_by_type(disabled_type) == FALSE {
             return FALSE;
         }
+        self.with_weapon_slaves(owner, |spawn, sim| {
+            spawn.order_slaves_to_clear_disabled(sim, disabled_type);
+        });
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return FALSE;
+        };
         obj.disabled_till_frame[idx as usize] = 0;
         obj.disabled_mask.set(idx, 0);
         let behaviors_to_edge: Vec<ModuleSlot> = if obj.is_disabled() == FALSE {
@@ -6699,6 +6890,7 @@ impl SimApi for SimContext {
         self.trigger_defection(owner, detection_frames, with_fx);
         self.set_object_team(owner, new_team);
         self.handle_partition_cell_maintenance(owner);
+        self.ai_idle(owner, CommandSourceType::FromAi);
         if let Some(ai_ms) = ai_slot {
             let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
                 if let Some(ai) = m.as_ai_mut() {
@@ -8447,14 +8639,6 @@ impl SimApi for SimContext {
         slave_id: ObjectId,
         dmg: &DamageInfo,
     ) {
-        let master_id = self
-            .world
-            .objects
-            .id_of(master)
-            .unwrap_or(ObjectId::INVALID);
-        self.world
-            .spawn_death_notifications
-            .push((master_id, slave_id));
         let Some(ss) = self.world.objects.get(master).and_then(|o| o.spawn_slot) else {
             return;
         };
@@ -8462,7 +8646,13 @@ impl SimApi for SimContext {
             let _ = self
                 .world
                 .modules
-                .push_deferred_op(ss, DeferredSelfOp::SpawnNotifySlaveDied(slave_id));
+                .push_deferred_op(
+                    ss,
+                    DeferredSelfOp::SpawnNotifySlaveDied {
+                        slave_id,
+                        source_id: dmg.input.source_id,
+                    },
+                );
             return;
         }
         let _ = self.dispatch_module(ss, |m, sim, ctx| {
@@ -8572,9 +8762,7 @@ impl SimApi for SimContext {
         let Some(obj) = self.world.objects.get(owner) else {
             return;
         };
-        let obj_id = obj.id;
         let slaved_slot = obj.slaved_slot;
-        self.world.slaved_die_notifications.push(obj_id);
         if let Some(ss) = slaved_slot {
             if !self.world.modules.is_executing(ss) {
                 let _ = self.dispatch_module(ss, |m, sim, ctx| {
@@ -8650,6 +8838,254 @@ impl SimApi for SimContext {
             let _ = self.dispatch_module(cs, |m, sim, ctx| {
                 if let Some(c) = m.as_contain_mut() {
                     c.recalc_apparent_controlling_player(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn spawn_all_slaves_stealthed(&mut self, owner: ObjectSlot) -> Option<Bool> {
+        let ss = self.world.objects.get(owner)?.spawn_slot?;
+        if self.world.modules.is_executing(ss) {
+            return None;
+        }
+        self.dispatch_module(ss, |m, sim, _| {
+            m.as_spawn_behavior().map(|s| s.are_all_slaves_stealthed(sim))
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn stealth_allowed_to_stealth(&mut self, owner: ObjectSlot) -> Bool {
+        let Some(ss) = self.world.objects.get(owner).and_then(|o| o.stealth_slot) else {
+            return FALSE;
+        };
+        if self.world.modules.is_executing(ss) {
+            return FALSE;
+        }
+        self.dispatch_module(ss, |m, sim, ctx| {
+            m.as_stealth_mut()
+                .map_or(FALSE, |st| st.allowed_to_stealth(sim, ctx, owner))
+        })
+        .unwrap_or(FALSE)
+    }
+
+    fn spawn_give_slaves_stealth_upgrade(&mut self, owner: ObjectSlot, grant_stealth: Bool) {
+        let Some(ss) = self.world.objects.get(owner).and_then(|o| o.spawn_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, _| {
+                if let Some(s) = m.as_spawn_behavior_mut() {
+                    s.give_slaves_stealth_upgrade(sim, grant_stealth);
+                }
+            });
+        }
+    }
+
+    fn new_object_from_template(&mut self, name: &str, team: TeamId) -> Option<ObjectSlot> {
+        let mut tmpl = self.rules.thing_factory.find_template_id(name)?;
+        let variations = self
+            .rules
+            .thing_factory
+            .find_by_template_id_final(tmpl.0 as u16)
+            .map_or_else(Vec::new, |t| t.get_build_variations().to_vec());
+        if !variations.is_empty() {
+            let which = self.rng_logic_int(0, variations.len() as Int - 1);
+            if let Some(found) = variations
+                .get(which as usize)
+                .and_then(|n| self.rules.thing_factory.find_template_id(n))
+            {
+                tmpl = found;
+            }
+        }
+        Some(self.spawn_object(tmpl, team, Coord3D::default(), 0.0))
+    }
+
+    fn on_unit_created(&mut self, _factory: ObjectSlot, unit: ObjectSlot) {
+        // The script engine and the AI player's `onUnitProduced` are unported.
+        let Some((team, tmpl, under_construction)) = self.world.objects.get(unit).map(|o| {
+            (
+                o.team_id,
+                o.thing.template_override(),
+                o.status.test(ObjectStatusType::UnderConstruction.as_i32()),
+            )
+        }) else {
+            return;
+        };
+        let Some(t) = tmpl.get_final(&self.rules.thing_factory) else {
+            return;
+        };
+        let id = UnsignedInt::from(t.get_template_id());
+        let desc = ScoreTemplateDesc {
+            id,
+            name: t.get_name().to_owned(),
+            kind_of: t.kindof.clone(),
+            equivalent_root_id: t.reskinned_from_id.map_or(id, UnsignedInt::from),
+        };
+        let player = self.player_index_for_team(team);
+        let view = ScoreObjectView {
+            template: &desc,
+            controlling_player_idx: player,
+            under_construction,
+        };
+        // `GameLogic::isScoringEnabled` is only cleared by scripts, which are unported.
+        self.world
+            .score_keepers
+            .entry(player)
+            .or_default()
+            .add_object_built(&view, TRUE);
+    }
+
+    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
+        let es = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.exit_slot.or(o.contain_slot))?;
+        if self.world.modules.is_executing(es) {
+            return None;
+        }
+        // The callers pass no template and no particular object.
+        self.dispatch_module(es, |m, sim, ctx| {
+            m.as_exit_mut()
+                .map(|e| e.reserve_door_for_exit(sim, ctx, ThingTemplateId(0), None))
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn exit_object_by_budding(
+        &mut self,
+        owner: ObjectSlot,
+        new_obj: ObjectSlot,
+        bud_host: Option<ObjectSlot>,
+    ) {
+        let Some(es) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.exit_slot.or(o.contain_slot))
+        else {
+            return;
+        };
+        if !self.world.modules.is_executing(es) {
+            let _ = self.dispatch_module(es, |m, sim, ctx| {
+                if let Some(e) = m.as_exit_mut() {
+                    e.exit_object_by_budding(sim, ctx, new_obj, bud_host);
+                }
+            });
+        }
+    }
+
+    fn slaved_on_enslave(&mut self, slave: ObjectSlot, slaver: ObjectSlot) {
+        let Some(ss) = self.world.objects.get(slave).and_then(|o| o.slaved_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, ctx| {
+                if let Some(su) = m.as_slaved_update_mut() {
+                    su.on_enslave(sim, ctx, Some(slaver));
+                }
+            });
+        }
+    }
+
+    fn slaved_on_slaver_damage(&mut self, slave: ObjectSlot, dmg: &DamageInfo) {
+        let Some(ss) = self.world.objects.get(slave).and_then(|o| o.slaved_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, ctx| {
+                if let Some(su) = m.as_slaved_update_mut() {
+                    su.on_slaver_damage(sim, ctx, dmg);
+                }
+            });
+        }
+    }
+
+    fn set_initial_health(&mut self, owner: ObjectSlot, initial_percent: Int) {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(bs) {
+            let _ = self.dispatch_module(bs, |m, sim, ctx| {
+                if let Some(b) = m.as_body_mut() {
+                    b.set_initial_health(sim, ctx, initial_percent);
+                }
+            });
+        }
+    }
+
+    fn ai_force_attack_object(
+        &mut self,
+        owner: ObjectSlot,
+        victim: ObjectSlot,
+        max_shots_to_fire: Int,
+        cmd_source: CommandSourceType,
+    ) {
+        self.order_ai(owner, "aiForceAttackObject", |ai, sim, ctx| {
+            ai.ai_force_attack_object(sim, ctx, victim, max_shots_to_fire, cmd_source);
+        });
+    }
+
+    fn ai_attack_position(
+        &mut self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+        max_shots_to_fire: Int,
+        cmd_source: CommandSourceType,
+    ) {
+        let pos = *pos;
+        self.order_ai(owner, "aiAttackPosition", |ai, sim, ctx| {
+            ai.ai_attack_position(sim, ctx, &pos, max_shots_to_fire, cmd_source);
+        });
+    }
+
+    fn ai_go_prone(&mut self, owner: ObjectSlot, dmg: &DamageInfo, _cmd_source: CommandSourceType) {
+        if self.world.objects.get(owner).is_none_or(|o| o.ai_slot.is_none()) {
+            return;
+        }
+        self.order_ai(owner, "aiGoProne", |_, _, _| {});
+        // `AIUpdateInterface::isAllowedToRespondToAiCommands` drops commands to the dead
+        // (its sleeping mood test is left to the AI port); `privateGoProne` then only
+        // forwards to the `ProneUpdate`.
+        if self
+            .world
+            .objects
+            .get(owner)
+            .is_some_and(|o| o.is_effectively_dead() != FALSE)
+        {
+            return;
+        }
+        let Some(ms) = self.module_by_name(owner, "ProneUpdate") else {
+            return;
+        };
+        if !self.world.modules.is_executing(ms) {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(prone) = m
+                    .as_any_mut()
+                    .and_then(|a| a.downcast_mut::<ProneUpdate>())
+                {
+                    prone.go_prone(sim, ctx, dmg);
+                }
+            });
+        }
+    }
+
+    fn set_locomotor_use_precise_z_pos(&mut self, owner: ObjectSlot, precise: Bool) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        if let Some(loco) = obj.ai_locomotor.as_mut() {
+            loco.set_use_precise_z_pos(precise);
+        }
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_use_precise_z_pos(precise);
                 }
             });
         }
@@ -9029,6 +9465,9 @@ impl SimApi for SimContext {
             return;
         };
         obj.loco_ultra_accurate = ultra;
+        if let Some(loco) = obj.ai_locomotor.as_mut() {
+            loco.set_ultra_accurate(ultra);
+        }
         let Some(ai_ms) = obj.ai_slot else {
             return;
         };
@@ -9457,6 +9896,26 @@ impl SimView for MockSimApi {
         self.ctx.contain_apparent_controlling_player(container, observer)
     }
 
+    fn thing_template_exists(&self, name: &str) -> Bool {
+        self.ctx.thing_template_exists(name)
+    }
+
+    fn spawn_closest_slave(&self, owner: ObjectSlot, pos: &Coord3D) -> Option<Option<ObjectSlot>> {
+        self.ctx.spawn_closest_slave(owner, pos)
+    }
+
+    fn contain_closest_rider(
+        &self,
+        owner: ObjectSlot,
+        pos: &Coord3D,
+    ) -> Option<Option<ObjectSlot>> {
+        self.ctx.contain_closest_rider(owner, pos)
+    }
+
+    fn slaved_is_self_tasking(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.slaved_is_self_tasking(owner)
+    }
+
     fn ai_is_idle(&self, owner: ObjectSlot) -> Bool {
         self.ctx.ai_is_idle(owner)
     }
@@ -9467,6 +9926,10 @@ impl SimView for MockSimApi {
 
     fn terrain_extent(&self) -> Region3D {
         self.ctx.terrain_extent()
+    }
+
+    fn ai_path_destination(&self, owner: ObjectSlot) -> Option<Coord3D> {
+        self.ctx.ai_path_destination(owner)
     }
 
     fn object_is_able_to_attack(&self, owner: ObjectSlot) -> Bool {
@@ -9527,6 +9990,14 @@ impl SimView for MockSimApi {
 
     fn object_command_set_string(&self, owner: ObjectSlot) -> String {
         self.ctx.object_command_set_string(owner)
+    }
+
+    fn able_to_attack_specific_object(&self, owner: ObjectSlot, attack_type: UnsignedInt, target: ObjectSlot, cmd_source: CommandSourceType) -> CanAttackResult {
+        self.ctx.able_to_attack_specific_object(owner, attack_type, target, cmd_source)
+    }
+
+    fn able_to_use_weapon_against_target(&self, owner: ObjectSlot, attack_type: UnsignedInt, victim: Option<ObjectSlot>, pos: &Coord3D, cmd_source: CommandSourceType) -> CanAttackResult {
+        self.ctx.able_to_use_weapon_against_target(owner, attack_type, victim, pos, cmd_source)
     }
 
     fn frame(&self) -> UnsignedInt {
@@ -10075,10 +10546,6 @@ impl SimView for MockSimApi {
         self.ctx.contain_is_rider_change(owner)
     }
 
-    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool> {
-        self.ctx.spawn_all_slaves_stealthed(owner)
-    }
-
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
         self.ctx.ai_last_command_source(owner)
     }
@@ -10243,6 +10710,62 @@ impl SimApi for MockSimApi {
 
     fn set_command_button_hunt(&mut self, owner: ObjectSlot, button_name: &str) {
         self.ctx.set_command_button_hunt(owner, button_name);
+    }
+
+    fn spawn_all_slaves_stealthed(&mut self, owner: ObjectSlot) -> Option<Bool> {
+        self.ctx.spawn_all_slaves_stealthed(owner)
+    }
+
+    fn stealth_allowed_to_stealth(&mut self, owner: ObjectSlot) -> Bool {
+        self.ctx.stealth_allowed_to_stealth(owner)
+    }
+
+    fn spawn_give_slaves_stealth_upgrade(&mut self, owner: ObjectSlot, grant_stealth: Bool) {
+        self.ctx.spawn_give_slaves_stealth_upgrade(owner, grant_stealth);
+    }
+
+    fn new_object_from_template(&mut self, name: &str, team: TeamId) -> Option<ObjectSlot> {
+        self.ctx.new_object_from_template(name, team)
+    }
+
+    fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        self.ctx.on_unit_created(factory, unit);
+    }
+
+    fn reserve_exit_door(&mut self, owner: ObjectSlot) -> Option<ExitDoorType> {
+        self.ctx.reserve_exit_door(owner)
+    }
+
+    fn exit_object_by_budding(&mut self, owner: ObjectSlot, new_obj: ObjectSlot, bud_host: Option<ObjectSlot>) {
+        self.ctx.exit_object_by_budding(owner, new_obj, bud_host);
+    }
+
+    fn slaved_on_enslave(&mut self, slave: ObjectSlot, slaver: ObjectSlot) {
+        self.ctx.slaved_on_enslave(slave, slaver);
+    }
+
+    fn slaved_on_slaver_damage(&mut self, slave: ObjectSlot, dmg: &DamageInfo) {
+        self.ctx.slaved_on_slaver_damage(slave, dmg);
+    }
+
+    fn set_initial_health(&mut self, owner: ObjectSlot, initial_percent: Int) {
+        self.ctx.set_initial_health(owner, initial_percent);
+    }
+
+    fn ai_force_attack_object(&mut self, owner: ObjectSlot, victim: ObjectSlot, max_shots_to_fire: Int, cmd_source: CommandSourceType) {
+        self.ctx.ai_force_attack_object(owner, victim, max_shots_to_fire, cmd_source);
+    }
+
+    fn ai_attack_position(&mut self, owner: ObjectSlot, pos: &Coord3D, max_shots_to_fire: Int, cmd_source: CommandSourceType) {
+        self.ctx.ai_attack_position(owner, pos, max_shots_to_fire, cmd_source);
+    }
+
+    fn ai_go_prone(&mut self, owner: ObjectSlot, dmg: &DamageInfo, cmd_source: CommandSourceType) {
+        self.ctx.ai_go_prone(owner, dmg, cmd_source);
+    }
+
+    fn set_locomotor_use_precise_z_pos(&mut self, owner: ObjectSlot, precise: Bool) {
+        self.ctx.set_locomotor_use_precise_z_pos(owner, precise);
     }
 
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {

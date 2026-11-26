@@ -311,3 +311,24 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 - Crate collide modules run on contact in `ThePartitionManager->update()` and destroy their object.
 - `TheParticleSystemManager->reset()` does not empty the list of the dummy manager; count from its size.
 - `InGameUI::addFloatingText` needs fonts; override it (it is virtual).
+### Orphaned spawns are never reclaimed
+
+- **Where:** `SpawnBehavior::reclaimOrphanSpawn`.
+- **What happens:** the loop `continue`s when `prevName.compare(*tempName)` is non-zero, that is when the names differ. `prevName` starts empty, so every name is skipped and `CanReclaimOrphans` does nothing. `InitialBurst` has a similar slip: it queues `runtimeProduced` (0 or 1) as the replacement frame instead of the staggered `birthFrame` it computes.
+- **How the oracle handles it:** nothing to do; the port returns no orphan and queues the same values (`gen_pkt296_365_spawn_slaved.cpp`).
+
+### A slave's random direction is a whole number of radians
+
+- **Where:** `SlavedUpdate`, every `GameLogicRandomValue( 0, 2*PI )`.
+- **What happens:** the integer overload is chosen, so the direction is one of 0..6. `doGuardLogic` wanders by `GuardMaxRange` (`GuardWanderRange` only switches it on), and `moveToNewRepairSpot` stores an absolute position in `m_guardPointOffset`, which the guard code later adds to the master's position. `m_repairRange` is not set by the data constructor.
+
+### A model condition set in `onObjectCreated` is lost
+
+- **Where:** `SlavedUpdate::onObjectCreated` (`MODELCONDITION_PACKING`).
+- **What happens:** `Object::setModelConditionState` writes to the drawable, which `ThingFactory::newObject` creates only after the `Object` constructor has run `onObjectCreated`.
+
+### Spawn and slave references that are not checked
+
+- **Where:** `SlavedUpdate::update` (`masterAI->getPath()`), `SpawnBehavior::computeAggregateStates` (`getDrawable()`).
+- **What happens:** a slave with a `ScoutRange` whose slaver has no AI crashes. With no spawn left, the aggregate health box offset becomes NaN (`0 * inf`).
+- **How the oracle handles it:** scouting slaves are only enslaved to objects with an AI. `PartitionManager` shroud updates for the local player need a display, so the local player is set to an unused index before objects change teams.

@@ -150,10 +150,32 @@ impl BodyFacet for HiveStructureBody {
     fn attempt_damage(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &mut DamageInfo) {
         let dt = dmg.input.damage_type.as_i32();
         if get_damage_type_flag(&self.damage_types_to_propagate_to_slaves, dt) != FALSE {
-            // `SpawnBehavior` / `Contain` closest-slave propagation wires here when ported in
-            // `WP-5.3`; currently fall through directly to `StructureBody::attempt_damage` when
-            // neither slave/contain interface exists.
-            let _ = &self.damage_types_to_swallow;
+            let hive = ctx.owner_slot;
+            if let Some(shooter_pos) = sim
+                .find_object(dmg.input.source_id)
+                .and_then(|s| sim.object(s))
+                .map(|o| *o.thing.get_position())
+            {
+                // The spawns shelter the hive; without a spawn behavior its riders do.
+                let heir = sim
+                    .spawn_closest_slave(hive, &shooter_pos)
+                    .or_else(|| sim.contain_closest_rider(hive, &shooter_pos));
+                match heir {
+                    Some(Some(slave)) => {
+                        sim.attempt_damage(slave, dmg);
+                        return;
+                    }
+                    Some(None) => {
+                        if get_damage_type_flag(&self.damage_types_to_swallow, dt) != FALSE {
+                            dmg.output.actual_damage_dealt = 0.0;
+                            dmg.output.actual_damage_clipped = 0.0;
+                            dmg.output.no_effect = zh_common::types::TRUE;
+                            return;
+                        }
+                    }
+                    None => {}
+                }
+            }
         }
         self.base.attempt_damage(sim, ctx, dmg);
     }
