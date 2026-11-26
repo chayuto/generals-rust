@@ -1,6 +1,6 @@
 # Spatial grid (`PKT-160 PartitionManager`) scope
 
-Stages 1 to 3 are done: cell filing (`spatial/partition_grid.rs`), searches (`spatial/partition_query.rs`), collisions (`spatial/partition_collide.rs`) and their wiring into the sim (`SimWorld::partition`, golden `golden_partition_wiring`). Stage 4, shroud and vision, is scoped below and not started. `PKT-160` stays unported until it is.
+Stages 1 to 3 are done: cell filing (`spatial/partition_grid.rs`), searches (`spatial/partition_query.rs`), collisions (`spatial/partition_collide.rs`) and their wiring into the sim (`SimWorld::partition`, golden `golden_partition_wiring`). Of stage 4, shroud and vision, the cells are done (`spatial/partition_shroud.rs`) but not yet used by the sim; the object side is not started. `PKT-160` stays unported until it is.
 
 ## Ordering rules a port must keep
 
@@ -17,8 +17,8 @@ Stages 1 to 3 are done: cell filing (`spatial/partition_grid.rs`), searches (`sp
 | 1 | Cells, geometry fill, dirty list, radius rings, range and closest queries, four distance rules | ~1,800 to 2,200 | Done: `golden_partition_grid`, `golden_partition_query` |
 | 2 | Sim queries on the grid, registration, dirty marking, collisions in the frame | Rust only | Done: `golden_partition_wiring` |
 | 3 | Collision tests and contact list | ~600 | Done: `golden_partition_collide` |
-| 4a | Cell shroud counts, circle reveal and cover, delayed unlook queue, map reveals, `crc`/`xfer` | ~400 | Not started |
-| 4b | `Object` side: ranges, last-look records, `look`/`shroud`, refresh sites | ~400 | Not started, needs 4a |
+| 4a | Cell shroud counts, circle reveal and cover, delayed unlook queue, map reveals, `crc`/`xfer` | ~400 | Done, not wired: `golden_partition_shroud` |
+| 4b | `Object` side: ranges, last-look records, `look`/`shroud`, refresh sites | ~400 | Not started |
 | 4c | Per-object shroud status (`PartitionData::getShroudedStatus`) | ~150 | Deferred |
 
 Not needed yet: threat and value maps (~340), position finding and line of sight (~380). Query filters (~500) are added per caller.
@@ -45,13 +45,20 @@ Not needed yet: threat and value maps (~340), position finding and line of sight
 
 `GameLogic::getCRC` hashes the grid right after the objects, so replay gates need this. `PartitionManager::crc` is, for each cell in order, 16 players of `{Int16 currentShroud, Int16 activeShroudLevel}` and then `Int16 cellX, cellY`. Threat and value maps are not in it.
 
-### 4a: cells (self-contained in `spatial/`)
+### 4a: cells (done, in `spatial/partition_shroud.rs`)
 
-- A cell starts at `{1, 0}` for every player (passive shroud). `currentShroud` 1 is shrouded, 0 fogged, negative is the number of lookers. `addLooker`, `removeLooker`, `addShrouder` and `removeShrouder` are not symmetric; port each as written.
-- The area is `DiscreteCircle` (`Core/.../Common/DiscreteCircle.cpp`, a Bresenham circle with its own duplicate-row rule), cell radius `ceil(range / cellSize)`, at least 1. Players are applied from the highest index down.
-- An unlook is queued, not run: it executes in `update`, after the contacts, once `frame + UnlookPersistDuration` is less than the current frame. Map reveal and shroud calls first flush or bypass the queue differently from one another.
-- `xfer` (version 2) holds the cell size, cell count, each cell's shroud levels and the pending queue.
-- Oracle: build against the real `PartitionManager`, as `gen_partition_grid.cpp` does; compare the cell checksum after every operation.
+- A cell starts at `{1, 0}` for every player (passive shroud). `currentShroud` 1 is shrouded, 0 fogged, negative is the number of lookers. `addLooker`, `removeLooker`, `addShrouder` and `removeShrouder` are not symmetric. Removing a looker that was never added leaves a value above 1, which reads as clear.
+- The area is a `DiscreteCircle`, cell radius `ceil(range / cellSize)`, at least 1.
+- An unlook is queued, not run: it executes once `frame + UnlookPersistDuration` is less than the current frame. Undoing a permanent reveal and shrouding the map flush the queue first; the two reveals do not.
+- A map boundary change stores the cells around the rebuild. On a map with fewer rows only player 0 is restored, because `restoreFoggedCells` returns early. Kept.
+- The saved cell size and count must match the grid. A load appends to the queue.
+- Not verified against the original: loading (checked only as a Rust save and load round trip).
+
+Left for 4b, because nothing looks yet:
+
+- `update_partition` does not call `process_pending_undo_shroud_reveals`.
+- `init_partition` does not flush, store and restore the shroud, so it resets it.
+- No game checksum or save includes the grid; the sim has no assembly of either.
 
 ### 4b: objects
 

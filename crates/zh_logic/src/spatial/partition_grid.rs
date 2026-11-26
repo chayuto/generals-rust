@@ -8,8 +8,8 @@
 //! Ported: `init`, `registerObject`, `unRegisterObject`, `makeDirty`, the filing
 //! half of `update`, the cell fill routines and the radius-ring table. The
 //! searches are in `partition_query`, the shape tests and contact processing in
-//! `partition_collide` (`update` gathers the contacts here). Not ported: shroud and
-//! fog, threat and value maps, ghost objects,
+//! `partition_collide` (`update` gathers the contacts here). The shroud levels are
+//! in `partition_shroud`. Not ported: threat and value maps, ghost objects,
 //! cached terrain heights.
 //!
 //! # List order
@@ -43,6 +43,8 @@ use zh_common::math::{
     gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D, Region3D,
 };
 use zh_common::types::{Bool, Int, ObjectId, Real, FALSE};
+
+use crate::spatial::partition_shroud::Shroud;
 
 /// What the filing code and the searches read from an object.
 #[derive(Debug, Clone)]
@@ -100,6 +102,7 @@ pub struct PartitionGrid {
     updated_since_last_reset: bool,
     /// `m_radiusVec`: offsets `(x, y)` by minimum ring distance.
     radius_vec: Vec<Vec<(Int, Int)>>,
+    pub(crate) shroud: Shroud,
 }
 
 impl PartitionGrid {
@@ -134,6 +137,7 @@ impl PartitionGrid {
             contacts: Vec::new(),
             updated_since_last_reset: false,
             radius_vec: Vec::new(),
+            shroud: Shroud::new(cell_count_x, cell_count_y),
         };
         grid.calc_radius_vec();
         grid
@@ -663,6 +667,11 @@ impl PartitionGrid {
     /// `getUpdatedSinceLastReset`.
     pub fn updated_since_last_reset(&self) -> bool {
         self.updated_since_last_reset
+    }
+
+    /// A load makes the shroud queries unsettled until the next update.
+    pub(crate) fn clear_updated_since_last_reset(&mut self) {
+        self.updated_since_last_reset = false;
     }
 
     /// `m_maxGcoRadius`.
