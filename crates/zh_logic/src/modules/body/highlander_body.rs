@@ -73,7 +73,9 @@ impl BodyFacet for HighlanderBody {
     fn attempt_damage(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &mut DamageInfo) {
         if dmg.input.damage_type != DamageType::Unresistable {
             let cap = self.inner.get_health() - 1.0;
-            if cap < dmg.input.amount {
+            // The reference `min` is the macro `x < y ? x : y`, so a NaN amount takes the cap.
+            #[allow(clippy::neg_cmp_op_on_partial_ord)]
+            if !(dmg.input.amount < cap) {
                 dmg.input.amount = cap;
             }
         }

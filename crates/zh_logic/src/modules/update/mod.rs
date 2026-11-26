@@ -6,7 +6,9 @@ pub mod dynamic_geometry_info_update;
 pub mod dynamic_shroud_clearing_range_update;
 pub mod float_update;
 pub mod height_die_update;
+pub mod fire_spread_update;
 pub mod fire_weapon_update;
+pub mod flammable_update;
 pub mod lifetime_update;
 pub mod projectile_stream_update;
 pub mod prone_update;
@@ -53,6 +55,26 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         fire_weapon_update::parse_fire_weapon_update_data,
         fire_weapon_update::create_fire_weapon_update,
+    );
+    reg.register_module(
+        nk,
+        "FireSpreadUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        fire_spread_update::parse_fire_spread_update_data,
+        fire_spread_update::create_fire_spread_update,
+    );
+    reg.register_module(
+        nk,
+        "FlammableUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x005),
+        SleepyUpdatePhase::Normal,
+        false,
+        flammable_update::parse_flammable_update_data,
+        flammable_update::create_flammable_update,
     );
     reg.register_module(
         nk,

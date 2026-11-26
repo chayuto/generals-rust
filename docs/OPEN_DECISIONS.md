@@ -5,7 +5,7 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 ## Decisions
 
 1. **Where dock state lives.** The dock updates are unported. `setDockOpen` / `setDockCrippled` are recorded in `SimWorld::dock_closed` and `SimWorld::dock_crippled` as stand-ins (used by `PKT-292`, `PKT-297`). Options: a dock facet, or a side table.
-2. **Default `XferSave` version.** The reference library is built with `RETAIL_COMPATIBLE_XFER_SAVE=1`, so `PoisonedBehavior` saves version 2. With `retail-xfer-save` off, the crate writes version 3. `golden_wp53_c1` strips the appended source id and compares it separately. Should default features match 0 or 1?
+2. **Default `XferSave` version.** The reference library is built with `RETAIL_COMPATIBLE_XFER_SAVE=1`, so `PoisonedBehavior` saves version 2. With `retail-xfer-save` off, the crate writes version 3. `golden_wp53_c1` strips the appended source id and compares it separately; `FlammableUpdate` (version 1 against 2) is handled the same way in `golden_pkt330_327_fire`. Should default features match 0 or 1?
 3. **AI random-number draws.** `AIUpdateInterface` is unported. Its draws are imitated in `sim/mod.rs` (`ai_construct`, `ai_init_state_machine`, `ai_idle`). The real port must take them over.
 4. **Shared and redirected passenger lists. Decided 2026-11-26 (owner: do what a faithful port does).** The contain getters now take `(sim, ctx)`, as the C++ virtuals reach the tunnel tracker and the rider's contain module. `PKT-300` and `PKT-264` are ported; `PKT-284` is unblocked.
 5. **Containment override hooks. Decided 2026-11-26: yes, follow the C++ virtual calls.** `ContainBehavior` has hooks for `addToContainList`, `removeFromContain` and the list getters, but not yet for `addToContain`, `isEnclosingContainerFor` or `isSpecialOverlordStyleContainer`. Add those with the `OverlordContain` port. `HelixContain` (`PKT-275`) implements the facets itself.
@@ -55,6 +55,10 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `defect_object` leaves out the end of `Object::defect` that moves the object's mines to the new team.
 - `CaveContain` does nothing where the reference dereferences a null tracker, and `CaveSystem` ignores a negative index, where the reference runs out of memory. A map or script with such a cave would crash the original.
 - `Player` and `StealthUpdate` call `recalcApparentControllingPlayer` on containers. Ported modules have no such hook; `CaveFacet` offers it for caves only.
+- `FireSpreadUpdate`: `OCLEmbers` goes through `spawn_ocl`, which only records the call, so the objects an embers list creates and their PRNG draws are missing.
+- `FlammableUpdate` plays no burning sound (client audio).
+- `FlammableUpdate` takes its own aflame damage while executing. `attempt_damage_watching` replays that one `onDamage`; further damage to the same object from inside that call chain would not reach the module.
+- `set_wake_frame` saturates where C++ wraps, and the scheduler does not read a sleep above `0x7fffffff` as negative, as the signed `UpdateSleepTime` does. No fire-module INI duration reaches either.
 
 ## Waiting on unported code
 
@@ -62,4 +66,3 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `PKT-267 DumbProjectileBehavior`: `Weapon::positionProjectileForLaunch`, `PartitionManager::estimateTerrainExtremesAlongLine`, `WeaponTemplate::shouldProjectileCollideWith` and `WeaponStore::handleProjectileDetonation`.
 - `PKT-305 AutoDepositUpdate`: a hook for `Player::becomingTeamMember`, a per-player `ScoreKeeper`, construction percent on objects, and a home for the upgrade template that `getUpgradedSupplyBoost` caches across all instances.
 - `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly`.
-- `PKT-327 FireSpreadUpdate`, `PKT-330 FlammableUpdate`: they call each other (`tryToIgnite`, `wouldIgnite`, `startFireSpreading`), and no facet carries those calls.

@@ -143,6 +143,12 @@ impl SimView for EngineSim<'_> {
     fn has_module_by_name_key(&self, owner: ObjectSlot, mod_name_key: NameKeyType) -> bool {
         not_wired("has_module_by_name_key")
     }
+    fn object_would_ignite(&self, owner: ObjectSlot) -> Bool {
+        not_wired("object_would_ignite")
+    }
+    fn closest_would_ignite_object(&self, owner: ObjectSlot, range: Real) -> Option<ObjectSlot> {
+        not_wired("closest_would_ignite_object")
+    }
     fn player_money(&self, team_id: TeamId) -> UnsignedInt {
         not_wired("player_money")
     }
@@ -436,6 +442,18 @@ impl SimApi for EngineSim<'_> {
     }
     fn dispatch_on_damage(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo) {
         not_wired("dispatch_on_damage")
+    }
+    fn attempt_damage_watching( &mut self, target: ObjectSlot, dmg: &mut DamageInfo, watch: ModuleSlot, ) -> Option<ObjectStatusMaskType> {
+        not_wired("attempt_damage_watching")
+    }
+    fn try_to_ignite(&mut self, owner: ObjectSlot) {
+        not_wired("try_to_ignite")
+    }
+    fn start_fire_spreading(&mut self, owner: ObjectSlot) {
+        not_wired("start_fire_spreading")
+    }
+    fn set_body_aflame(&mut self, owner: ObjectSlot, setting: Bool) {
+        not_wired("set_body_aflame")
     }
     fn dispatch_on_healing(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo) {
         not_wired("dispatch_on_healing")

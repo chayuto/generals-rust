@@ -1038,6 +1038,12 @@ pub trait SimView {
     fn ai_enable_repulsors(&self) -> Bool;
     fn has_module_by_name_key(&self, owner: ObjectSlot, mod_name_key: NameKeyType) -> bool;
 
+    /// `wouldIgnite` of the owner's `FlammableUpdate`; `FALSE` without one.
+    fn object_would_ignite(&self, owner: ObjectSlot) -> Bool;
+
+    /// `getClosestObject(owner, range, FROM_CENTER_3D)` over the objects that would ignite.
+    fn closest_would_ignite_object(&self, owner: ObjectSlot, range: Real) -> Option<ObjectSlot>;
+
     fn player_money(&self, team_id: TeamId) -> UnsignedInt;
     fn player_is_human(&self, team_id: TeamId) -> Bool;
     fn is_neutral_controlled(&self, owner: ObjectSlot) -> Bool;
@@ -1202,6 +1208,20 @@ pub trait SimApi: SimView {
         duration: UnsignedInt,
     ) -> Bool;
     fn dispatch_on_damage(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo);
+    /// `attempt_damage` by a module on its own owner. A module cannot be called back while it
+    /// executes: this returns the owner's status when the `onDamage` loop reached `watch`.
+    fn attempt_damage_watching(
+        &mut self,
+        target: ObjectSlot,
+        dmg: &mut DamageInfo,
+        watch: ModuleSlot,
+    ) -> Option<ObjectStatusMaskType>;
+    /// `tryToIgnite` on the owner's `FlammableUpdate`, if it has one.
+    fn try_to_ignite(&mut self, owner: ObjectSlot);
+    /// `startFireSpreading` on the owner's `FireSpreadUpdate`, if it has one.
+    fn start_fire_spreading(&mut self, owner: ObjectSlot);
+    /// `BodyModuleInterface::setAflame`, which only rebuilds client effects.
+    fn set_body_aflame(&mut self, owner: ObjectSlot, setting: Bool);
     fn dispatch_on_healing(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo);
     fn dispatch_on_body_damage_state_change(
         &mut self,
@@ -1653,6 +1673,8 @@ pub struct SimWorld {
     pub upgrades_recorded: Vec<(TeamId, String)>,
     pub attacked_by: BTreeMap<TeamId, BTreeSet<Int>>,
     pub spawned_ocls: Vec<(String, ObjectId, Coord3D, Coord3D)>,
+    /// The module `attempt_damage_watching` waits for, and the status seen at its turn.
+    pub damage_watch: Option<(ModuleSlot, Option<ObjectStatusMaskType>)>,
     pub triggered_fx_lists: Vec<(String, Coord3D)>,
     pub triggered_damage_fx: Vec<(String, DamageType, Real, ObjectId, ObjectId)>,
     pub player_money: BTreeMap<TeamId, UnsignedInt>,
@@ -1754,6 +1776,7 @@ impl SimWorld {
             upgrades_recorded: Vec::new(),
             attacked_by: BTreeMap::new(),
             spawned_ocls: Vec::new(),
+            damage_watch: None,
             triggered_fx_lists: Vec::new(),
             triggered_damage_fx: Vec::new(),
             player_money: BTreeMap::new(),
@@ -3553,6 +3576,41 @@ impl SimView for SimContext {
         self.world.ai_enable_repulsors
     }
 
+    fn object_would_ignite(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|obj| {
+                obj.behaviors.iter().find_map(|&(ms, _)| {
+                    self.world
+                        .modules
+                        .payload(ms)
+                        .and_then(|m| m.as_flammable())
+                })
+            })
+            .map_or(FALSE, |f| f.would_ignite())
+    }
+
+    fn closest_would_ignite_object(&self, owner: ObjectSlot, range: Real) -> Option<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let me = objects
+            .id_of(owner)
+            .and_then(|id| partition_object(objects, factory, id))?;
+        let found = self.world.partition.get_closest_object(
+            QueryCenter::Object(&me),
+            range,
+            DistanceCalculationType::FromCenter3d,
+            &|id| partition_object(objects, factory, id),
+            &mut |id| {
+                objects
+                    .slot_by_id(id)
+                    .is_some_and(|slot| self.object_would_ignite(slot) != FALSE)
+            },
+        );
+        found.id.and_then(|id| objects.slot_by_id(id))
+    }
+
     fn has_module_by_name_key(&self, owner: ObjectSlot, mod_name_key: NameKeyType) -> bool {
         let Some(obj) = self.world.objects.get(owner) else {
             return false;
@@ -4638,6 +4696,64 @@ impl SimApi for SimContext {
         }
     }
 
+    fn try_to_ignite(&mut self, owner: ObjectSlot) {
+        let found = self.world.objects.get(owner).and_then(|obj| {
+            obj.behaviors.iter().map(|&(ms, _)| ms).find(|&ms| {
+                self.world
+                    .modules
+                    .payload(ms)
+                    .is_some_and(|m| m.as_flammable().is_some())
+            })
+        });
+        if let Some(ms) = found {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(f) = m.as_flammable_mut() {
+                    f.try_to_ignite(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn start_fire_spreading(&mut self, owner: ObjectSlot) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors.iter().map(|&(ms, _)| ms).collect()
+        });
+        for ms in slots {
+            let mut handled = false;
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(f) = m.as_fire_spread_mut() {
+                    f.start_fire_spreading(sim, ctx);
+                    handled = true;
+                }
+            });
+            if handled {
+                break;
+            }
+        }
+    }
+
+    fn set_body_aflame(&mut self, owner: ObjectSlot, setting: Bool) {
+        // A body that is executing is skipped: the call changes nothing in the simulation.
+        if let Some(body) = self.world.objects.get(owner).and_then(|o| o.body_slot) {
+            let _ = self.dispatch_module(body, |m, sim, ctx| {
+                if let Some(b) = m.as_body_mut() {
+                    b.set_aflame(sim, ctx, setting);
+                }
+            });
+        }
+    }
+
+    fn attempt_damage_watching(
+        &mut self,
+        target: ObjectSlot,
+        dmg: &mut DamageInfo,
+        watch: ModuleSlot,
+    ) -> Option<ObjectStatusMaskType> {
+        let outer = self.world.damage_watch.replace((watch, None));
+        self.attempt_damage_on(target, dmg);
+        std::mem::replace(&mut self.world.damage_watch, outer).and_then(|(_, status)| status)
+    }
+
     fn dispatch_on_damage(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo) {
         let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
             o.behaviors
@@ -4647,6 +4763,12 @@ impl SimApi for SimContext {
                 .collect()
         });
         for ms in slots {
+            let status = self.world.objects.get(owner).map(|o| o.status.clone());
+            if let Some((watch, seen)) = self.world.damage_watch.as_mut() {
+                if *watch == ms {
+                    *seen = status;
+                }
+            }
             let _ = self.dispatch_module(ms, |m, sim, ctx| {
                 if let Some(d) = m.as_damage_mut() {
                     d.on_damage(sim, ctx, dmg);
@@ -7889,6 +8011,14 @@ impl SimView for MockSimApi {
         self.ctx.has_module_by_name_key(owner, mod_name_key)
     }
 
+    fn object_would_ignite(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_would_ignite(owner)
+    }
+
+    fn closest_would_ignite_object(&self, owner: ObjectSlot, range: Real) -> Option<ObjectSlot> {
+        self.ctx.closest_would_ignite_object(owner, range)
+    }
+
     fn player_money(&self, team_id: TeamId) -> UnsignedInt {
         self.ctx.player_money(team_id)
     }
@@ -8331,6 +8461,27 @@ impl SimApi for MockSimApi {
     ) -> Bool {
         self.ctx
             .attempt_healing_from_sole_benefactor(target, amount, source, duration)
+    }
+
+    fn try_to_ignite(&mut self, owner: ObjectSlot) {
+        self.ctx.try_to_ignite(owner);
+    }
+
+    fn start_fire_spreading(&mut self, owner: ObjectSlot) {
+        self.ctx.start_fire_spreading(owner);
+    }
+
+    fn set_body_aflame(&mut self, owner: ObjectSlot, setting: Bool) {
+        self.ctx.set_body_aflame(owner, setting);
+    }
+
+    fn attempt_damage_watching(
+        &mut self,
+        target: ObjectSlot,
+        dmg: &mut DamageInfo,
+        watch: ModuleSlot,
+    ) -> Option<ObjectStatusMaskType> {
+        self.ctx.attempt_damage_watching(target, dmg, watch)
     }
 
     fn dispatch_on_damage(&mut self, owner: ObjectSlot, dmg: &mut DamageInfo) {

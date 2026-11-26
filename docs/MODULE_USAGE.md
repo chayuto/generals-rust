@@ -8,14 +8,13 @@ or weapon code outside modules). The replays do not match their recordings
 (`BASELINE.md`), so they are a sample of play, not the original games.
 
 - Classes created: 104; in every replay: 50.
-- Classes with a ported packet: 61 of 104; in every replay: 30 of 50.
-- Instances with a ported packet: 10271 of 14355.
+- Classes with a ported packet: 63 of 104; in every replay: 31 of 50.
+- Instances with a ported packet: 11030 of 14355.
 
 ## Not ported
 
 | Module | Packet | Replays | Instances | C++ bytes in packet |
 |---|---|---|---|---|
-| `FlammableUpdate` | `PKT-330` | 6 | 705 | 17139 |
 | `StealthUpdate` | `PKT-374` | 6 | 610 | 46745 |
 | `PhysicsBehavior` | `PKT-348` | 6 | 379 | 77122 |
 | `ProductionUpdate` | `PKT-354` | 6 | 347 | 60927 |
@@ -49,7 +48,6 @@ or weapon code outside modules). The replays do not match their recordings
 | `TransportAIUpdate` | `PKT-384` | 3 | 11 | 11159 |
 | `ParkingPlaceBehavior` | `PKT-286` | 3 | 4 | 41782 |
 | `SpawnPointProductionExitUpdate` | `PKT-367` | 3 | 4 | 13341 |
-| `FireSpreadUpdate` | `PKT-327` | 2 | 54 | 11332 |
 | `StructureToppleUpdate` | `PKT-377` | 2 | 12 | 31223 |
 | `TensileFormationUpdate` | `PKT-382` | 2 | 12 | 16588 |
 | `MissileLauncherBuildingUpdate` | `PKT-341` | 2 | 3 | 19292 |

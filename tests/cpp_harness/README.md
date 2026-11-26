@@ -40,6 +40,22 @@ Each `gen_*.cpp` here compiles unmodified `vendor/GeneralsX` sources, with minim
 - **How the oracle handles it:** the encoder output is recorded, but that one decode has no reference result and is skipped (see `compress_like_manager()`).
 - **Port contract:** the Rust decoder only has to return, with `Ok` or `Err` (packet §1, rule 7). `test_wp7_2b_compression_1000_small_golden_vectors` decodes that stream, and the CI job timeouts (`timeout-minutes` of 3 on Linux and 5 cross-OS in `ci-guardrails.yml`) stop a hang from running for long.
 
+### `min` is a macro, so NaN takes the second argument
+
+- **Where:** `HighlanderBody::attemptDamage`, `min(m_amount, getHealth() - 1)`.
+- **What happens:** a NaN damage amount becomes `health - 1` and is dealt. `if cap < amount` in Rust (`std::min` order) keeps the NaN.
+- **Guard:** `golden_pkt330_327_fire` feeds NaN damage to every body type it uses.
+
+### A module's own damage callback runs at its place in the list
+
+- **Where:** `FlammableUpdate::doAflameDamage` damages its owner from inside `update()`. With two `FlammableUpdate` modules and the AFLAME status cleared from outside, the second ignites after the first one's `onDamage` has already run.
+- **Port contract:** a callback replayed after the damage returns must see the object status of its turn (`attempt_damage_watching`), not the status afterwards.
+- **Guard:** `golden_pkt330_327_fire` (one vector of 1,000 shows the difference).
+
+### Oversized integer INI tokens differ by platform
+
+`scanType` takes the `__APPLE__` branch for integers too: `MinSpreadDelay = 100000000000` saturates with a warning on the reference Mac and is rejected elsewhere. Keep fixture tokens in range.
+
 ### `__APPLE__` watch list (not yet handled by an oracle)
 
 These are the other `__APPLE__` branches in the vendor sources at the pinned commit that can change data, not just file paths. Check them before writing a harness that compiles these files.

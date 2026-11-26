@@ -508,6 +508,18 @@ pub trait BehaviorModule: Send {
     fn as_die_mut(&mut self) -> Option<&mut dyn DieFacet> {
         None
     }
+    fn as_flammable(&self) -> Option<&dyn FlammableFacet> {
+        None
+    }
+
+    fn as_flammable_mut(&mut self) -> Option<&mut dyn FlammableFacet> {
+        None
+    }
+
+    fn as_fire_spread_mut(&mut self) -> Option<&mut dyn FireSpreadFacet> {
+        None
+    }
+
     fn as_damage_mut(&mut self) -> Option<&mut dyn DamageFacet> {
         None
     }
@@ -840,6 +852,20 @@ pub trait DieFacet {
     fn eject_pilot_dying(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn set_creator(&mut self, _creator_id: ObjectId) {}
     fn notify_script_engine(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+}
+
+/// The calls `FireSpreadUpdate` makes on another object's `FlammableUpdate`.
+pub trait FlammableFacet {
+    /// `FlammableUpdate::wouldIgnite`.
+    fn would_ignite(&self) -> Bool;
+    /// `FlammableUpdate::tryToIgnite`.
+    fn try_to_ignite(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+}
+
+/// The call `FlammableUpdate` makes on its owner's `FireSpreadUpdate`.
+pub trait FireSpreadFacet {
+    /// `FireSpreadUpdate::startFireSpreading`.
+    fn start_fire_spreading(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
 }
 
 /// Damage reaction facet (`DamageModuleInterface`).
