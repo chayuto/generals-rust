@@ -34,7 +34,7 @@ Not needed yet: threat and value maps (~340), position finding and line of sight
 ## Not mirrored or not verified
 
 - Containment registration (`set_in_partition` from the contain modules and the hijacker crate) has no oracle of its own; the existing contain suites pass.
-- No Rust counterpart yet: the register and unregister calls in `TunnelContain`, `CaveContain`, `TunnelTracker::loadPostProcess`, `HijackerUpdate` and `DeliverPayloadAIUpdate`, `TunnelContain::onContaining` (`PKT-284` waits on `OPEN_DECISIONS.md` items 4–5), and the re-filing on script disabled or unpowered changes. Add them when porting those.
+- No Rust counterpart yet: the register and unregister calls in `TunnelContain`, `CaveContain`, `TunnelTracker::loadPostProcess`, `HijackerUpdate` and `DeliverPayloadAIUpdate`, `TunnelContain::onContaining` (`PKT-284` is unported; see `OPEN_DECISIONS.md` items 4–5), and the re-filing on script disabled or unpowered changes. Add them when porting those.
 - `Object::setStatus` also detonates mines on an `UnderConstruction` change. Not ported.
 - Threat and value maps (`onPartitionCellChange`) are not ported (the shroud half of `onPartitionCellChange` is wired in 4b).
 - `iteratePotentialCollisions` and `PartitionFilterWouldCollide` are not ported; `geom_collides_with_geom` is.

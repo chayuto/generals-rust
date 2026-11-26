@@ -1471,16 +1471,16 @@ macro_rules! impl_contain_module {
                 fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
                     self.open_data().weapon_bonus_passed_to_passengers
                 }
-                fn get_contain_count(&self) -> UnsignedInt {
+                fn get_contain_count(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
                     self.open_core().contain_list_size
                 }
-                fn get_contain_max(&self) -> Int {
+                fn get_contain_max(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Int {
                     self.contain_max_value()
                 }
                 fn is_enclosing_container_for(&self, _other: ObjectSlot) -> Bool {
                     self.is_enclosing()
                 }
-                fn is_garrisonable(&self) -> Bool {
+                fn is_garrisonable(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
                     self.is_garrisonable_container()
                 }
                 fn is_bustable(&self) -> Bool {
@@ -1504,7 +1504,11 @@ macro_rules! impl_contain_module {
                 ) -> Bool {
                     self.is_valid_container(sim, ctx, obj, check_capacity)
                 }
-                fn get_contained_items(&self) -> &[ObjectId] {
+                fn get_contained_items<'a>(
+                    &'a self,
+                    _sim: &'a dyn SimView,
+                    _ctx: ModuleContext,
+                ) -> &'a [ObjectId] {
                     &self.open_core().contain_list
                 }
                 fn add_to_contain(
@@ -1570,7 +1574,12 @@ macro_rules! impl_contain_module {
                 fn get_hero_units_contained(&self) -> UnsignedInt {
                     self.open_core().hero_units_contained
                 }
-                fn is_contained(&self, obj_id: ObjectId) -> Bool {
+                fn is_contained(
+                    &self,
+                    _sim: &dyn SimView,
+                    _ctx: ModuleContext,
+                    obj_id: ObjectId,
+                ) -> Bool {
                     Bool::from(self.open_core().contain_list.contains(&obj_id))
                 }
                 fn on_selling(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {

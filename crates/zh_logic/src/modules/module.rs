@@ -907,14 +907,17 @@ pub trait ContainFacet {
     fn is_weapon_bonus_passed_to_passengers(&self) -> Bool {
         FALSE
     }
-    fn get_contain_count(&self) -> UnsignedInt;
-    fn get_contain_max(&self) -> Int {
+    /// The count, maximum, item list, membership, garrison and capture queries take the
+    /// game view because `TunnelContain` and `CaveContain` answer them from a tracker
+    /// outside the module and `OverlordContain` forwards them to its rider.
+    fn get_contain_count(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt;
+    fn get_contain_max(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Int {
         -1
     }
     fn is_enclosing_container_for(&self, _other: ObjectSlot) -> Bool {
         FALSE
     }
-    fn is_garrisonable(&self) -> Bool {
+    fn is_garrisonable(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
         FALSE
     }
     fn is_valid_container_for(
@@ -926,7 +929,11 @@ pub trait ContainFacet {
     ) -> Bool {
         FALSE
     }
-    fn get_contained_items(&self) -> &[ObjectId] {
+    fn get_contained_items<'a>(
+        &'a self,
+        _sim: &'a dyn SimView,
+        _ctx: ModuleContext,
+    ) -> &'a [ObjectId] {
         &[]
     }
     fn add_to_contain(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, obj: ObjectSlot);
@@ -974,7 +981,7 @@ pub trait ContainFacet {
     fn is_special_zero_slot_container(&self) -> Bool {
         FALSE
     }
-    fn is_kick_out_on_capture(&self) -> Bool {
+    fn is_kick_out_on_capture(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
         TRUE
     }
     fn is_passenger_allowed_to_fire(
@@ -995,7 +1002,12 @@ pub trait ContainFacet {
     fn get_rider_slot(&self, _sim: &dyn SimView) -> Option<ObjectSlot> {
         None
     }
-    fn is_contained(&self, _obj_id: ObjectId) -> Bool {
+    fn is_contained(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _obj_id: ObjectId,
+    ) -> Bool {
         FALSE
     }
     fn get_player_entered_mask(&self) -> UnsignedShort {

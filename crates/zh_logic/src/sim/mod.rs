@@ -3899,7 +3899,7 @@ impl SimView for SimContext {
             return 0;
         };
         if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
-            return c.get_contain_count();
+            return c.get_contain_count(self, self.world.modules.meta(cs).context(cs));
         }
         match self.world.modules.sidecar(cs) {
             ModuleSidecar::Contain { count, .. } => count,
@@ -3912,7 +3912,7 @@ impl SimView for SimContext {
             return -1;
         };
         if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
-            return c.get_contain_max();
+            return c.get_contain_max(self, self.world.modules.meta(cs).context(cs));
         }
         match self.world.modules.sidecar(cs) {
             ModuleSidecar::Contain { max, .. } => max,
@@ -4123,7 +4123,10 @@ impl SimView for SimContext {
             .modules
             .payload(cs)
             .and_then(|p| p.as_contain())
-            .map_or_else(Vec::new, |c| c.get_contained_items().to_vec())
+            .map_or_else(Vec::new, |c| {
+                let ctx = self.world.modules.meta(cs).context(cs);
+                c.get_contained_items(self, ctx).to_vec()
+            })
     }
 
     fn contain_is_passenger_allowed_to_fire(&self, owner: ObjectSlot, id: ObjectId) -> Bool {
@@ -4349,7 +4352,7 @@ impl SimView for SimContext {
             return FALSE;
         };
         if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
-            return c.is_garrisonable();
+            return c.is_garrisonable(self, self.world.modules.meta(cs).context(cs));
         }
         match self.world.modules.sidecar(cs) {
             ModuleSidecar::Contain { garrisonable, .. } => garrisonable,
@@ -5183,7 +5186,10 @@ impl SimApi for SimContext {
                 .modules
                 .payload(cs)
                 .and_then(|p| p.as_contain())
-                .is_some_and(|c| c.is_kick_out_on_capture() != FALSE)
+                .is_some_and(|c| {
+                    let ctx = self.world.modules.meta(cs).context(cs);
+                    c.is_kick_out_on_capture(self, ctx) != FALSE
+                })
         });
         if kick_out {
             self.contain_remove_all(owner, TRUE);

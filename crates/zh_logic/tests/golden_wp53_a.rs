@@ -1185,12 +1185,13 @@ fn golden_wp53_a_all_1000_seeds() {
 
         let (oc_pre_count, oc_pre_stealth, oc_pre_hero, oc_pre_pm, oc_pre_ids) = {
             let oc = sim.world.modules.payload(oc_slot).unwrap().as_contain().unwrap();
+            let ctx = sim.world.modules.meta(oc_slot).context(oc_slot);
             (
-                oc.get_contain_count(),
+                oc.get_contain_count(&sim, ctx),
                 oc.get_stealth_units_contained(),
                 oc.get_hero_units_contained(),
                 oc.get_player_entered_mask(),
-                oc.get_contained_items()
+                oc.get_contained_items(&sim, ctx)
                     .iter()
                     .map(|id| id.0 as u32)
                     .collect::<Vec<u32>>(),
@@ -1265,8 +1266,9 @@ fn golden_wp53_a_all_1000_seeds() {
 
         let (oc_post_count, oc_post_stealth, oc_post_hero) = {
             let oc = sim.world.modules.payload(oc_slot).unwrap().as_contain().unwrap();
+            let ctx = sim.world.modules.meta(oc_slot).context(oc_slot);
             (
-                oc.get_contain_count(),
+                oc.get_contain_count(&sim, ctx),
                 oc.get_stealth_units_contained(),
                 oc.get_hero_units_contained(),
             )
@@ -1328,7 +1330,10 @@ fn golden_wp53_a_all_1000_seeds() {
             .modules
             .payload(oc_col_slot)
             .and_then(|p| p.as_contain())
-            .is_some_and(|c| c.is_contained(sim.world.objects.id_of(oc_col_veh).unwrap()) != FALSE);
+            .is_some_and(|c| {
+                let ctx = sim.world.modules.meta(oc_col_slot).context(oc_col_slot);
+                c.is_contained(&sim, ctx, sim.world.objects.id_of(oc_col_veh).unwrap()) != FALSE
+            });
         assert_eq!(oc_col_cnt, exp.get("oc_col_cnt").as_u32(), "seed {seed} oc_col_cnt");
         assert_eq!(u32::from(oc_col_veh_in), exp.get("oc_col_veh").as_u32(), "seed {seed} oc_col_veh");
 
@@ -1900,7 +1905,10 @@ fn wp53_a_contracts_registration_collide_and_reentrancy() {
         .modules
         .payload(oc_slot)
         .and_then(|p| p.as_contain())
-        .map(|c| c.get_contained_items().to_vec())
+        .map(|c| {
+            let ctx = sim.world.modules.meta(oc_slot).context(oc_slot);
+            c.get_contained_items(&sim, ctx).to_vec()
+        })
         .unwrap();
     assert_eq!(oc_contains, vec![veh_id]);
     assert!(sim.world.objects.get(enemy).unwrap().contained_by.is_none());

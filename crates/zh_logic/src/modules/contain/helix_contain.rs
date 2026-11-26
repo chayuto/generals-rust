@@ -640,14 +640,14 @@ impl ContainFacet for HelixContain {
         TRUE
     }
 
-    fn get_contain_count(&self) -> UnsignedInt {
-        self.0.get_contain_count()
+    fn get_contain_count(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
+        self.0.get_contain_count(sim, ctx)
     }
-    fn get_contain_max(&self) -> Int {
-        self.0.get_contain_max()
+    fn get_contain_max(&self, sim: &dyn SimView, ctx: ModuleContext) -> Int {
+        self.0.get_contain_max(sim, ctx)
     }
-    fn is_garrisonable(&self) -> Bool {
-        self.0.is_garrisonable()
+    fn is_garrisonable(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool {
+        self.0.is_garrisonable(sim, ctx)
     }
     fn is_bustable(&self) -> Bool {
         self.0.is_bustable()
@@ -670,8 +670,12 @@ impl ContainFacet for HelixContain {
     ) -> Bool {
         ContainFacet::is_valid_container_for(&self.0, sim, ctx, obj, check_capacity)
     }
-    fn get_contained_items(&self) -> &[ObjectId] {
-        self.0.get_contained_items()
+    fn get_contained_items<'a>(
+        &'a self,
+        sim: &'a dyn SimView,
+        ctx: ModuleContext,
+    ) -> &'a [ObjectId] {
+        self.0.get_contained_items(sim, ctx)
     }
     fn remove_all_contained(
         &mut self,
@@ -709,8 +713,8 @@ impl ContainFacet for HelixContain {
     fn get_hero_units_contained(&self) -> UnsignedInt {
         self.0.get_hero_units_contained()
     }
-    fn is_contained(&self, obj_id: ObjectId) -> Bool {
-        self.0.is_contained(obj_id)
+    fn is_contained(&self, sim: &dyn SimView, ctx: ModuleContext, obj_id: ObjectId) -> Bool {
+        self.0.is_contained(sim, ctx, obj_id)
     }
     fn on_selling(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.0.on_selling(sim, ctx);
