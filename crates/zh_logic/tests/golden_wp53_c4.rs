@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 use zh_common::ini::{IniError, IniLoadType, IniReader};
-use zh_common::math::Coord3D;
+use zh_common::math::{Coord3D, Region3D};
 use zh_common::types::{
     Int, NameKeyType, Real, Relationship, TeamId, UpdateSleepTime, FALSE, TRUE,
 };
@@ -321,6 +321,14 @@ const TEAMS: [TeamId; 3] = [NEUTRAL, TEAM_A, TEAM_B];
 
 fn reset_world(sim: &mut SimContext, frame: u32, seed: u32, local_player: Int) {
     sim.world = SimWorld::new();
+    // The harness world: 20-unit partition cells over its 1000 by 1000 terrain.
+    sim.init_partition(
+        20.0,
+        Region3D {
+            lo: Coord3D::new(0.0, 0.0, 0.0),
+            hi: Coord3D::new(1000.0, 1000.0, 100.0),
+        },
+    );
     let w = &mut sim.world;
     for (player, team) in TEAMS.into_iter().enumerate() {
         w.team_players.insert(team, player as Int);
@@ -574,6 +582,8 @@ fn run_neutron(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
         targets.push(o);
     }
     let m = module_named(sim, bomb, "NeutronBlastBehavior");
+    // The harness updates the partition once, after setting the scene.
+    sim.update_partition();
     let allies = *v.p.last().expect("relationship mask");
     for (bit, pair) in [(0, 1), (1, 0), (0, 2), (2, 0), (1, 2), (2, 1)].into_iter().enumerate() {
         if allies & (1 << bit) != 0 {

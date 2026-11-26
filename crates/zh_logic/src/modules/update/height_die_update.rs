@@ -5,8 +5,7 @@
 //! Golden test: `crates/zh_logic/tests/golden_wp54_c.rs`.
 //!
 //! Destroying attached particle systems is client work; only the flag recording
-//! it is kept. The structure scan does not model the reference partition cell
-//! walk: see `SimView::find_objects_in_range_bounding_sphere_3d`.
+//! it is kept.
 
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::modules::behavior::behavior_module::{xfer_module_version, UpdateScheduleTracker};

@@ -11,7 +11,7 @@ use zh_common::golden_json::{
     get_u32,
 };
 use zh_common::ini::{IniLoadType, IniReader};
-use zh_common::math::Coord3D;
+use zh_common::math::{Coord3D, Region3D};
 use zh_common::types::{
     Bool, NameKeyType, Real, Relationship, TeamId, VeterancyLevel, XferVersion,
     FALSE, TRUE,
@@ -769,6 +769,14 @@ fn wp52_collide_crates_golden_vectors() {
     assert_eq!(lines.len(), 1000, "expected 1000 golden vector seeds");
 
     let mut api = MockSimApi::new();
+    // The harness world: 20-unit partition cells over its 1000 by 1000 terrain.
+    api.ctx.init_partition(
+        20.0,
+        Region3D {
+            lo: Coord3D::new(0.0, 0.0, 0.0),
+            hi: Coord3D::new(1000.0, 1000.0, 100.0),
+        },
+    );
     api.ctx.rules.fx_list_names.insert("FX_CrateExec".to_owned());
     api.ctx.rules.fx_list_names.insert("FX_CarBomb".to_owned());
     api.ctx.rules.ocl_names.insert("OCL_EjectEmpty".to_owned());
@@ -1745,6 +1753,8 @@ fn wp52_collide_crates_golden_vectors() {
             0.0,
         );
 
+        // The harness updates the partition here.
+        api.ctx.update_partition();
         api.object_mut(vt_crate).unwrap().ai_goal_object =
             Some(if vt_goal { vt_tgt } else { vt_decoy });
         let m_vt = first_collide_module(&api, vt_crate);

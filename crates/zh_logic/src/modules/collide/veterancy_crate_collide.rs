@@ -9,7 +9,7 @@ use crate::modules::collide::crate_collide::{
 use crate::modules::module::{BehaviorModule, ModuleData};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::rules::combat_types::LocomotorSurfaceType;
-use crate::sim::{SimApi, SimView};
+use crate::sim::{SimApi, SimView, PRIVATE_STATUS_OFF_MAP};
 use zh_common::ini::{IniError, IniReader};
 use zh_common::types::{Bool, Int, NameKeyType, Real, UnsignedInt, FALSE, TRUE};
 
@@ -221,21 +221,27 @@ impl CrateCollideImpl for VeterancyCrateCollide {
         if self.range_of_effect == 0 {
             let _ = gain_exp_for_level(sim, other, levels_to_gain, can_scale);
         } else {
-            let Some((other_pos, other_team)) = sim
+            let Some((other_team, other_off_map)) = sim
                 .object(other)
-                .map(|o| (*o.thing.get_position(), o.team_id))
+                .map(|o| (o.team_id, o.private_status & PRIVATE_STATUS_OFF_MAP))
             else {
                 return FALSE;
             };
-            let candidates = sim.find_objects_in_range(&other_pos, self.range_of_effect as Real);
-            for slot in candidates {
-                if slot == other {
-                    continue;
-                }
-                let same_player = sim.object(slot).is_some_and(|o| o.team_id == other_team);
-                if same_player {
-                    let _ = gain_exp_for_level(sim, slot, levels_to_gain, can_scale);
-                }
+            let other_player = sim.player_index(other_team);
+            // The search is from `other`, so it is not among the results. The filters
+            // run before anyone gains a level.
+            let targets: Vec<ObjectSlot> = sim
+                .find_objects_in_range_of(other, self.range_of_effect as Real)
+                .into_iter()
+                .filter(|&slot| {
+                    sim.object(slot).is_some_and(|o| {
+                        sim.player_index(o.team_id) == other_player
+                            && (o.private_status & PRIVATE_STATUS_OFF_MAP) == other_off_map
+                    })
+                })
+                .collect();
+            for slot in targets {
+                let _ = gain_exp_for_level(sim, slot, levels_to_gain, can_scale);
             }
         }
         TRUE

@@ -8,8 +8,8 @@
 //! bridge, names the bomb's current victim, sets `MISSILE_KILLING_SELF` and records player
 //! upgrades.
 //!
-//! The saved `PropagandaTowerBehavior` ids are compared sorted: the reference saves them in
-//! partition scan order (see `docs/OPEN_DECISIONS.md`).
+//! The saved `PropagandaTowerBehavior` ids are compared in the order saved, which is the
+//! order of the partition scan.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 use zh_common::ini::{IniError, IniLoadType, IniReader};
-use zh_common::math::Coord3D;
+use zh_common::math::{Coord3D, Region3D};
 use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, Relationship, TeamId, UpdateSleepTime, FALSE, TRUE,
 };
@@ -654,6 +654,14 @@ fn reset_world(sim: &mut SimContext, frame: u32, seed: u32, local_player: Int) {
     }
     w.frame = frame;
     w.rng.init_random_with_seed(seed);
+    // The harness world: 20-unit partition cells over its 1000 by 1000 terrain.
+    sim.init_partition(
+        20.0,
+        Region3D {
+            lo: Coord3D::new(0.0, 0.0, 0.0),
+            hi: Coord3D::new(1000.0, 1000.0, 100.0),
+        },
+    );
 }
 
 fn team_index(team: TeamId) -> u32 {
@@ -1042,6 +1050,8 @@ fn run_bunker(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
     let mut frame = v.frame;
     let mut rows = Vec::new();
     for &[code, a, ..] in &v.ops {
+        // The harness updates the partition before each operation.
+        sim.update_partition();
         let t = target.and_then(|s| live(sim, s));
         match code {
             0 if has_ai => {
@@ -1123,19 +1133,6 @@ fn run_bunker(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
     (rows, crc)
 }
 
-/// Sorts the saved tracker ids that follow the empty-list encoding of length `fixed`, as the
-/// harness does (the reference's order comes from its partition scan).
-fn sorted_ids(raw: &[u8], fixed: usize) -> Vec<u8> {
-    let mut ids: Vec<[u8; 4]> = raw[fixed..]
-        .chunks_exact(4)
-        .map(|c| [c[0], c[1], c[2], c[3]])
-        .collect();
-    ids.sort_by_key(|&c| u32::from_be_bytes(c));
-    let mut out = raw[..fixed].to_vec();
-    out.extend(ids.into_iter().flatten());
-    out
-}
-
 fn bonus_bits(sim: &SimContext, slot: Option<ObjectSlot>) -> u32 {
     let Some(slot) = slot else {
         return 4;
@@ -1186,6 +1183,8 @@ fn run_propaganda(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
         let u = matches!(code, 1 | 2 | 5 | 6)
             .then(|| live(sim, units[a as usize]))
             .flatten();
+        // The harness updates the partition before each operation.
+        sim.update_partition();
         match code {
             0 => {
                 for _ in 0..a {
@@ -1307,7 +1306,7 @@ fn run_propaganda(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
             let next = sim.module_schedule(m).expect("schedule").next_call_frame();
             let raw = save_module(sim, m);
             let tracked = ((raw.len() - fixed) / 4) as u32;
-            (Some(sorted_ids(&raw, fixed)), next, tracked)
+            (Some(raw), next, tracked)
         } else {
             (None, 0, 0)
         };
@@ -1455,6 +1454,7 @@ fn propaganda_load_reverses_the_tracked_ids() {
     let m = module_named(&mut sim, tower, "PropagandaTowerBehavior");
     spawn(&mut sim, "P53C3_URifle", TEAM_A);
     spawn(&mut sim, "P53C3_URifle", TEAM_A);
+    sim.update_partition();
     step(&mut sim, m, tower, 101);
     let saved = save_module(&mut sim, m);
     let fixed = saved.len() - 8;
@@ -1495,6 +1495,7 @@ fn range_scan_skips_riders_nested_in_an_enclosed_container() {
     };
 
     sim.contain_add(open, rider);
+    sim.update_partition();
     assert_eq!(seen(&sim), [true, true], "an open garrison hides nothing");
     sim.contain_add(transport, open);
     assert_eq!(seen(&sim), [false, false], "both leave with the transport");

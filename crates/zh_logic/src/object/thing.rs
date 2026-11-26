@@ -3,12 +3,13 @@
 use std::cell::Cell;
 
 use crate::arena::ThingTemplateId;
+use crate::combat::turret_ai::normalize_angle_cpp;
 use crate::object::r#override::Override;
 use crate::object::thing_factory::ThingFactory;
 use crate::object::thing_template::ThingTemplate;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::rules::kind_of::{KindOfMaskType, KindOfType};
-use zh_common::math::{gm_cosf, gm_sinf, normalize_angle, Coord3D, Matrix3D};
+use zh_common::math::{gm_cosf, gm_sinf, Coord3D, Matrix3D};
 use zh_common::types::{Bool, Int, Real, FALSE, TRUE};
 
 pub const INITIAL_THING_POS_X: Real = 0.0;
@@ -283,7 +284,8 @@ impl Thing {
             self.transform.set_axes(&x, &y, &z, &pos);
         }
 
-        self.cached_angle = normalize_angle(angle);
+        // The engine's `normalizeAngle`, range (-PI, PI], not the `WWMath` one.
+        self.cached_angle = normalize_angle_cpp(angle);
         self.cached_pos = pos;
         self.cache_flags
             .set(self.cache_flags.get() & !VALID_DIRVECTOR);

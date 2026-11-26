@@ -20,8 +20,6 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `BridgeScaffoldBehavior`: zero speed on a zero-length leg gives NaN positions. The reference then destroys the object from outside the module; Rust does not. `gen_wp53_c1.cpp` excludes those inputs, so no vector covers this.
 - An unknown `PulseFX` name stays set in Rust but becomes null in C++.
 - `destroy_object` runs the contain removal at once but `on_delete` only in `process_destroy_list`. C++ `Object::onDestroy` runs both inside `destroyObject`, so a destroyed container's riders stay alive until the end of the frame here. `gen_wp53_c2.cpp` never destroys a container outright.
-- `find_objects_in_range` returns objects in world list order, not partition scan order. Matching it needs the `PartitionManager` cell lists, which are not ported. `PropagandaTowerBehavior` saves its tracked ids in scan order, so its `Xfer` bytes differ once it tracks two or more. `golden_wp53_c3` compares the ids sorted.
-- **`PKT-291 PropagandaTowerBehavior` is not yet bit-exact**, whatever `PORT_MAP.md` counts, because of the scan order above. Once the partition scan is ported, remove the id sorting from `golden_wp53_c3`.
 - `capture_object` / `set_object_team` leave out the rest of `Object::onCapture`: `cancelAllTasks` on a dozer, clearing the `SCRIPT_UNSELLABLE` status and a skirmish AI selling a captured faction building.
 - With `retail-crc`, `WeaponTemplate::get_delay_between_shots` returns the maximum when the minimum exceeds it; the retail PRNG helper draws a value there. The default build matches.
 - `physics_apply_force` and `physics_apply_motive_force` are stand-ins: they add force over mass to velocity. C++ adds to acceleration, keeps only the lateral part while motive, and ignores NaN.
@@ -35,10 +33,8 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - Weapon firing leaves out `DAMAGE_DEPLOY`'s assault order, `processRequestAssistance` and the victim effects of `DAMAGE_DISARM`.
 - **`PKT-216 FireWeaponPower` is not bit-exact**, although `PORT_MAP.md` counts it. It fires at once, where C++ reloads all ammo and orders the unported AI to attack.
 - `Weapon::transfer_next_shot_stats_from` copies the stored status; C++ copies `getStatus()`, which refreshes it first. It has no callers.
-- `set_geometry_info` only stores the geometry. C++ `Object::setGeometryInfo` also re-registers the object with the partition manager and tells the drawable, so a later range scan can differ after `DynamicGeometryInfoUpdate`.
+- `set_geometry_info` stores the geometry and re-registers with the partition grid, but does not tell the drawable as C++ `Object::setGeometryInfo` does.
 - `ProjectileStreamUpdate::add_projectile` has no caller until weapon projectiles are ported.
-- **`PKT-333 HeightDieUpdate` is not fully bit-exact** with `TargetHeightIncludesStructures`, although `PORT_MAP.md` counts it. C++ only visits partition cells near the owner, so it can miss a tall structure that the distance rule alone accepts, and the port then kills the object when C++ would not. Needs partition cells; no vector covers it.
-- `find_objects_in_range` and `find_objects_in_range_bounding` differ from C++ in two ways besides order: they skip destroyed objects, which stay in the partition until the destroy list is processed, and they accept a distance equal to the radius, where C++ uses `<`. `find_objects_in_range_bounding_sphere_3d` does neither.
 - `RadiusDecalUpdate::create_radius_decal` has no caller, and takes a template name because decal templates are not ported.
 
 ## Waiting on unported code
@@ -49,4 +45,4 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly`.
 - `PKT-327 FireSpreadUpdate`, `PKT-330 FlammableUpdate`: they call each other (`tryToIgnite`, `wouldIgnite`, `startFireSpreading`), and no facet carries those calls.
 - `PKT-372 SpyVisionUpdate`: the player vision-spied state (`setUnitsVisionSpied`).
-- `PKT-388 WeaponBonusUpdate`: the partition scan order, which decides the order the bonus helpers are woken in.
+- `PKT-388 WeaponBonusUpdate`: was waiting on the partition scan order, which is now ported. Ready to retry.

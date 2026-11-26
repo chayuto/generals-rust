@@ -4,9 +4,8 @@
 //! Packet: `packets/phase5/PKT-291_PropagandaTowerBehavior.md`.
 //! Golden test: `crates/zh_logic/tests/golden_wp53_c3.rs`.
 //!
-//! The tracked ids follow the order of `find_objects_in_range`, not of the C++ partition scan
-//! (see `docs/OPEN_DECISIONS.md`). Not modelled: the off-map scan filter. An `UpgradeRequired`
-//! that names no upgrade crashes the reference; here it counts as not owned.
+//! An `UpgradeRequired` that names no upgrade crashes the reference; here it counts as not
+//! owned.
 
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::combat::damage::DamageInfo;
@@ -20,7 +19,7 @@ use crate::rules::disabled_types::{disabled_mask_all, DisabledMaskType, Disabled
 use crate::rules::kind_of::KindOfType;
 use crate::rules::object_status_types::ObjectStatusType;
 use crate::rules::upgrade::{UpgradeMaskType, UpgradeType};
-use crate::sim::{SimApi, SimView};
+use crate::sim::{SimApi, SimView, PRIVATE_STATUS_OFF_MAP};
 use std::any::Any;
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
 use zh_common::types::{
@@ -220,7 +219,11 @@ impl PropagandaTowerBehavior {
             }
         }
 
-        // Allied, alive, non-structure objects in range. Entries are pushed at the head.
+        // Allied, alive, non-structure objects in range on the same side of the map edge.
+        // Entries are pushed at the head.
+        let owner_off_map = sim
+            .object(owner)
+            .map_or(0, |o| o.private_status & PRIVATE_STATUS_OFF_MAP);
         let mut new_list = Vec::new();
         for obj in sim.find_objects_in_range(&center, self.data.scan_radius) {
             if sim.player_relationship(owner, obj) != Relationship::Allies
@@ -228,13 +231,19 @@ impl PropagandaTowerBehavior {
             {
                 continue;
             }
-            let Some((id, dead)) = sim
-                .object(obj)
-                .map(|o| (o.id, o.is_effectively_dead() != FALSE))
-            else {
+            let Some((id, dead, off_map)) = sim.object(obj).map(|o| {
+                (
+                    o.id,
+                    o.is_effectively_dead() != FALSE,
+                    o.private_status & PRIVATE_STATUS_OFF_MAP,
+                )
+            }) else {
                 continue;
             };
-            if dead || (obj == owner && self.data.affects_self == FALSE) {
+            if dead
+                || off_map != owner_off_map
+                || (obj == owner && self.data.affects_self == FALSE)
+            {
                 continue;
             }
             new_list.insert(0, id);

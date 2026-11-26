@@ -18,7 +18,7 @@ use crate::rules::combat_types::{DamageType, DeathType};
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::KindOfType;
 use crate::rules::object_status_types::ObjectStatusType;
-use crate::sim::{SimApi, SimView};
+use crate::sim::{SimApi, SimView, PRIVATE_STATUS_OFF_MAP};
 use std::any::Any;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::types::{
@@ -133,12 +133,17 @@ impl DieFacet for NeutronBlastBehavior {
         };
 
         // The scan filters run when the iterator is built, before anything is hurt.
+        let owner_off_map = sim
+            .object(owner)
+            .map_or(0, |o| o.private_status & PRIVATE_STATUS_OFF_MAP);
         let targets: Vec<ObjectSlot> = sim
             .find_objects_in_range(&center, self.data.blast_radius)
             .into_iter()
             .filter(|&slot| {
-                sim.object(slot)
-                    .is_some_and(|o| o.is_effectively_dead() == FALSE)
+                sim.object(slot).is_some_and(|o| {
+                    o.is_effectively_dead() == FALSE
+                        && (o.private_status & PRIVATE_STATUS_OFF_MAP) == owner_off_map
+                })
             })
             .collect();
 

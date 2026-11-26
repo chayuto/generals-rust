@@ -13,9 +13,8 @@
 // Effects are observed with an extra FXNugget on each fixture FXList (the map is revealed so the
 // shroud test passes). The bunker buster shockwave is observed through its weapon's `FireFX`.
 //
-// `PropagandaTowerBehavior` saves its tracked ids in partition scan order, which the port does
-// not reproduce, so the ids are sorted before the bytes are recorded (see
-// `docs/OPEN_DECISIONS.md`).
+// `PropagandaTowerBehavior` saves its tracked ids in partition scan order, and the bytes are
+// recorded as saved.
 
 #include "oracle_wp51_world.h"
 
@@ -484,18 +483,6 @@ static void gen_propaganda(Vec& v, int i) {
     }
 }
 
-// Sorts the saved tracker ids that follow the empty-list encoding of length `fixed`.
-static std::string sorted_ids(const std::string& hex, size_t fixed) {
-    std::vector<std::string> ids;
-    for (size_t i = fixed; i + 8 <= hex.size(); i += 8) ids.push_back(hex.substr(i, 8));
-    std::sort(ids.begin(), ids.end(), [](const std::string& a, const std::string& b) {
-        return std::stoul(a, nullptr, 16) < std::stoul(b, nullptr, 16);
-    });
-    std::string out = hex.substr(0, fixed);
-    for (const std::string& s : ids) out += s;
-    return out;
-}
-
 static void run_propaganda(oracle_wp51::World& w, Vec& v) {
     const uint32_t tteam = v.p[0], container = v.p[1], second = v.p[2], count = v.p[3];
     Player* player = team_of(w, tteam)->getControllingPlayer();
@@ -604,7 +591,7 @@ static void run_propaganda(oracle_wp51::World& w, Vec& v) {
             next = m->friend_getNextCallFrame();
             const std::string raw = save_hex(m);
             tracked = static_cast<uint32_t>((raw.size() - fixed) / 8);
-            x = sorted_ids(raw, fixed);
+            x = raw;
         }
         obs.push_back(next);
         obs.push_back(tracked);

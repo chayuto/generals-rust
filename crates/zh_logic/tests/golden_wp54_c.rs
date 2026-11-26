@@ -14,10 +14,9 @@
 //! Not covered: loading a save; the pure virtual special power interface; decal
 //! drawing, visibility to the local player and decal templates (only an empty or
 //! non-empty name is used); disabled owners; an owner without a player;
-//! structures that the reference partition cell walk misses although their
-//! bounding sphere is in range, where the port is known to differ (see the harness
-//! header; all structures here start within 40 units of the owner and none of the
-//! 150 vectors had to be discarded for this);
+//! structures that the partition cell walk misses although their bounding sphere
+//! is in range (the harness would discard such a vector, and none of the 150 had
+//! to be);
 //! wall layers, several bridges and rubble bridges; contained or destroyed
 //! structures other than a plain destroy; particle systems; death by a body other
 //! than `ActiveBody`; a frame counter that wraps.
@@ -27,7 +26,7 @@ use std::path::Path;
 use zh_common::golden_json::{decode_hex_bytes, encode_hex_bytes, extract_vector_lines};
 use zh_common::golden_json::{get_str, get_u32};
 use zh_common::ini::{IniLoadType, IniReader};
-use zh_common::math::{Coord3D, Matrix3D};
+use zh_common::math::{Coord3D, Matrix3D, Region3D};
 use zh_common::types::{Bool, Int, Real, TeamId, FALSE, TRUE};
 use zh_common::xfer::{XferCrc, XferSave};
 use zh_logic::arena::{ModuleContext, ModuleSlot, ObjectSlot};
@@ -65,6 +64,14 @@ fn spawn(sim: &mut SimContext, name: &str, team: TeamId) -> ObjectSlot {
 
 fn reset_world(sim: &mut SimContext, frame: u32, seed: u32) {
     sim.world = SimWorld::new();
+    // The harness world: 20-unit partition cells over its 1000 by 1000 terrain.
+    sim.init_partition(
+        20.0,
+        Region3D {
+            lo: Coord3D::new(0.0, 0.0, 0.0),
+            hi: Coord3D::new(1000.0, 1000.0, 100.0),
+        },
+    );
     let w = &mut sim.world;
     for (player, team) in [NEUTRAL, TEAM_A].into_iter().enumerate() {
         w.team_players.insert(team, player as Int);
@@ -257,6 +264,8 @@ fn run_die(sim: &mut SimContext, case: &Case) -> (Vec<String>, u32) {
     for op in &case.ops {
         match op[0] {
             0 => {
+                // The harness updates the partition before each module step.
+                sim.update_partition();
                 frame += op[1];
                 step(sim, m, owner, frame);
             }

@@ -55,11 +55,15 @@ use crate::scheduler::{
 };
 use crate::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use crate::spatial::crate_system::CrateSystem;
+use crate::spatial::partition_collide::{process_contacts, CollisionHost};
+use crate::spatial::partition_grid::{PartitionGrid, PartitionObject};
+use crate::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::GeometryInfo;
 use zh_common::math::{
     div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D,
+    Region3D,
 };
 use zh_common::random_value::PrngState;
 use zh_common::types::{
@@ -1009,13 +1013,13 @@ pub trait SimView {
     fn object_is_above_terrain(&self, owner: ObjectSlot) -> Bool;
     fn object_has_ai(&self, owner: ObjectSlot) -> Bool;
     fn object_ai_goal_object(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
+    /// `PartitionManager::iterateObjectsInRange(pos, radius, FROM_CENTER_2D)` with
+    /// `ITER_FASTEST` and no filters; the caller applies its own. Only objects filed
+    /// by the last [`SimContext::update_partition`] and strictly closer than `radius`.
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
-    fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
-    /// The objects `PartitionManager::iterateObjectsInRange(obj, radius,
-    /// FROM_BOUNDINGSPHERE_3D)` accepts by distance, in no particular order. As in
-    /// the reference, objects awaiting the destroy list are included. The
-    /// reference only visits objects filed in partition cells near `owner`, so it
-    /// can miss an object whose large sphere is in range from further away.
+    /// The same search from an object, which is never part of the result.
+    fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot>;
+    /// The object form of the search under `FROM_BOUNDINGSPHERE_3D`.
     fn find_objects_in_range_bounding_sphere_3d(
         &self,
         owner: ObjectSlot,
@@ -1384,6 +1388,10 @@ pub trait SimApi: SimView {
     /// `ContainModuleInterface::harmAndForceExitAllContained`.
     fn contain_harm_and_force_exit_all(&mut self, container: ObjectSlot, dmg: &DamageInfo);
     fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>);
+    /// `PartitionManager::registerObject` (`present`) or `unRegisterObject`. Both do
+    /// nothing if the object is already in that state. A newly registered object is
+    /// not seen by searches until the next [`SimContext::update_partition`].
+    fn set_in_partition(&mut self, owner: ObjectSlot, present: Bool);
     /// `BodyModuleInterface::setDamageState`.
     fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType);
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D);
@@ -1522,6 +1530,30 @@ pub trait SimApi: SimView {
     fn client(&mut self) -> &mut dyn ClientSink;
 }
 
+/// The smallest change of position or angle `Object::reactToTransformChange` acts on.
+const TRANSFORM_THRESHOLD: Real = 0.01;
+
+/// `PartitionCellSize` in the retail `GameData.ini`.
+pub const DEFAULT_PARTITION_CELL_SIZE: Real = 40.0;
+
+/// What the partition grid reads from the object `id`.
+fn partition_object(
+    objects: &ObjectArena<ObjectRecord>,
+    factory: &ThingFactory,
+    id: ObjectId,
+) -> Option<PartitionObject> {
+    let obj = objects.get(objects.slot_by_id(id)?)?;
+    let tmpl = obj.thing.template_override().get_final(factory);
+    Some(PartitionObject {
+        id,
+        pos: *obj.thing.get_position(),
+        angle: obj.thing.get_orientation(),
+        geometry: obj.geometry.clone(),
+        is_immobile: tmpl.map_or(FALSE, |t| t.is_kind_of(KindOfType::Immobile)),
+        build_cost: tmpl.map_or(0, |t| Int::from(t.get_build_cost())),
+    })
+}
+
 /// Mutable per-match simulation state (`GameLogic`).
 pub struct SimWorld {
     pub frame: UnsignedInt,
@@ -1607,6 +1639,8 @@ pub struct SimWorld {
     pub blocked_pathfind_cells: BTreeMap<(Int, Int, Int), PathfindCellType>,
     pub valid_movement_terrain_override: Option<Bool>,
     pub map_extent_hi: Coord3D,
+    /// `ThePartitionManager`'s cell grid. Sized by [`SimContext::init_partition`].
+    pub partition: PartitionGrid,
     /// `ThePlayerList->getLocalPlayer()` index (only used for apparent-controller visuals).
     pub local_player_index: Int,
     /// `Player::getDefaultTeam()` by player index.
@@ -1704,6 +1738,13 @@ impl SimWorld {
             blocked_pathfind_cells: BTreeMap::new(),
             valid_movement_terrain_override: None,
             map_extent_hi: Coord3D::new(1000.0, 1000.0, 100.0),
+            partition: PartitionGrid::new(
+                DEFAULT_PARTITION_CELL_SIZE,
+                Region3D {
+                    lo: Coord3D::new(0.0, 0.0, 0.0),
+                    hi: Coord3D::new(1000.0, 1000.0, 100.0),
+                },
+            ),
             local_player_index: 0,
             player_default_teams: BTreeMap::new(),
             skirmish_ai_teams: BTreeSet::new(),
@@ -1853,26 +1894,105 @@ impl SimContext {
             .unwrap_or(team_id.0)
     }
 
-    /// Whether `PartitionManager` would not hold `slot`, so that range scans cannot see it.
-    /// `OpenContain::addOrRemoveObjFromWorld` unregisters a rider of an enclosing container (the
-    /// `Masked` status set by `Object::onContainedBy`) and, with it, anything riding that rider
-    /// in a non-enclosing way.
-    fn is_out_of_partition(&self, slot: ObjectSlot) -> bool {
-        let mut current = slot;
-        // Bounded so that a containment cycle cannot hang the scan.
-        for _ in 0..8 {
-            let Some(obj) = self.world.objects.get(current) else {
-                return false;
-            };
-            let Some(container) = obj.contained_by else {
-                return false;
-            };
-            if obj.status.test(ObjectStatusType::Masked.as_i32()) != FALSE {
-                return true;
+    /// Sets the map extent, rebuilds the partition grid with `cell_size` over it and
+    /// registers every object in world list order (`TerrainLogic::setActiveBoundary`:
+    /// `friend_prepareForMapBoundaryAdjust` and `friend_notifyOfNewMapBoundary`). That
+    /// includes objects a container had taken out of the grid.
+    pub fn init_partition(&mut self, cell_size: Real, extent: Region3D) {
+        self.world.map_extent_hi = extent.hi;
+        self.world.partition = PartitionGrid::new(cell_size, extent);
+        let slots: Vec<ObjectSlot> = self.world.objects.world_iter().collect();
+        for slot in slots {
+            if let Some(id) = self.world.objects.id_of(slot) {
+                self.world.partition.register(id);
             }
-            current = container;
+            self.update_off_map(slot);
         }
-        false
+    }
+
+    /// Sets or clears `OFF_MAP` from the object's position: on the edge counts as off.
+    fn update_off_map(&mut self, owner: ObjectSlot) {
+        let extent = *self.world.partition.world_extents();
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let pos = obj.thing.get_position();
+        let inside = extent.lo.x < pos.x
+            && pos.x < extent.hi.x
+            && extent.lo.y < pos.y
+            && pos.y < extent.hi.y;
+        if inside {
+            obj.private_status &= !PRIVATE_STATUS_OFF_MAP;
+        } else {
+            obj.private_status |= PRIVATE_STATUS_OFF_MAP;
+        }
+    }
+
+    /// `PartitionManager::update`: re-files the dirty objects, then runs the
+    /// collisions found. Call it after [`Self::step_sleepy_updates`] and before
+    /// [`Self::process_destroy_list`].
+    ///
+    /// `Object::onPartitionCellChange` only maintains the shroud, threat and value
+    /// maps, which are not ported, so the changed ids are dropped.
+    pub fn update_partition(&mut self) {
+        let SimContext { rules, world, .. } = self;
+        let SimWorld {
+            partition, objects, ..
+        } = world;
+        let _ = partition.update(&|id| partition_object(objects, &rules.thing_factory, id));
+        process_contacts(self);
+    }
+
+    fn search_partition(
+        &self,
+        center: QueryCenter<'_>,
+        radius: Real,
+        rule: DistanceCalculationType,
+    ) -> Vec<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        self.world
+            .partition
+            .iterate_objects_in_range(
+                center,
+                radius,
+                rule,
+                IterOrderType::Fastest,
+                &|id| partition_object(objects, factory, id),
+                &mut |_| true,
+            )
+            .into_iter()
+            .filter_map(|(id, _)| objects.slot_by_id(id))
+            .collect()
+    }
+
+    fn search_partition_from_object(
+        &self,
+        owner: ObjectSlot,
+        radius: Real,
+        rule: DistanceCalculationType,
+    ) -> Vec<ObjectSlot> {
+        let Some(me) = self.world.objects.id_of(owner).and_then(|id| {
+            partition_object(&self.world.objects, &self.rules.thing_factory, id)
+        }) else {
+            return Vec::new();
+        };
+        self.search_partition(QueryCenter::Object(&me), radius, rule)
+    }
+
+    /// The bit change of `Object::setStatus`. A change of `UnderConstruction`
+    /// re-files the object (it changes what the object can see). The mine
+    /// detonation the original runs there is not ported.
+    fn change_status(&mut self, owner: ObjectSlot, status: ObjectStatusType, value: Int) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let was_set = obj.status.test(status.as_i32()) != FALSE;
+        obj.status.set(status.as_i32(), value);
+        let id = obj.id;
+        if status == ObjectStatusType::UnderConstruction && was_set != (value != 0) {
+            self.world.partition.make_dirty(id);
+        }
     }
 
     /// The `aiIdle` at the top of `Object::onCapture`. Retail always idles on a change of owner;
@@ -1930,9 +2050,10 @@ impl SimContext {
         Ok(out)
     }
 
-    /// `Object::reactToTransformChange`: tell the owner's container module that it moved.
+    /// `Object::reactToTransformChange`: re-file the owner in the partition, tell its
+    /// contain module that it moved, and on a change of position update `OFF_MAP`.
     fn react_to_transform_change(&mut self, owner: ObjectSlot, old_pos: &Coord3D, old_angle: Real) {
-        const THRESH: Real = 0.01;
+        const THRESH: Real = TRANSFORM_THRESHOLD;
         let Some(obj) = self.world.objects.get(owner) else {
             return;
         };
@@ -1944,15 +2065,20 @@ impl SimContext {
         if !moved && !turned {
             return;
         }
-        let Some(cs) = obj.contain_slot else {
-            return;
-        };
-        if !self.world.modules.is_executing(cs) {
-            let _ = self.dispatch_module(cs, |m, sim, ctx| {
-                if let Some(c) = m.as_contain_mut() {
-                    c.contain_react_to_transform_change(sim, ctx);
-                }
-            });
+        let contain_slot = obj.contain_slot;
+        let id = obj.id;
+        self.world.partition.make_dirty(id);
+        if let Some(cs) = contain_slot {
+            if !self.world.modules.is_executing(cs) {
+                let _ = self.dispatch_module(cs, |m, sim, ctx| {
+                    if let Some(c) = m.as_contain_mut() {
+                        c.contain_react_to_transform_change(sim, ctx);
+                    }
+                });
+            }
+        }
+        if moved {
+            self.update_off_map(owner);
         }
     }
 
@@ -2035,6 +2161,10 @@ impl SimContext {
 
             for ms in beh_slots {
                 let _ = self.world.modules.free(ms);
+            }
+            // `Object::~Object`.
+            if let Some(id) = self.world.objects.id_of(slot) {
+                self.world.partition.unregister(id);
             }
             let _ = self.world.objects.despawn(slot);
         }
@@ -2293,17 +2423,31 @@ impl SimContext {
         record.status = initial_status;
         record.experience_tracker.set_trainable(trainable);
         let mut dummy_reactor = crate::object::thing::NoopTransformReactor;
-        let mut mtx = zh_common::math::Matrix3D::identity();
-        self.terrain.align_on_terrain(angle, &pos, FALSE, &mut mtx);
-        record.thing.set_transform_matrix(&mtx, &mut dummy_reactor);
-
         let has_template = self
             .rules
             .thing_factory
             .find_by_template_id_final(tmpl.0 as u16)
             .is_some();
+        if has_template {
+            // `setPosition` then `setOrientation`, so that the angle is stored as
+            // given (normalized) rather than read back from the matrix.
+            let factory = &self.rules.thing_factory;
+            let terrain = self.terrain.as_ref();
+            record
+                .thing
+                .set_position(factory, &pos, terrain, &mut dummy_reactor);
+            record
+                .thing
+                .set_orientation(factory, angle, terrain, &mut dummy_reactor);
+        } else {
+            // A thing without a template has no kind-of bits to consult.
+            let mut mtx = zh_common::math::Matrix3D::identity();
+            self.terrain.align_on_terrain(angle, &pos, FALSE, &mut mtx);
+            record.thing.set_transform_matrix(&mtx, &mut dummy_reactor);
+        }
         if !has_template {
             let slot = self.world.objects.spawn(id, record, true);
+            self.world.partition.register(id);
             self.client.on_object_created(id, tmpl);
             return slot;
         }
@@ -2384,6 +2528,10 @@ impl SimContext {
             }
         }
 
+        // `ThingFactory::newObject` registers with the partition after the create
+        // modules and before `initObject`.
+        self.world.partition.register(id);
+
         // C++ builds the weapon set last (`updateWeaponSet` closes `initObject`), so module
         // constructors neither see its weapons nor share a reload with them.
         if let Some(ref set) = wts {
@@ -2391,6 +2539,18 @@ impl SimContext {
             if let Some(o) = self.world.objects.get_mut(slot) {
                 o.weapon_set.init_from_template_set(set, frame);
             }
+        }
+
+        // The original creates the object at the origin and positions it afterwards, so
+        // `OFF_MAP` is only evaluated for a position that differs from the origin.
+        let placed = self.world.objects.get(slot).is_some_and(|o| {
+            let p = o.thing.get_position();
+            [p.x, p.y, p.z]
+                .iter()
+                .any(|&v| zh_common::math::gm_fabsf(v) > TRANSFORM_THRESHOLD)
+        });
+        if placed {
+            self.update_off_map(slot);
         }
 
         self.client.on_object_created(id, tmpl);
@@ -2978,22 +3138,15 @@ impl SimView for SimContext {
     }
 
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
-        let r2 = radius * radius;
-        self.world
-            .objects
-            .world_iter()
-            .filter(|&slot| {
-                self.world.objects.get(slot).is_some_and(|obj| {
-                    if obj.is_destroyed() || self.is_out_of_partition(slot) {
-                        return false;
-                    }
-                    let pos = obj.thing.get_position();
-                    let dx = pos.x - center.x;
-                    let dy = pos.y - center.y;
-                    (dx * dx + dy * dy) <= r2
-                })
-            })
-            .collect()
+        self.search_partition(
+            QueryCenter::Position(*center),
+            radius,
+            DistanceCalculationType::FromCenter2d,
+        )
+    }
+
+    fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot> {
+        self.search_partition_from_object(owner, radius, DistanceCalculationType::FromCenter2d)
     }
 
     fn find_objects_in_range_bounding_sphere_3d(
@@ -3001,55 +3154,11 @@ impl SimView for SimContext {
         owner: ObjectSlot,
         radius: Real,
     ) -> Vec<ObjectSlot> {
-        let Some(me) = self.world.objects.get(owner) else {
-            return Vec::new();
-        };
-        let a = *me.thing.get_position();
-        let a_z = a.z + me.geometry.get_z_delta_to_center_position();
-        let a_radius = me.geometry.get_bounding_sphere_radius();
-        self.world
-            .objects
-            .world_iter()
-            .filter(|&slot| {
-                // Objects awaiting the destroy list stay in the reference partition.
-                slot != owner
-                    && self.world.objects.get(slot).is_some_and(|obj| {
-                        if self.is_out_of_partition(slot) {
-                            return false;
-                        }
-                        let b = obj.thing.get_position();
-                        let dx = b.x - a.x;
-                        let dy = b.y - a.y;
-                        let dz = (b.z + obj.geometry.get_z_delta_to_center_position()) - a_z;
-                        let mut dist_sqr = dx * dx + dy * dy + dz * dz;
-                        let total = a_radius + obj.geometry.get_bounding_sphere_radius();
-                        if total > 0.0 {
-                            let shrunk = zh_common::math::gm_sqrtf(dist_sqr) - total;
-                            dist_sqr = if shrunk <= 0.0 { 0.0 } else { shrunk * shrunk };
-                        }
-                        dist_sqr < radius * radius
-                    })
-            })
-            .collect()
-    }
-
-    fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
-        self.world
-            .objects
-            .world_iter()
-            .filter(|&slot| {
-                self.world.objects.get(slot).is_some_and(|obj| {
-                    if obj.is_destroyed() || self.is_out_of_partition(slot) {
-                        return false;
-                    }
-                    let pos = obj.thing.get_position();
-                    let dx = pos.x - center.x;
-                    let dy = pos.y - center.y;
-                    let eff = radius + obj.geometry.get_bounding_circle_radius();
-                    (dx * dx + dy * dy) <= (eff * eff)
-                })
-            })
-            .collect()
+        self.search_partition_from_object(
+            owner,
+            radius,
+            DistanceCalculationType::FromBoundingSphere3d,
+        )
     }
 
     fn find_special_power_module(
@@ -3722,6 +3831,46 @@ impl SimContext {
     }
 }
 
+impl CollisionHost for SimContext {
+    fn grid_mut(&mut self) -> &mut PartitionGrid {
+        &mut self.world.partition
+    }
+
+    fn partition_object(&self, id: ObjectId) -> Option<PartitionObject> {
+        partition_object(&self.world.objects, &self.rules.thing_factory, id)
+    }
+
+    fn is_no_collide(&self, id: ObjectId) -> bool {
+        self.world.objects.slot_by_id(id).is_some_and(|slot| {
+            self.object_is_kind_of(slot, KindOfType::NoCollide) != FALSE
+        })
+    }
+
+    fn has_no_collisions_status(&self, id: ObjectId) -> bool {
+        self.world
+            .objects
+            .slot_by_id(id)
+            .and_then(|slot| self.world.objects.get(slot))
+            .is_some_and(|o| o.status.test(ObjectStatusType::NoCollisions.as_i32()) != FALSE)
+    }
+
+    fn is_destroyed(&self, id: ObjectId) -> bool {
+        self.world
+            .objects
+            .slot_by_id(id)
+            .and_then(|slot| self.world.objects.get(slot))
+            .is_none_or(ObjectRecord::is_destroyed)
+    }
+
+    fn on_collide(&mut self, id: ObjectId, other: ObjectId, loc: &Coord3D, normal: &Coord3D) {
+        let Some(slot) = self.world.objects.slot_by_id(id) else {
+            return;
+        };
+        let other = self.world.objects.slot_by_id(other);
+        self.dispatch_on_collide(slot, other, Some(loc), Some(normal));
+    }
+}
+
 impl SimApi for SimContext {
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
         if let Some(obj) = self.world.objects.get_mut(owner) {
@@ -4281,9 +4430,7 @@ impl SimApi for SimContext {
     }
 
     fn set_status(&mut self, owner: ObjectSlot, status: ObjectStatusType) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.status.set(status.as_i32(), 1);
-        }
+        self.change_status(owner, status, 1);
         if status == ObjectStatusType::Repulsor {
             let until = self.world.frame.saturating_add(2 * 30);
             self.trigger_repulsor(owner, until);
@@ -4291,9 +4438,7 @@ impl SimApi for SimContext {
     }
 
     fn clear_status(&mut self, owner: ObjectSlot, status: ObjectStatusType) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.status.set(status.as_i32(), 0);
-        }
+        self.change_status(owner, status, 0);
     }
 
     fn set_weapon_bonus_condition(
@@ -5257,6 +5402,12 @@ impl SimApi for SimContext {
                 .collect()
         });
         for ms in slots {
+            // Tested before each module, in case a collide module sets it.
+            if self.world.objects.get(owner).is_some_and(|o| {
+                o.status.test(ObjectStatusType::NoCollisions.as_i32()) != FALSE
+            }) {
+                break;
+            }
             let _ = self.dispatch_module(ms, |m, sim, ctx| {
                 if let Some(c) = m.as_collide_mut() {
                     c.on_collide(sim, ctx, other, loc, normal);
@@ -5372,8 +5523,15 @@ impl SimApi for SimContext {
     }
 
     fn set_geometry_info(&mut self, owner: ObjectSlot, geom: &GeometryInfo) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.geometry = geom.clone();
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.geometry = geom.clone();
+        let id = obj.id;
+        // The number of cells an object may occupy is fixed per registration.
+        if self.world.partition.is_registered(id) {
+            self.world.partition.unregister(id);
+            self.world.partition.register(id);
         }
     }
 
@@ -5573,6 +5731,17 @@ impl SimApi for SimContext {
         if let Some(obj) = self.world.objects.get_mut(passenger) {
             obj.contained_by = container;
             obj.contained_by_frame = if container.is_some() { frame } else { 0 };
+        }
+    }
+
+    fn set_in_partition(&mut self, owner: ObjectSlot, present: Bool) {
+        let Some(id) = self.world.objects.id_of(owner) else {
+            return;
+        };
+        if present != FALSE {
+            self.world.partition.register(id);
+        } else {
+            self.world.partition.unregister(id);
         }
     }
 
@@ -6927,8 +7096,8 @@ impl SimView for MockSimApi {
         self.ctx.find_objects_in_range(center, radius)
     }
 
-    fn find_objects_in_range_bounding(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
-        self.ctx.find_objects_in_range_bounding(center, radius)
+    fn find_objects_in_range_of(&self, owner: ObjectSlot, radius: Real) -> Vec<ObjectSlot> {
+        self.ctx.find_objects_in_range_of(owner, radius)
     }
 
     fn find_objects_in_range_bounding_sphere_3d(
@@ -7850,6 +8019,10 @@ impl SimApi for MockSimApi {
 
     fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>) {
         self.ctx.set_contained_by(passenger, container);
+    }
+
+    fn set_in_partition(&mut self, owner: ObjectSlot, present: Bool) {
+        self.ctx.set_in_partition(owner, present);
     }
 
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D) {

@@ -12,8 +12,7 @@ use crate::modules::special_power::special_power_module::{
     SpecialPowerBehaviorImpl, SpecialPowerModule, SpecialPowerModuleData,
 };
 use crate::rules::kind_of::KindOfType;
-use crate::rules::object_status_types::ObjectStatusType;
-use crate::sim::SimApi;
+use crate::sim::{SimApi, PRIVATE_STATUS_OFF_MAP};
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
 use zh_common::math::Coord3D;
 use zh_common::types::{NameKeyType, Real, Relationship, UnsignedInt, FALSE};
@@ -175,9 +174,9 @@ impl SpecialPowerBehaviorImpl for DemoralizeSpecialPower {
             }
         }
 
-        let source_masked = sim.object(ctx.owner_slot).map_or(FALSE, |o| {
-            o.status.test(ObjectStatusType::Masked.as_i32())
-        });
+        let source_off_map = sim
+            .object(ctx.owner_slot)
+            .map_or(0, |o| o.private_status & PRIVATE_STATUS_OFF_MAP);
         let candidates = sim.find_objects_in_range(loc, range);
         for target in candidates {
             let rel = sim.player_relationship(ctx.owner_slot, target);
@@ -187,10 +186,10 @@ impl SpecialPowerBehaviorImpl for DemoralizeSpecialPower {
             if sim.object_is_kind_of(target, KindOfType::Infantry) == FALSE {
                 continue;
             }
-            let target_masked = sim.object(target).map_or(FALSE, |o| {
-                o.status.test(ObjectStatusType::Masked.as_i32())
-            });
-            if target_masked != source_masked {
+            let target_off_map = sim
+                .object(target)
+                .map_or(0, |o| o.private_status & PRIVATE_STATUS_OFF_MAP);
+            if target_off_map != source_off_map {
                 continue;
             }
             if sim.object_has_ai(target) != FALSE {

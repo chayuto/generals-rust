@@ -389,6 +389,7 @@ impl OpenContainCore {
     pub fn load_post_process(
         &mut self,
         data: &OpenContainModuleData,
+        enclosing: Bool,
         sim: &mut dyn SimApi,
         ctx: ModuleContext,
     ) {
@@ -403,6 +404,9 @@ impl OpenContainCore {
         for id in ids {
             if let Some(slot) = sim.find_object(id) {
                 self.add_to_contain_list(sim, slot);
+                if enclosing != FALSE {
+                    add_or_remove_obj_from_world(sim, slot, FALSE);
+                }
                 sim.set_contained_by(slot, Some(ctx.owner_slot));
             }
         }
@@ -488,7 +492,9 @@ pub trait ContainBehavior: Any + Send {
     }
     fn post_process(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         let data = self.open_data().clone();
-        self.open_core_mut().load_post_process(&data, sim, ctx);
+        let enclosing = self.is_enclosing();
+        self.open_core_mut()
+            .load_post_process(&data, enclosing, sim, ctx);
     }
 
     // UpdateModule
@@ -631,6 +637,19 @@ fn sync_contain_sidecar<C: ContainBehavior + ?Sized>(
     );
 }
 
+/// The partition half of `OpenContain::addOrRemoveObjFromWorld`. Riders that `obj`
+/// holds without enclosing them come and go with it.
+fn add_or_remove_obj_from_world(sim: &mut dyn SimApi, obj: ObjectSlot, add: Bool) {
+    sim.set_in_partition(obj, add);
+    for id in sim.contain_items(obj) {
+        if let Some(rider) = sim.find_object(id) {
+            if sim.contain_is_enclosing_container_for(obj, rider) == FALSE {
+                add_or_remove_obj_from_world(sim, rider, add);
+            }
+        }
+    }
+}
+
 /// `Object::onContainedBy` (status bits plus back pointer).
 fn on_contained_by(sim: &mut dyn SimApi, rider: ObjectSlot, owner: ObjectSlot, enclosing: Bool) {
     sim.set_status(rider, ObjectStatusType::Unselectable);
@@ -687,6 +706,10 @@ pub fn add_to_contain<C: ContainBehavior + ?Sized>(
     c.open_core_mut().player_entered_mask = sim.player_mask(rider_team);
     sync_contain_sidecar(c, sim, ctx);
 
+    if c.is_enclosing() != FALSE {
+        add_or_remove_obj_from_world(sim, rider, FALSE);
+    }
+
     #[cfg(feature = "retail-crc")]
     c.redeploy(sim, ctx);
 
@@ -730,6 +753,10 @@ fn remove_at<C: ContainBehavior + ?Sized>(
         core.hero_units_contained = core.hero_units_contained.saturating_sub(1);
     }
     sync_contain_sidecar(c, sim, ctx);
+
+    if c.is_enclosing() != FALSE {
+        add_or_remove_obj_from_world(sim, rider, TRUE);
+    }
 
     if let Some((c_pos, c_layer)) = sim
         .object(ctx.owner_slot)

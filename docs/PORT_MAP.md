@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`215` implemented, `0` seeded skeletons, `248` unported)
-- **Golden Vector Oracles:** `61` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `60` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `62` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `61` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -263,6 +263,7 @@
 | `docs/golden_vectors/PARTITION_COLLIDE.json` | 520 | no |
 | `docs/golden_vectors/PARTITION_GRID.json` | 1200 | no |
 | `docs/golden_vectors/PARTITION_QUERY.json` | 3609 | no |
+| `docs/golden_vectors/PARTITION_WIRING.json` | 320 | no |
 | `docs/golden_vectors/PKT-001.json` | 1000 | no |
 | `docs/golden_vectors/PKT-002.json` | 1000 | no |
 | `docs/golden_vectors/PKT-003.json` | 1000 | no |
@@ -344,6 +345,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_collide.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_query.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_partition_wiring.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt003.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt116_academy_stats.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt143_locomotor.rs` | `active` |

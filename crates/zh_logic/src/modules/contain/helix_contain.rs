@@ -268,7 +268,10 @@ impl ContainBehavior for HelixBase {
 
     fn post_process(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         let data = self.data.transport.open.clone();
-        self.state.core.load_post_process(&data, sim, ctx);
+        let enclosing = self.is_enclosing();
+        self.state
+            .core
+            .load_post_process(&data, enclosing, sim, ctx);
         self.portable_slot = sim.find_object(self.portable_structure_id);
     }
 

@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniLoadType, IniReader};
-use zh_common::math::Coord3D;
+use zh_common::math::{Coord3D, Region3D};
 use zh_common::types::{
     Bool, Int, NameKeyType, Real, Relationship, TeamId, UnsignedInt, UpdateSleepTime, FALSE, TRUE,
 };
@@ -904,6 +904,14 @@ fn build_rules() -> RulesRegistry {
 
 fn new_sim(rules: RulesRegistry) -> SimContext {
     let mut sim = SimContext::new();
+    // The harness world: 20-unit partition cells over its 1000 by 1000 terrain.
+    sim.init_partition(
+        20.0,
+        Region3D {
+            lo: Coord3D::new(0.0, 0.0, 0.0),
+            hi: Coord3D::new(1000.0, 1000.0, 100.0),
+        },
+    );
     sim.rules = rules;
     sim.world.team_players.insert(TEAM_NEUTRAL, 0);
     sim.world.team_players.insert(TEAM_A, 1);
@@ -1533,6 +1541,7 @@ fn golden_wp53_a_all_1000_seeds() {
             TEAM_A,
             Coord3D::new(320.0, 300.0, 0.0),
         );
+        sim.update_partition();
 
         hurt(&mut sim, ah_obj, DamageType::Unresistable, DeathType::Normal, 60.0);
         hurt(&mut sim, ah_ally, DamageType::Unresistable, DeathType::Normal, 50.0);
@@ -1743,6 +1752,7 @@ fn golden_wp53_a_all_1000_seeds() {
         let f2_crc = crc_module(&mut sim, f2_slot);
         let f2_hex = save_module_hex(&mut sim, f2_slot);
         let _f2_target = spawn(&mut sim, "P53_Inf", TEAM_B, Coord3D::new(460.0, 450.0, 0.0));
+        sim.update_partition();
         hurt(
             &mut sim,
             f2_obj,
@@ -1774,6 +1784,7 @@ fn golden_wp53_a_all_1000_seeds() {
         let gs_enemy = spawn(&mut sim, "P53_Grantable", TEAM_B, Coord3D::new(20.0, 10.0, 0.0));
         let gs_offmap = spawn(&mut sim, "P53_Grantable", TEAM_A, Coord3D::new(-5.0, -5.0, 0.0));
         sim.world.objects.get_mut(gs_offmap).unwrap().private_status |= PRIVATE_STATUS_OFF_MAP;
+        sim.update_partition();
 
         let gs_slot = find_module_by_name(&mut sim, gs_obj, "GrantStealthBehavior", 0).unwrap();
         let gs_init_pri = sim.module_schedule(gs_slot).unwrap().priority();

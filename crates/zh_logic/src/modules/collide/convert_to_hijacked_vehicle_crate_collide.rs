@@ -174,6 +174,7 @@ impl CrateCollideImpl for ConvertToHijackedVehicleCrateCollide {
 
         let shroud_range = object_shroud_clearing_range(sim, ctx.owner_slot);
         sim.set_shroud_clearing_range(other, shroud_range);
+        sim.set_in_partition(ctx.owner_slot, FALSE);
         FALSE
     }
 

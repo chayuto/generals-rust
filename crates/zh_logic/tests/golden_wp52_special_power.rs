@@ -8,7 +8,7 @@ use zh_common::golden_json::{
     decode_hex_bytes, extract_vector_lines, get_i32, get_i32_vec, get_str, get_u32, get_u32_array,
 };
 use zh_common::ini::{IniLoadType, IniReader};
-use zh_common::math::Coord3D;
+use zh_common::math::{Coord3D, Region3D};
 use zh_common::types::{NameKeyType, ObjectId, TeamId, FALSE, TRUE};
 use zh_common::xfer::{XferCrc, XferError, XferLoad, XferSave};
 use zh_logic::arena::{
@@ -589,6 +589,16 @@ End
 #[test]
 fn test_wp52_demoralize_special_power_and_subclass_contracts() {
     let mut sim = SimContext::new();
+    // The harness world: 20-unit partition cells over its 1000 by 1000 terrain.
+    // The units below stand at y = 0. A position on the map edge is off the map, so
+    // the map starts further out.
+    sim.init_partition(
+        20.0,
+        Region3D {
+            lo: Coord3D::new(-100.0, -100.0, 0.0),
+            hi: Coord3D::new(1000.0, 1000.0, 100.0),
+        },
+    );
     register_demoralize_special_power(&mut sim.rules.module_registry, &mut sim.rules.name_keys);
     sim.rules.fx_list_names.insert("FX_Demoralize".to_owned());
     load_base_rules(&mut sim);
@@ -764,6 +774,7 @@ End
     }
 
     let dem_ms = find_sp_module(&sim, src);
+    sim.update_partition();
     let _ = sim.dispatch_module(dem_ms, |m, sim_a, ctx| {
         m.as_special_power_mut().unwrap().do_special_power_at_location(
             sim_a,
