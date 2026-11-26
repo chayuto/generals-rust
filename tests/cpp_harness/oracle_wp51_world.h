@@ -178,6 +178,13 @@ public:
     void update() override {}
     void draw() override {}
     View* createView(bool = false) override { return nullptr; }
+    // UI text needs `TheGlobalLanguageData`, `TheDisplay` and fonts, none of which exist
+    // headless. Without these `Radar::tryUnderAttackEvent` segfaults when a structure is damaged.
+    void message(UnicodeString, ...) override {}
+    void message(AsciiString, ...) override {}
+    void messageColor(const RGBColor*, UnicodeString, ...) override {}
+    void messageNoFormat(const UnicodeString&) override {}
+    void messageNoFormat(const RGBColor*, const UnicodeString&) override {}
 };
 
 class NullAudioManager : public AudioManager {
@@ -454,7 +461,23 @@ struct World {
             if (!p_n->getTunnelSystem()) {
                 p_n->*access_member(Wp51PlayerTunnelTag()) = newInstance(TunnelTracker);
             }
+            // `Player::init` leaves no default team, but retail always has one for the neutral
+            // player. Without it `GarrisonContain::onObjectCreated` (InitialRoster) spawns
+            // into `getControllingPlayer()->getDefaultTeam() == nullptr` and segfaults.
             team_neutral = p_n->getDefaultTeam();
+            if (!team_neutral) {
+                Dict dict_n;
+                TheTeamFactory->initTeam("TeamNeutral", AsciiString::TheEmptyString, TRUE, &dict_n);
+                team_neutral = TheTeamFactory->findTeam("TeamNeutral");
+                if (team_neutral) {
+                    team_neutral->setControllingPlayer(p_n);
+                    p_n->*access_member(Wp51PlayerDefaultTeamTag()) = team_neutral;
+                }
+            }
+            if (!p_n->getDefaultTeam()) {
+                std::fprintf(stderr, "oracle: neutral player has no default team\n");
+                std::abort();
+            }
         }
         if (p_a) {
             const PlayerTemplate* pta =
