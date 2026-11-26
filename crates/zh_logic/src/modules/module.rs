@@ -531,6 +531,12 @@ pub trait BehaviorModule: Send {
     fn as_dock_mut(&mut self) -> Option<&mut dyn DockFacet> {
         None
     }
+    fn as_topple_mut(&mut self) -> Option<&mut dyn ToppleFacet> {
+        None
+    }
+    fn as_auto_deposit_mut(&mut self) -> Option<&mut dyn AutoDepositFacet> {
+        None
+    }
     fn as_power_plant_mut(&mut self) -> Option<&mut dyn PowerPlantFacet> {
         None
     }
@@ -923,6 +929,27 @@ pub trait CreateFacet {
     fn should_do_on_build_complete(&self) -> Bool {
         FALSE
     }
+}
+
+/// The calls other code makes on a `ToppleUpdate` (`Object::topple`).
+pub trait ToppleFacet {
+    /// `isAbleToBeToppled`.
+    fn is_able_to_be_toppled(&self) -> Bool;
+    /// `applyTopplingForce`.
+    fn apply_toppling_force(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        direction: &Coord3D,
+        speed: Real,
+        options: UnsignedInt,
+    );
+}
+
+/// The call `Player::becomingTeamMember` makes on an `AutoDepositUpdate`.
+pub trait AutoDepositFacet {
+    /// `awardInitialCaptureBonus`, for the player now controlling the owner.
+    fn award_initial_capture_bonus(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
 }
 
 /// Collision reaction facet (`CollideModuleInterface`).

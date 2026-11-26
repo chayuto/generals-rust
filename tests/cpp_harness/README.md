@@ -163,6 +163,20 @@ A small object normally spans at most two cells per axis, and its cell array has
 
 `Object::setStatus` with `OBJECT_STATUS_UNDER_CONSTRUCTION` also detonates mines it finds. The port does not do this, so vectors with mines must not toggle it.
 
+### `StructureToppleUpdate` reads the client PRNG into the simulation
+
+- **What happens:** the burst delay is `GameClientRandomValue`, and the burst makes logic-PRNG draws and OCLs. Anything client-side that draws from the same stream (for example the jitter of `AutoDepositUpdate`'s floating text) moves later bursts.
+- **Port contract:** the Rust module draws through `rng_client_int`. `golden_pkt383_377_305_topple` probes the client seed after every vector.
+
+### `AutoDepositUpdate` caches one upgrade template for the whole process
+
+- **What happens:** `getUpgradedSupplyBoost` holds a function-local `static`, so every `UpgradedBoost` entry of every instance tests the upgrade named by the first lookup.
+- **Port contract:** `SimWorld::auto_deposit_boost_upgrade` caches the first result. A harness cannot reset it, so the Rust test carries it from vector to vector.
+
+### `StructureToppleUpdate` never plays `TopplingFX`
+
+- **What happens:** the field is parsed and never used. The crushing damage line also swaps sine and cosine for its sideways offset, so it is not perpendicular to the fall.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault.
@@ -216,3 +230,7 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 ### Observing orders and model bones without an AI or models
 
 - **How the oracle handles it:** `gen_pkt315_379_357_367_exits.cpp` registers `AIUpdateInterface` subclasses that override `aiDoCommand` to record the order, which also avoids the AI refusing it (a disabled unit is not `isMobile`). Bones come from a `DrawModule` swapped into the drawable's module array, so `getPristineBonePositions` and `convertBonePosToWorldPos` run unmodified.
+### Revealing the map for the local player needs a display
+
+`revealMapForPlayerPermanently` calls `TheDisplay->setShroudLevel` for the local player, and there is none. Reveal first, then `setLocalPlayer`. Without the reveal, `FXList` drops effects at shrouded positions (`gen_pkt383_377_305_topple.cpp`).
+

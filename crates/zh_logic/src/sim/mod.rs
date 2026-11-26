@@ -18,6 +18,7 @@ use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
+use crate::economy::score_keeper::ScoreKeeper;
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
@@ -589,6 +590,9 @@ impl RulesRegistry {
     }
 }
 
+/// `CONSTRUCTION_COMPLETE` (`BuildAssistant.h`).
+pub const CONSTRUCTION_COMPLETE: Real = -1.0;
+
 /// Slot-stored object state (`Object` in `ObjectArena<ObjectRecord>`), embedding [`Thing`].
 #[derive(Debug, Clone)]
 pub struct ObjectRecord {
@@ -683,6 +687,10 @@ pub struct ObjectRecord {
     pub ai_locomotor: Option<Box<Locomotor>>,
     /// Set once the AI behaviour state machine exists (`AIUpdateInterface::onObjectCreated`).
     pub ai_state_machine_ready: Bool,
+    /// `Object::m_constructionPercent`.
+    pub construction_percent: Real,
+    /// Copy of the body's last damage type, read while the body is executing.
+    pub body_last_damage_type: Option<DamageType>,
 }
 
 impl ObjectRecord {
@@ -777,6 +785,8 @@ impl ObjectRecord {
             ai_locomotor_set: None,
             ai_locomotor: None,
             ai_state_machine_ready: FALSE,
+            construction_percent: CONSTRUCTION_COMPLETE,
+            body_last_damage_type: None,
         }
     }
 
@@ -1187,6 +1197,16 @@ pub trait SimView {
     fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot>;
     /// The objects of every player who counts `team_id`'s player as an enemy, in player order.
     fn enemy_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot>;
+
+    /// `Object::getConstructionPercent`.
+    fn object_construction_percent(&self, owner: ObjectSlot) -> Real;
+    /// `Object::isLogicallyVisible`, for the local player.
+    fn object_is_logically_visible(&self, owner: ObjectSlot) -> Bool;
+    /// The damage type of `BodyModuleInterface::getLastDamageInfo`. `None` is the
+    /// null pointer of a body that keeps none.
+    fn object_last_damage_type(&self, owner: ObjectSlot) -> Option<DamageType>;
+    /// `ScriptEngine::adjustToppleDirection`.
+    fn adjust_topple_direction(&self, owner: ObjectSlot, direction: &mut Coord3D);
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -1685,6 +1705,29 @@ pub trait SimApi: SimView {
     /// `AIUpdateInterface::chooseLocomotorSet`.
     fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType);
     fn client(&mut self) -> &mut dyn ClientSink;
+
+    /// `GameClientRandomValue`.
+    fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int;
+    fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real);
+    /// `Object::topple`.
+    fn topple_object(
+        &mut self,
+        owner: ObjectSlot,
+        direction: &Coord3D,
+        speed: Real,
+        options: UnsignedInt,
+    );
+    /// `Pathfinder::removeObjectFromPathfindMap`.
+    fn pathfinder_remove_object(&mut self, owner: ObjectSlot);
+    /// `BoneFXUpdate::stopAllBoneFX` (the module is unported: the call is recorded).
+    fn stop_all_bone_fx(&mut self, owner: ObjectSlot);
+    /// `Money::deposit`, with its unsigned wrapping amount.
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt);
+    /// `InGameUI::addFloatingText` of an "add cash" message.
+    fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int);
+    /// The mask of the template in the `static` of `AutoDepositUpdate`'s
+    /// `getUpgradedSupplyBoost`: the first call looks `name` up, later calls ignore it.
+    fn auto_deposit_boost_upgrade(&mut self, name: &str) -> Option<UpgradeMaskType>;
 }
 
 /// An `aiFollowExitProductionPath` order; the AI state it drives is unported.
@@ -1806,8 +1849,18 @@ pub struct SimWorld {
     pub player_captured_objects: BTreeMap<TeamId, Int>,
     pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
     pub special_power_uses_delay: Bool,
-    /// `ScoreKeeper::m_totalMoneyEarned` (players have no score keeper yet).
-    pub player_money_earned: BTreeMap<TeamId, Int>,
+    /// `Player::getScoreKeeper()` by player index.
+    pub score_keepers: BTreeMap<Int, ScoreKeeper>,
+    /// `ScriptEngine::m_toppleDirections`, keyed by the named object's id (objects
+    /// have no name yet).
+    pub script_topple_directions: BTreeMap<ObjectId, Coord3D>,
+    /// `BoneFXUpdate::stopAllBoneFX` calls.
+    pub bone_fx_stops: Vec<ObjectId>,
+    /// "Add cash" floating texts: object, position, amount.
+    pub floating_money_texts: Vec<(ObjectId, Coord3D, Int)>,
+    /// The `static const UpgradeTemplate*` of `AutoDepositUpdate`: unset until the
+    /// first lookup, then its result for good.
+    pub auto_deposit_boost_upgrade: Option<Option<UpgradeMaskType>>,
     /// Teams whose controlling player is a playable side (`Player::isPlayableSide`).
     pub playable_side_teams: BTreeSet<TeamId>,
     pub car_bombed_objects: Vec<(ObjectId, ObjectId)>,
@@ -1910,7 +1963,11 @@ impl SimWorld {
             player_captured_objects: BTreeMap::new(),
             shared_special_power_ready_frames: BTreeMap::new(),
             special_power_uses_delay: TRUE,
-            player_money_earned: BTreeMap::new(),
+            score_keepers: BTreeMap::new(),
+            script_topple_directions: BTreeMap::new(),
+            bone_fx_stops: Vec::new(),
+            floating_money_texts: Vec::new(),
+            auto_deposit_boost_upgrade: None,
             playable_side_teams: BTreeSet::new(),
             car_bombed_objects: Vec::new(),
             hijacked_objects: Vec::new(),
@@ -2127,6 +2184,33 @@ impl SimContext {
             .get(&team_id)
             .copied()
             .unwrap_or(team_id.0)
+    }
+
+    /// The `AutoDepositUpdate` part of `Player::becomingTeamMember(obj, true)`.
+    fn award_capture_bonus(&mut self, owner: ObjectSlot) {
+        if self.is_neutral_controlled(owner) != FALSE {
+            return;
+        }
+        // `findUpdateModule("AutoDepositUpdate")`.
+        let Some(ms) = self.module_by_name(owner, "AutoDepositUpdate") else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, sim, ctx| {
+            if let Some(deposit) = m.as_auto_deposit_mut() {
+                deposit.award_initial_capture_bonus(sim, ctx);
+            }
+        });
+    }
+
+    /// `Object::findModule` by module name.
+    fn module_by_name(&mut self, owner: ObjectSlot, name: &str) -> Option<ModuleSlot> {
+        let key = self.rules.name_keys.name_to_key(name);
+        self.behavior_slots(owner).into_iter().find(|&ms| {
+            self.world
+                .modules
+                .payload(ms)
+                .is_some_and(|p| p.module_name_key() == key)
+        })
     }
 
     /// Collects all object slots controlled by `player_idx` in `Player::iterateObjects`
@@ -4729,6 +4813,70 @@ impl SimView for SimContext {
             _ => FALSE,
         }
     }
+
+    fn object_construction_percent(&self, owner: ObjectSlot) -> Real {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(CONSTRUCTION_COMPLETE, |o| o.construction_percent)
+    }
+
+    fn object_is_logically_visible(&self, owner: ObjectSlot) -> Bool {
+        // `getOuterObject`.
+        let mut outer = owner;
+        while let Some(container) = self.world.objects.get(outer).and_then(|o| o.contained_by) {
+            outer = container;
+        }
+        if self.object_is_kind_of(outer, KindOfType::Disguiser) != FALSE {
+            return TRUE;
+        }
+        let Some(obj) = self.world.objects.get(outer) else {
+            return TRUE;
+        };
+        if obj.status.test(ObjectStatusType::Stealthed.as_i32()) == FALSE
+            || obj.status.test(ObjectStatusType::Detected.as_i32()) != FALSE
+        {
+            return TRUE;
+        }
+        let local = self.world.local_player_index;
+        let owner_player = self.player_index_for_team(obj.team_id);
+        let relationship = if owner_player == local {
+            Relationship::Allies
+        } else {
+            self.world
+                .player_relationships
+                .get(&(local, owner_player))
+                .copied()
+                .unwrap_or(Relationship::Neutral)
+        };
+        let active = self
+            .world
+            .player_default_teams
+            .get(&local)
+            .is_none_or(|&team| self.player_is_active(team) != FALSE);
+        Bool::from(!active || relationship == Relationship::Allies)
+    }
+
+    fn object_last_damage_type(&self, owner: ObjectSlot) -> Option<DamageType> {
+        let obj = self.world.objects.get(owner)?;
+        match self.world.modules.payload(obj.body_slot?) {
+            Some(body) => Some(body.as_body()?.get_last_damage_info()?.input.damage_type),
+            // The body is running (a death inside its own damage handling).
+            None => obj.body_last_damage_type,
+        }
+    }
+
+    fn adjust_topple_direction(&self, owner: ObjectSlot, direction: &mut Coord3D) {
+        let scripted = self
+            .world
+            .objects
+            .id_of(owner)
+            .and_then(|id| self.world.script_topple_directions.get(&id));
+        if let Some(&scripted) = scripted {
+            *direction = scripted;
+            direction.normalize();
+        }
+    }
 }
 
 impl SimContext {
@@ -6317,8 +6465,12 @@ impl SimApi for SimContext {
     }
 
     fn add_money_earned(&mut self, team_id: TeamId, amount: Int) {
-        let total = self.world.player_money_earned.entry(team_id).or_insert(0);
-        *total = total.wrapping_add(amount);
+        let player = self.player_index_for_team(team_id);
+        self.world
+            .score_keepers
+            .entry(player)
+            .or_default()
+            .add_money_earned(amount);
     }
 
     fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
@@ -6769,6 +6921,8 @@ impl SimApi for SimContext {
             return;
         }
         self.world.team_member_prepend(new_team, owner);
+        // `Player::becomingTeamMember(obj, true)`, before `onCapture`.
+        self.award_capture_bonus(owner);
         if old_team == TeamId::INVALID {
             return;
         }
@@ -8169,6 +8323,73 @@ impl SimApi for SimContext {
     fn client(&mut self) -> &mut dyn ClientSink {
         self.client.as_mut()
     }
+
+    fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int {
+        self.world.rng.get_game_client_random_value(lo, hi)
+    }
+
+    fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.construction_percent = percent;
+        }
+    }
+
+    fn topple_object(
+        &mut self,
+        owner: ObjectSlot,
+        direction: &Coord3D,
+        speed: Real,
+        options: UnsignedInt,
+    ) {
+        // `findModule("ToppleUpdate")`. A running module is not entered again.
+        let Some(ms) = self.module_by_name(owner, "ToppleUpdate") else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, sim, ctx| {
+            if let Some(t) = m.as_topple_mut() {
+                if t.is_able_to_be_toppled() != FALSE {
+                    t.apply_toppling_force(sim, ctx, direction, speed, options);
+                }
+            }
+        });
+    }
+
+    fn pathfinder_remove_object(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.pathfind_map_objects.remove(&id);
+        }
+    }
+
+    fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
+        let key = self.rules.name_keys.name_to_key("BoneFXUpdate");
+        let has_module = self.has_module_by_name_key(owner, key);
+        if let (true, Some(id)) = (has_module, self.world.objects.id_of(owner)) {
+            self.world.bone_fx_stops.push(id);
+        }
+    }
+
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+        let entry = self.world.player_money.entry(team_id).or_insert(0);
+        *entry = entry.wrapping_add(amount);
+    }
+
+    fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.floating_money_texts.push((id, *pos, amount));
+        }
+    }
+
+    fn auto_deposit_boost_upgrade(&mut self, name: &str) -> Option<UpgradeMaskType> {
+        if self.world.auto_deposit_boost_upgrade.is_none() {
+            let mask = self
+                .rules
+                .upgrade_center
+                .find_upgrade(name, &mut self.rules.name_keys)
+                .map(|t| t.upgrade_mask().clone());
+            self.world.auto_deposit_boost_upgrade = Some(mask);
+        }
+        self.world.auto_deposit_boost_upgrade.clone().flatten()
+    }
 }
 
 /// Lightweight [`SimApi`] wrapper used in standalone Gate V2 module tests.
@@ -8741,6 +8962,22 @@ impl SimView for MockSimApi {
 
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
         self.ctx.contain_is_garrisonable(owner)
+    }
+
+    fn object_construction_percent(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_construction_percent(owner)
+    }
+
+    fn object_is_logically_visible(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_is_logically_visible(owner)
+    }
+
+    fn object_last_damage_type(&self, owner: ObjectSlot) -> Option<DamageType> {
+        self.ctx.object_last_damage_type(owner)
+    }
+
+    fn adjust_topple_direction(&self, owner: ObjectSlot, direction: &mut Coord3D) {
+        self.ctx.adjust_topple_direction(owner, direction);
     }
 }
 
@@ -9864,5 +10101,43 @@ impl SimApi for MockSimApi {
 
     fn client(&mut self) -> &mut dyn ClientSink {
         self.ctx.client()
+    }
+
+    fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int {
+        self.ctx.rng_client_int(lo, hi)
+    }
+
+    fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real) {
+        self.ctx.set_object_construction_percent(owner, percent);
+    }
+
+    fn topple_object(
+        &mut self,
+        owner: ObjectSlot,
+        direction: &Coord3D,
+        speed: Real,
+        options: UnsignedInt,
+    ) {
+        self.ctx.topple_object(owner, direction, speed, options);
+    }
+
+    fn pathfinder_remove_object(&mut self, owner: ObjectSlot) {
+        self.ctx.pathfinder_remove_object(owner);
+    }
+
+    fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
+        self.ctx.stop_all_bone_fx(owner);
+    }
+
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+        self.ctx.deposit_player_money(team_id, amount);
+    }
+
+    fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int) {
+        self.ctx.add_floating_money_text(owner, pos, amount);
+    }
+
+    fn auto_deposit_boost_upgrade(&mut self, name: &str) -> Option<UpgradeMaskType> {
+        self.ctx.auto_deposit_boost_upgrade(name)
     }
 }

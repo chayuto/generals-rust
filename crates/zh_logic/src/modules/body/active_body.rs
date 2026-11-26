@@ -404,6 +404,15 @@ impl ActiveBody {
         }
     }
 
+    /// Readers of `getLastDamageInfo` that run while this body is executing see the
+    /// copy on the object.
+    fn mirror_last_damage_type(&self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+        let damage_type = self.last_damage_info.input.damage_type;
+        if let Some(obj) = sim.object_mut(ctx.owner_slot) {
+            obj.body_last_damage_type = Some(damage_type);
+        }
+    }
+
     fn finish_health_damage(
         &mut self,
         sim: &mut dyn SimApi,
@@ -421,6 +430,7 @@ impl ActiveBody {
         dmg.output.actual_damage_clipped = self.prev_health - self.current_health;
 
         self.record_last_damage_info(sim, dmg);
+        self.mirror_last_damage_type(sim, ctx);
 
         if self.last_damage_info.input.source_id != ObjectId::INVALID {
             sim.record_attacked_by(ctx.owner_slot, self.last_damage_info.input.source_id);
@@ -827,6 +837,7 @@ impl BodyFacet for ActiveBody {
             self.last_damage_info = healing.clone();
             self.last_damage_cleared = FALSE;
             self.last_healing_timestamp = sim.frame();
+            self.mirror_last_damage_type(sim, ctx);
 
             self.sync_sidecar_to_sim(sim, ctx);
 

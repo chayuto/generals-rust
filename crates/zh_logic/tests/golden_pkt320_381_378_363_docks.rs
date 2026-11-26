@@ -626,12 +626,13 @@ fn row(sim: &mut SimContext, s: &mut Scene, ret: &[u32], d: i64) -> String {
     ];
     for team in TEAMS {
         v.push(sim.world.player_money.get(&team).copied().unwrap_or(0));
+        // Each team here is its own player.
+        let player = sim.world.team_players.get(&team).copied().unwrap_or(team.0);
         v.push(
             sim.world
-                .player_money_earned
-                .get(&team)
-                .copied()
-                .unwrap_or(0) as u32,
+                .score_keepers
+                .get(&player)
+                .map_or(0, |k| k.total_money_earned) as u32,
         );
     }
     let destroyed = sim

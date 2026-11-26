@@ -15,6 +15,7 @@ use zh_logic::combat::damage_fx::DamageFXStore;
 use zh_logic::combat::locomotor::{Locomotor, LocomotorStore};
 use zh_logic::combat::locomotor_set::LocomotorSetType;
 use zh_logic::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
+use zh_logic::economy::score_keeper::ScoreKeeper;
 use zh_logic::economy::MAX_PLAYER_COUNT;
 use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use zh_logic::modules::module_factory::ModuleParseContext;
@@ -455,6 +456,18 @@ impl SimView for EngineSim<'_> {
     }
     fn enemy_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
         not_wired("enemy_player_objects")
+    }
+    fn object_construction_percent(&self, owner: ObjectSlot) -> Real {
+        not_wired("object_construction_percent")
+    }
+    fn object_is_logically_visible(&self, owner: ObjectSlot) -> Bool {
+        not_wired("object_is_logically_visible")
+    }
+    fn object_last_damage_type(&self, owner: ObjectSlot) -> Option<DamageType> {
+        not_wired("object_last_damage_type")
+    }
+    fn adjust_topple_direction(&self, owner: ObjectSlot, direction: &mut Coord3D) {
+        not_wired("adjust_topple_direction")
     }
 }
 
@@ -1082,5 +1095,29 @@ impl SimApi for EngineSim<'_> {
     }
     fn client(&mut self) -> &mut dyn ClientSink {
         not_wired("client")
+    }
+    fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int {
+        not_wired("rng_client_int")
+    }
+    fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real) {
+        not_wired("set_object_construction_percent")
+    }
+    fn topple_object( &mut self, owner: ObjectSlot, direction: &Coord3D, speed: Real, options: UnsignedInt, ) {
+        not_wired("topple_object")
+    }
+    fn pathfinder_remove_object(&mut self, owner: ObjectSlot) {
+        not_wired("pathfinder_remove_object")
+    }
+    fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
+        not_wired("stop_all_bone_fx")
+    }
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+        not_wired("deposit_player_money")
+    }
+    fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int) {
+        not_wired("add_floating_money_text")
+    }
+    fn auto_deposit_boost_upgrade(&mut self, name: &str) -> Option<UpgradeMaskType> {
+        not_wired("auto_deposit_boost_upgrade")
     }
 }

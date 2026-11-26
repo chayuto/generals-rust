@@ -1,5 +1,6 @@
 //! `WP-5.4`: `UpdateModule` leaf modules.
 
+pub mod auto_deposit_update;
 pub mod base_renerate_update;
 pub mod default_production_exit_update;
 pub mod deletion_update;
@@ -29,6 +30,8 @@ pub mod spy_vision_update;
 pub mod stealth_detector_update;
 pub mod stealth_update;
 pub mod supply_center_production_exit_update;
+pub mod structure_topple_update;
+pub mod topple_update;
 pub mod weapon_bonus_update;
 
 use crate::arena::FacetMask;
@@ -39,6 +42,36 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "ToppleUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x011),
+        SleepyUpdatePhase::Normal,
+        false,
+        topple_update::parse_topple_update_data,
+        topple_update::create_topple_update,
+    );
+    reg.register_module(
+        nk,
+        "StructureToppleUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x003),
+        SleepyUpdatePhase::Normal,
+        false,
+        structure_topple_update::parse_structure_topple_update_data,
+        structure_topple_update::create_structure_topple_update,
+    );
+    reg.register_module(
+        nk,
+        "AutoDepositUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        auto_deposit_update::parse_auto_deposit_update_data,
+        auto_deposit_update::create_auto_deposit_update,
+    );
     reg.register_module(
         nk,
         "SupplyWarehouseDockUpdate",
