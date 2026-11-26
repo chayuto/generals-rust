@@ -98,6 +98,7 @@ impl UpgradeBehaviorImpl for RadarUpgrade {
         if let Some(team_id) = sim.object(ctx.owner_slot).map(|o| o.team_id) {
             sim.add_radar(team_id, self.is_disable_proof);
         }
+        sim.extend_radar_update(ctx.owner_slot);
     }
 
     fn on_delete(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {

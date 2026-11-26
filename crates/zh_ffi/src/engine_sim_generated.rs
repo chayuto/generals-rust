@@ -650,6 +650,9 @@ impl SimApi for EngineSim<'_> {
     fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
         not_wired("disable_radar")
     }
+    fn extend_radar_update(&mut self, owner: ObjectSlot) {
+        not_wired("extend_radar_update")
+    }
     fn extend_power_plant(&mut self, owner: ObjectSlot) {
         not_wired("extend_power_plant")
     }

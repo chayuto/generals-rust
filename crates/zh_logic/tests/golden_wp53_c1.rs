@@ -8,9 +8,10 @@
 //! this crate's default writes version 3, which appends the poison source. The test removes
 //! those four bytes and compares them with the reference's `m_poisonSource` column.
 //!
-//! `PowerPlantUpdate` and the dock updates in the C++ fixture are not ported; the Rust side
+//! The dock updates in the C++ fixture are not ported; the Rust side
 //! records the calls made into them.
 
+use zh_logic::modules::update::power_plant_update::PowerPlantUpdate;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
@@ -627,7 +628,16 @@ fn run_overcharge(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
             }
             last = save_module(sim, m);
             health = sim.object_health(o).to_bits();
-            extended = u32::from(sim.world.power_plant_extended.contains(&id));
+            let rods = module_named(sim, o, "PowerPlantUpdate");
+            extended = u32::from(
+                sim.dispatch_module(rods, |b, _, _| {
+                    b.as_any()
+                        .and_then(|a| a.downcast_ref::<PowerPlantUpdate>())
+                        .expect("rods")
+                        .extended
+                })
+                .expect("rods dispatch"),
+            );
             active = u32::from(
                 sim.dispatch_module(m, |b, _, _| {
                     b.as_overcharge().expect("oc").is_overcharge_active()

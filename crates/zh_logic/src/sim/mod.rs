@@ -1376,6 +1376,9 @@ pub trait SimApi: SimView {
     fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool);
     fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool);
     fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt);
+    /// `RadarUpdate::extendRadar` on the owner's first `RadarUpdate`, if any.
+    fn extend_radar_update(&mut self, owner: ObjectSlot);
+    /// `PowerPlantUpdateInterface::extendRods(TRUE)` on every module that has it.
     fn extend_power_plant(&mut self, owner: ObjectSlot);
     /// `PowerPlantUpdateInterface::extendRods(FALSE)`.
     fn retract_power_plant(&mut self, owner: ObjectSlot);
@@ -1689,7 +1692,6 @@ pub struct SimWorld {
     pub player_captured_objects: BTreeMap<TeamId, Int>,
     pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
     pub special_power_uses_delay: Bool,
-    pub power_plant_extended: BTreeSet<ObjectId>,
     /// `DockUpdateInterface::m_dockOpen == FALSE` (dock updates are unported).
     pub dock_closed: BTreeSet<ObjectId>,
     /// `DockUpdateInterface::m_dockCrippled` (dock updates are unported).
@@ -1791,7 +1793,6 @@ impl SimWorld {
             player_captured_objects: BTreeMap::new(),
             shared_special_power_ready_frames: BTreeMap::new(),
             special_power_uses_delay: TRUE,
-            power_plant_extended: BTreeSet::new(),
             dock_closed: BTreeSet::new(),
             dock_crippled: BTreeSet::new(),
             playable_side_teams: BTreeSet::new(),
@@ -2584,6 +2585,22 @@ impl SimContext {
             return;
         }
         self.ai_idle(owner, CommandSourceType::FromAi);
+    }
+
+    fn behavior_slots(&self, owner: ObjectSlot) -> Vec<ModuleSlot> {
+        self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors.iter().map(|&(ms, _)| ms).collect()
+        })
+    }
+
+    fn extend_rods(&mut self, owner: ObjectSlot, extend: Bool) {
+        for ms in self.behavior_slots(owner) {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(f) = m.as_power_plant_mut() {
+                    f.extend_rods(sim, ctx, extend);
+                }
+            });
+        }
     }
 
     /// Dispatches `f` on `mod_slot` via Take-and-Restore, draining any re-entrant [`DeferredSelfOp`]s
@@ -5962,9 +5979,7 @@ impl SimApi for SimContext {
     }
 
     fn retract_power_plant(&mut self, owner: ObjectSlot) {
-        if let Some(id) = self.world.objects.id_of(owner) {
-            self.world.power_plant_extended.remove(&id);
-        }
+        self.extend_rods(owner, FALSE);
     }
 
     fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool) {
@@ -5988,8 +6003,21 @@ impl SimApi for SimContext {
     }
 
     fn extend_power_plant(&mut self, owner: ObjectSlot) {
-        if let Some(id) = self.world.objects.id_of(owner) {
-            self.world.power_plant_extended.insert(id);
+        self.extend_rods(owner, TRUE);
+    }
+
+    fn extend_radar_update(&mut self, owner: ObjectSlot) {
+        for ms in self.behavior_slots(owner) {
+            let mut handled = false;
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(f) = m.as_radar_mut() {
+                    f.extend_radar(sim, ctx);
+                    handled = true;
+                }
+            });
+            if handled {
+                break;
+            }
         }
     }
 
@@ -8866,6 +8894,10 @@ impl SimApi for MockSimApi {
 
     fn extend_power_plant(&mut self, owner: ObjectSlot) {
         self.ctx.extend_power_plant(owner);
+    }
+
+    fn extend_radar_update(&mut self, owner: ObjectSlot) {
+        self.ctx.extend_radar_update(owner);
     }
 
     fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {

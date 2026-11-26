@@ -52,6 +52,12 @@ Each `gen_*.cpp` here compiles unmodified `vendor/GeneralsX` sources, with minim
 - **Port contract:** a callback replayed after the damage returns must see the object status of its turn (`attempt_damage_watching`), not the status afterwards.
 - **Guard:** `golden_pkt330_327_fire` (one vector of 1,000 shows the difference).
 
+### `snapshot_save_hex`'s CRC is not the module's CRC
+
+- **Where:** `oracle_wp51::World::snapshot_save_hex(s, &crc)` returns a CRC of the saved bytes. `snapshot_crc(s)` runs the module's own `crc()`.
+- **What happens:** most update modules add nothing in `crc()`, so the two differ.
+- **Guard:** `golden_pkt358_351_radar_power` compares the Rust `crc()` with `snapshot_crc`.
+
 ### Oversized integer INI tokens differ by platform
 
 `scanType` takes the `__APPLE__` branch for integers too: `MinSpreadDelay = 100000000000` saturates with a warning on the reference Mac and is rejected elsewhere. Keep fixture tokens in range.

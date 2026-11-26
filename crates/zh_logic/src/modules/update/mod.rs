@@ -11,7 +11,9 @@ pub mod fire_weapon_update;
 pub mod flammable_update;
 pub mod lifetime_update;
 pub mod projectile_stream_update;
+pub mod power_plant_update;
 pub mod prone_update;
+pub mod radar_update;
 pub mod radius_decal_update;
 pub mod smart_bomb_target_homing_update;
 pub mod special_power_update_module;
@@ -175,6 +177,26 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         dynamic_shroud_clearing_range_update::parse_dynamic_shroud_clearing_range_update_data,
         dynamic_shroud_clearing_range_update::create_dynamic_shroud_clearing_range_update,
+    );
+    reg.register_module(
+        nk,
+        "RadarUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        radar_update::parse_radar_update_data,
+        radar_update::create_radar_update,
+    );
+    reg.register_module(
+        nk,
+        "PowerPlantUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::POWER_PLANT_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        power_plant_update::parse_power_plant_update_data,
+        power_plant_update::create_power_plant_update,
     );
     reg.register_module(
         nk,

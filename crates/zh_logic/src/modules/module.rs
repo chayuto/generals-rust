@@ -520,6 +520,14 @@ pub trait BehaviorModule: Send {
         None
     }
 
+    fn as_radar_mut(&mut self) -> Option<&mut dyn RadarFacet> {
+        None
+    }
+
+    fn as_power_plant_mut(&mut self) -> Option<&mut dyn PowerPlantFacet> {
+        None
+    }
+
     fn as_damage_mut(&mut self) -> Option<&mut dyn DamageFacet> {
         None
     }
@@ -866,6 +874,18 @@ pub trait FlammableFacet {
 pub trait FireSpreadFacet {
     /// `FireSpreadUpdate::startFireSpreading`.
     fn start_fire_spreading(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+}
+
+/// The call `RadarUpgrade` makes on its owner's `RadarUpdate`.
+pub trait RadarFacet {
+    /// `RadarUpdate::extendRadar`.
+    fn extend_radar(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+}
+
+/// `PowerPlantUpdateInterface`.
+pub trait PowerPlantFacet {
+    /// `extendRods`.
+    fn extend_rods(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, extend: Bool);
 }
 
 /// Damage reaction facet (`DamageModuleInterface`).

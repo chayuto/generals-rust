@@ -7,7 +7,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
-- Packets: 223 of 463 implemented, 240 unported (Phase 2: 102, Phase 4: 4, Phase 5: 88, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 225 of 463 implemented, 238 unported (Phase 2: 102, Phase 4: 4, Phase 5: 86, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -21,6 +21,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | `b428ad1` | Contain getters take the game view (owner decision on `OPEN_DECISIONS.md` items 4 and 5) |
 | `fafa769` and next | `PKT-300 TunnelContain`, `PKT-264 CaveContain` |
 | after `2b88a3b` | Module census (`MODULE_USAGE.md`); `PKT-330 FlammableUpdate` and `PKT-327 FireSpreadUpdate`; fixed `HighlanderBody` on NaN damage |
+| after `2daf832` | `PKT-358 RadarUpdate` and `PKT-351 PowerPlantUpdate`; `RadarUpgrade` now extends the radar; CI time limit raised to 6 minutes |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 
