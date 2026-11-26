@@ -35,7 +35,15 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - Weapon firing leaves out `DAMAGE_DEPLOY`'s assault order, `processRequestAssistance` and the victim effects of `DAMAGE_DISARM`.
 - **`PKT-216 FireWeaponPower` is not bit-exact**, although `PORT_MAP.md` counts it. It fires at once, where C++ reloads all ammo and orders the unported AI to attack.
 - `Weapon::transfer_next_shot_stats_from` copies the stored status; C++ copies `getStatus()`, which refreshes it first. It has no callers.
+- `set_geometry_info` only stores the geometry. C++ `Object::setGeometryInfo` also re-registers the object with the partition manager and tells the drawable, so a later range scan can differ after `DynamicGeometryInfoUpdate`.
+- `ProjectileStreamUpdate::add_projectile` has no caller until weapon projectiles are ported.
+
+## Waiting on unported code
 
 - `PKT-266 CountermeasuresBehavior`: `PhysicsBehavior` (`getVelocityMagnitude`, `transferVelocityTo`, a real `applyMotiveForce`) and the `Vector2` normalise and rotate math. Its constructor also leaves `m_reloadFrame` unset.
 - `PKT-267 DumbProjectileBehavior`: `Weapon::positionProjectileForLaunch`, `PartitionManager::estimateTerrainExtremesAlongLine`, `WeaponTemplate::shouldProjectileCollideWith` and `WeaponStore::handleProjectileDetonation`.
 - `PKT-305 AutoDepositUpdate`: a hook for `Player::becomingTeamMember`, a per-player `ScoreKeeper`, construction percent on objects, and a home for the upgrade template that `getUpgradedSupplyBoost` caches across all instances.
+- `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly`.
+- `PKT-327 FireSpreadUpdate`, `PKT-330 FlammableUpdate`: they call each other (`tryToIgnite`, `wouldIgnite`, `startFireSpreading`), and no facet carries those calls.
+- `PKT-372 SpyVisionUpdate`: the player vision-spied state (`setUnitsVisionSpied`).
+- `PKT-388 WeaponBonusUpdate`: the partition scan order, which decides the order the bonus helpers are woken in.
