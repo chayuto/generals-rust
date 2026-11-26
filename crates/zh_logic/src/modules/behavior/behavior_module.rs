@@ -2,12 +2,13 @@
 //! (`BehaviorModule.h`, `BehaviorModule.cpp`, `UpdateModule.h`, `UpdateModule.cpp`).
 
 use crate::arena::{FacetMask, ModuleContext, ModuleSlot};
+use crate::combat::damage::DamageInfo;
 use crate::modules::module::{ModuleData, ModuleSnapshotHeader};
 use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
 use crate::sim::{SimApi, SimView};
 use std::any::Any;
 use std::collections::BTreeSet;
-use zh_common::types::{NameKeyType, XferVersion};
+use zh_common::types::{Int, NameKeyType, XferVersion};
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
 /// Shared base template data for pure `BehaviorModule` subclasses with no extra fields (`BehaviorModule.h`).
@@ -124,4 +125,29 @@ pub fn xfer_module_version(
     let mut version = current_version;
     xfer.xfer_version(&mut version, current_version)?;
     Ok(version)
+}
+
+/// Rebuilds the `DamageInfo` carried by a deferred `onDie` ([`DeferredSelfOp::Die`]).
+pub fn damage_info_from_die_op(op: &crate::arena::DeferredSelfOp) -> Option<DamageInfo> {
+    let crate::arena::DeferredSelfOp::Die {
+        damage_type,
+        death_type,
+        source_id,
+        amount,
+        kill,
+        actual_damage_dealt,
+        actual_damage_clipped,
+    } = *op
+    else {
+        return None;
+    };
+    let mut dmg = DamageInfo::default();
+    dmg.input.damage_type = crate::rules::combat_types::DamageType::from_i32(damage_type as Int)?;
+    dmg.input.death_type = crate::rules::combat_types::DeathType::from_i32(death_type as Int)?;
+    dmg.input.source_id = source_id;
+    dmg.input.amount = amount;
+    dmg.input.kill = kill;
+    dmg.output.actual_damage_dealt = actual_damage_dealt;
+    dmg.output.actual_damage_clipped = actual_damage_clipped;
+    Some(dmg)
 }

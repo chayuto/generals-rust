@@ -15,7 +15,7 @@ use crate::arena::{
 use crate::combat::armor::{Armor, ArmorStore};
 use crate::combat::damage::DamageInfo;
 use crate::combat::damage_fx::DamageFXStore;
-use crate::combat::locomotor::LocomotorStore;
+use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
@@ -68,6 +68,34 @@ use zh_common::types::{
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
 pub type FindPositionFlags = UnsignedInt;
+/// `TheWeaponSetTypeToModelConditionTypeMap` (`WeaponSet.h`).
+fn weapon_set_model_condition(flag: WeaponSetType) -> Option<ModelConditionFlagType> {
+    use ModelConditionFlagType as Mc;
+    Some(match flag {
+        WeaponSetType::Veteran => Mc::WeaponSetVeteran,
+        WeaponSetType::Elite => Mc::WeaponSetElite,
+        WeaponSetType::Hero => Mc::WeaponSetHero,
+        WeaponSetType::PlayerUpgrade => Mc::WeaponSetPlayerUpgrade,
+        WeaponSetType::CrateUpgradeOne => Mc::WeaponSetCrateUpgradeOne,
+        WeaponSetType::CrateUpgradeTwo => Mc::WeaponSetCrateUpgradeTwo,
+        WeaponSetType::VehicleHijack
+        | WeaponSetType::Carbomb
+        | WeaponSetType::MineClearingDetail
+        | WeaponSetType::Count => return None,
+        WeaponSetType::Rider1 => Mc::Rider1,
+        WeaponSetType::Rider2 => Mc::Rider2,
+        WeaponSetType::Rider3 => Mc::Rider3,
+        WeaponSetType::Rider4 => Mc::Rider4,
+        WeaponSetType::Rider5 => Mc::Rider5,
+        WeaponSetType::Rider6 => Mc::Rider6,
+        WeaponSetType::Rider7 => Mc::Rider7,
+        WeaponSetType::Rider8 => Mc::Rider8,
+    })
+}
+
+/// `IDLE_COUNTDOWN_DELAY` (`AIStates.cpp`, two seconds of logic frames).
+const AI_IDLE_COUNTDOWN_DELAY: Int = 60;
+
 pub const FPF_NONE: UnsignedInt = 0;
 pub const FPF_IGNORE_WATER: UnsignedInt = 1 << 0;
 pub const FPF_WATER_ONLY: UnsignedInt = 1 << 1;
@@ -636,6 +664,12 @@ pub struct ObjectRecord {
     pub loco_ultra_accurate: Bool,
     pub loco_close_enough_dist: Real,
     pub loco_close_enough_dist_3d: Bool,
+    /// `AIUpdateInterface::m_curLocomotorSet` (`None` = `LOCOMOTORSET_INVALID`).
+    pub ai_locomotor_set: Option<LocomotorSetType>,
+    /// `AIUpdateInterface::m_curLocomotor`.
+    pub ai_locomotor: Option<Box<Locomotor>>,
+    /// Set once the AI behaviour state machine exists (`AIUpdateInterface::onObjectCreated`).
+    pub ai_state_machine_ready: Bool,
 }
 
 impl ObjectRecord {
@@ -732,6 +766,9 @@ impl ObjectRecord {
             loco_ultra_accurate: FALSE,
             loco_close_enough_dist: 1.0,
             loco_close_enough_dist_3d: FALSE,
+            ai_locomotor_set: None,
+            ai_locomotor: None,
+            ai_state_machine_ready: FALSE,
         }
     }
 
@@ -992,6 +1029,14 @@ pub trait SimView {
     fn slow_death_scale(&self) -> Real;
     fn hulk_max_lifetime_override(&self) -> Int;
     fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId;
+    /// `Object::getDrawable() != nullptr`: drawables are bound after `onObjectCreated`.
+    fn object_has_drawable(&self, owner: ObjectSlot) -> Bool;
+    fn local_player_index(&self) -> Int;
+    /// `Player::getDefaultTeam()` of the player controlling `team_id`.
+    fn player_default_team(&self, team_id: TeamId) -> TeamId;
+    fn player_is_skirmish_ai(&self, team_id: TeamId) -> Bool;
+    /// `Player::getRelationship` from the controller of `team_id` toward `player_index`.
+    fn team_relationship_to_player(&self, team_id: TeamId, player_index: Int) -> Relationship;
     fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool;
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool;
     fn contain_items(&self, owner: ObjectSlot) -> Vec<ObjectId>;
@@ -1418,6 +1463,12 @@ pub trait SimApi: SimView {
         pos: &Coord3D,
         layer: PathfindLayerEnum,
     );
+    /// PRNG-visible part of the `AIUpdateInterface` constructor: `chooseLocomotorSet(NORMAL)`.
+    fn ai_construct(&mut self, owner: ObjectSlot);
+    /// PRNG-visible part of `AIUpdateInterface::onObjectCreated` (state machine creation).
+    fn ai_init_state_machine(&mut self, owner: ObjectSlot);
+    /// `AIUpdateInterface::chooseLocomotorSet`.
+    fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType);
     fn client(&mut self) -> &mut dyn ClientSink;
 }
 
@@ -1500,6 +1551,12 @@ pub struct SimWorld {
     pub blocked_pathfind_cells: BTreeMap<(Int, Int, Int), PathfindCellType>,
     pub valid_movement_terrain_override: Option<Bool>,
     pub map_extent_hi: Coord3D,
+    /// `ThePlayerList->getLocalPlayer()` index (only used for apparent-controller visuals).
+    pub local_player_index: Int,
+    /// `Player::getDefaultTeam()` by player index.
+    pub player_default_teams: BTreeMap<Int, TeamId>,
+    /// Teams controlled by a skirmish AI player (`Player::isSkirmishAIPlayer`).
+    pub skirmish_ai_teams: BTreeSet<TeamId>,
 }
 
 impl Default for SimWorld {
@@ -1588,6 +1645,9 @@ impl SimWorld {
             blocked_pathfind_cells: BTreeMap::new(),
             valid_movement_terrain_override: None,
             map_extent_hi: Coord3D::new(1000.0, 1000.0, 100.0),
+            local_player_index: 0,
+            player_default_teams: BTreeMap::new(),
+            skirmish_ai_teams: BTreeSet::new(),
         }
     }
 
@@ -1772,6 +1832,32 @@ impl SimContext {
         Ok(out)
     }
 
+    /// `Object::reactToTransformChange`: tell the owner's container module that it moved.
+    fn react_to_transform_change(&mut self, owner: ObjectSlot, old_pos: &Coord3D, old_angle: Real) {
+        const THRESH: Real = 0.01;
+        let Some(obj) = self.world.objects.get(owner) else {
+            return;
+        };
+        let pos = obj.thing.get_position();
+        let moved = zh_common::math::gm_fabsf(pos.x - old_pos.x) > THRESH
+            || zh_common::math::gm_fabsf(pos.y - old_pos.y) > THRESH
+            || zh_common::math::gm_fabsf(pos.z - old_pos.z) > THRESH;
+        let turned = zh_common::math::gm_fabsf(obj.thing.get_orientation() - old_angle) > THRESH;
+        if !moved && !turned {
+            return;
+        }
+        let Some(cs) = obj.contain_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(cs) {
+            let _ = self.dispatch_module(cs, |m, sim, ctx| {
+                if let Some(c) = m.as_contain_mut() {
+                    c.contain_react_to_transform_change(sim, ctx);
+                }
+            });
+        }
+    }
+
     /// Marks `slot` destroyed (`GameLogic::destroyObject`), running `DestroyFacet::on_destroy`
     /// and queueing `slot` for end-of-frame deletion in [`Self::process_destroy_list`].
     pub fn destroy_object_now(&mut self, slot: ObjectSlot) {
@@ -1812,6 +1898,10 @@ impl SimContext {
         }
 
         self.world.enqueue_destroy(slot);
+        // `Object::onDestroy`: say goodbye to whoever contains us.
+        if let Some(container) = self.world.objects.get(slot).and_then(|o| o.contained_by) {
+            self.contain_remove(container, slot, FALSE);
+        }
         self.client.on_object_destroyed(obj_id);
     }
 
@@ -2151,7 +2241,7 @@ impl SimContext {
                 template_data_id: nug.data_id,
             };
             let module = create_fn(mod_data, ctx);
-            self.world.attach_module(
+            let mod_slot = self.world.attach_module(
                 slot,
                 nug.tag_key,
                 nug.data_id,
@@ -2159,6 +2249,9 @@ impl SimContext {
                 desc.update_phase,
                 module,
             );
+            let _ = self.dispatch_module(mod_slot, |m, sim, ctx| {
+                m.on_construct(sim, ctx);
+            });
         }
 
         let behaviors: Vec<(ModuleSlot, FacetMask)> = self
@@ -3013,6 +3106,39 @@ impl SimView for SimContext {
             .map_or(ObjectId::INVALID, |o| o.physics_last_collidee)
     }
 
+    fn object_has_drawable(&self, owner: ObjectSlot) -> Bool {
+        Bool::from(self.world.objects.is_in_world_list(owner))
+    }
+
+    fn local_player_index(&self) -> Int {
+        self.world.local_player_index
+    }
+
+    fn player_default_team(&self, team_id: TeamId) -> TeamId {
+        let idx = self.player_index_for_team(team_id);
+        self.world
+            .player_default_teams
+            .get(&idx)
+            .copied()
+            .unwrap_or(team_id)
+    }
+
+    fn player_is_skirmish_ai(&self, team_id: TeamId) -> Bool {
+        Bool::from(self.world.skirmish_ai_teams.contains(&team_id))
+    }
+
+    fn team_relationship_to_player(&self, team_id: TeamId, player_index: Int) -> Relationship {
+        let pa = self.player_index_for_team(team_id);
+        if pa == player_index {
+            return Relationship::Allies;
+        }
+        self.world
+            .player_relationships
+            .get(&(pa, player_index))
+            .copied()
+            .unwrap_or(Relationship::Neutral)
+    }
+
     fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool {
         let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
             return FALSE;
@@ -3524,6 +3650,22 @@ impl SimApi for SimContext {
                 .collect()
         });
         for ms in slots {
+            if self.world.modules.is_executing(ms) {
+                // The module killed its own owner: deliver `onDie` once it returns.
+                let _ = self.world.modules.push_deferred_op(
+                    ms,
+                    DeferredSelfOp::Die {
+                        damage_type: dmg.input.damage_type.as_i32() as u8,
+                        death_type: dmg.input.death_type.as_i32() as u8,
+                        source_id: dmg.input.source_id,
+                        amount: dmg.input.amount,
+                        kill: dmg.input.kill,
+                        actual_damage_dealt: dmg.output.actual_damage_dealt,
+                        actual_damage_clipped: dmg.output.actual_damage_clipped,
+                    },
+                );
+                continue;
+            }
             let _ = self.dispatch_module(ms, |m, sim, ctx| {
                 if let Some(d) = m.as_die_mut() {
                     d.on_die(sim, ctx, dmg);
@@ -4261,8 +4403,17 @@ impl SimApi for SimContext {
     }
 
     fn set_weapon_set_flag(&mut self, owner: ObjectSlot, flag: WeaponSetType, set: Bool) {
+        let has_drawable = self.world.objects.is_in_world_list(owner);
         if let Some(obj) = self.world.objects.get_mut(owner) {
             obj.weapon_set_flags.set(flag.as_i32(), i32::from(set != FALSE));
+            // `Object::setWeaponSetFlag` mirrors the flag onto the drawable.
+            if let Some(condition) = weapon_set_model_condition(flag).filter(|_| has_drawable) {
+                if set != FALSE {
+                    obj.set_model_condition_state(condition);
+                } else {
+                    obj.clear_model_condition_state(condition);
+                }
+            }
         }
     }
 
@@ -5114,19 +5265,27 @@ impl SimApi for SimContext {
     }
 
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            let mut dummy = crate::object::thing::NoopTransformReactor;
-            obj.thing
-                .set_position(&self.rules.thing_factory, pos, self.terrain.as_ref(), &mut dummy);
-        }
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let old_pos = *obj.thing.get_position();
+        let old_angle = obj.thing.get_orientation();
+        let mut dummy = crate::object::thing::NoopTransformReactor;
+        obj.thing
+            .set_position(&self.rules.thing_factory, pos, self.terrain.as_ref(), &mut dummy);
+        self.react_to_transform_change(owner, &old_pos, old_angle);
     }
 
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            let mut dummy = crate::object::thing::NoopTransformReactor;
-            obj.thing
-                .set_orientation(&self.rules.thing_factory, angle, self.terrain.as_ref(), &mut dummy);
-        }
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let old_pos = *obj.thing.get_position();
+        let old_angle = obj.thing.get_orientation();
+        let mut dummy = crate::object::thing::NoopTransformReactor;
+        obj.thing
+            .set_orientation(&self.rules.thing_factory, angle, self.terrain.as_ref(), &mut dummy);
+        self.react_to_transform_change(owner, &old_pos, old_angle);
     }
 
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
@@ -5793,9 +5952,10 @@ impl SimApi for SimContext {
                     }
                 });
             }
-            let ry = self.rng_logic_real(-1.0, 1.0);
-            let rp = self.rng_logic_real(-1.0, 1.0);
-            let rr = self.rng_logic_real(-1.0, 1.0);
+            // C++ passes `-1.0f, 1.0f` to the integer `GameLogicRandomValue`.
+            let ry = self.rng_logic_int(-1, 1) as Real;
+            let rp = self.rng_logic_int(-1, 1) as Real;
+            let rr = self.rng_logic_int(-1, 1) as Real;
             if let Some(obj) = self.world.objects.get_mut(owner) {
                 obj.physics_yaw_rate += sy * ry;
                 obj.physics_pitch_rate += sp * rp;
@@ -5874,6 +6034,22 @@ impl SimApi for SimContext {
                     ai.ai_idle(sim, ctx, cmd_source);
                 }
             });
+        }
+        // `AIUpdateInterface::privateIdle`: re-enter `AI_IDLE` (one PRNG draw), then idle
+        // everything this object contains.
+        let ready = self.world.objects.get(owner).is_some_and(|o| {
+            o.ai_state_machine_ready != FALSE
+                && o.thing
+                    .is_kind_of(&self.rules.thing_factory, KindOfType::Projectile)
+                    == FALSE
+        });
+        if ready {
+            let _ = self.rng_logic_int(0, AI_IDLE_COUNTDOWN_DELAY);
+            for id in self.contain_items(owner) {
+                if let Some(rider) = self.find_object(id) {
+                    self.ai_idle(rider, cmd_source);
+                }
+            }
         }
     }
 
@@ -6175,6 +6351,59 @@ impl SimApi for SimContext {
     ) {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.pathfind_goals.insert(id, (*pos, layer));
+        }
+    }
+
+    fn ai_construct(&mut self, owner: ObjectSlot) {
+        self.ai_choose_locomotor_set(owner, LocomotorSetType::Normal);
+    }
+
+    fn ai_init_state_machine(&mut self, owner: ObjectSlot) {
+        if self.world.objects.get(owner).is_none() {
+            return;
+        }
+        // `AIStateMachine` owns three attack-move / follow-waypoint states that each build an
+        // idle sub-machine, then enters its own default state: four `AIIdleState::onEnter`.
+        for _ in 0..4 {
+            let _ = self.rng_logic_int(0, AI_IDLE_COUNTDOWN_DELAY);
+        }
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.ai_state_machine_ready = TRUE;
+        }
+    }
+
+    fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType) {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return;
+        };
+        if obj.ai_locomotor_set == Some(set_type) {
+            return;
+        }
+        let names: Vec<String> = obj
+            .thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+            .map_or_else(Vec::new, |t| t.get_locomotor_set(set_type).to_vec());
+        if names.is_empty() {
+            return;
+        }
+        let frame = self.world.frame;
+        let mut current: Option<Box<Locomotor>> = None;
+        for name in &names {
+            let Some(tmpl) = self.rules.locomotor_store.find_by_name(name) else {
+                continue;
+            };
+            let loco = Locomotor::new(tmpl, &mut self.world.rng, frame);
+            // `chooseBestLocomotorForPosition` is unported: the first entry stays current.
+            if current.is_none() {
+                current = Some(Box::new(loco));
+            }
+        }
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.ai_has_locomotor = Bool::from(current.is_some());
+            obj.ai_locomotor = current;
+            obj.ai_locomotor_set = Some(set_type);
+            obj.cur_locomotor_set = set_type;
         }
     }
 
@@ -6485,6 +6714,26 @@ impl SimView for MockSimApi {
 
     fn physics_last_collidee(&self, owner: ObjectSlot) -> ObjectId {
         self.ctx.physics_last_collidee(owner)
+    }
+
+    fn object_has_drawable(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_has_drawable(owner)
+    }
+
+    fn local_player_index(&self) -> Int {
+        self.ctx.local_player_index()
+    }
+
+    fn player_default_team(&self, team_id: TeamId) -> TeamId {
+        self.ctx.player_default_team(team_id)
+    }
+
+    fn player_is_skirmish_ai(&self, team_id: TeamId) -> Bool {
+        self.ctx.player_is_skirmish_ai(team_id)
+    }
+
+    fn team_relationship_to_player(&self, team_id: TeamId, player_index: Int) -> Relationship {
+        self.ctx.team_relationship_to_player(team_id, player_index)
     }
 
     fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool {
@@ -7522,6 +7771,18 @@ impl SimApi for MockSimApi {
         layer: PathfindLayerEnum,
     ) {
         self.ctx.pathfinder_update_goal(owner, pos, layer);
+    }
+
+    fn ai_construct(&mut self, owner: ObjectSlot) {
+        self.ctx.ai_construct(owner);
+    }
+
+    fn ai_init_state_machine(&mut self, owner: ObjectSlot) {
+        self.ctx.ai_init_state_machine(owner);
+    }
+
+    fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType) {
+        self.ctx.ai_choose_locomotor_set(owner, set_type);
     }
 
     fn client(&mut self) -> &mut dyn ClientSink {

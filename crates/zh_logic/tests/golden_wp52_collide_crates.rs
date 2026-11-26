@@ -13,7 +13,7 @@ use zh_common::golden_json::{
 use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::Coord3D;
 use zh_common::types::{
-    Bool, Int, NameKeyType, Real, Relationship, TeamId, UnsignedInt, VeterancyLevel, XferVersion,
+    Bool, NameKeyType, Real, Relationship, TeamId, VeterancyLevel, XferVersion,
     FALSE, TRUE,
 };
 use zh_common::xfer::{Snapshot, Xfer, XferCrc, XferError, XferLoad, XferSave};
@@ -22,7 +22,7 @@ use zh_logic::combat::damage::DamageInfo;
 use zh_logic::combat::locomotor::LocomotorTemplate;
 use zh_logic::combat::locomotor_set::LocomotorSetType;
 use zh_logic::modules::module::{
-    AiUpdateFacet, BehaviorModule, ContainFacet, ModuleSnapshotHeader, ModuleType, PhysicsFacet,
+    AiUpdateFacet, BehaviorModule, ModuleSnapshotHeader, ModuleType, PhysicsFacet,
 };
 use zh_logic::object::weapon::{Weapon, WeaponTemplate};
 use zh_logic::object::weapon_set::WeaponSlotType;
@@ -444,64 +444,6 @@ impl BehaviorModule for StubHijackerBehavior {
     }
 }
 
-struct StubContainBehavior {
-    key: NameKeyType,
-    count: UnsignedInt,
-}
-
-impl ContainFacet for StubContainBehavior {
-    fn get_contain_count(&self) -> UnsignedInt {
-        self.count
-    }
-
-    fn get_contain_max(&self) -> Int {
-        2
-    }
-
-    fn add_to_contain(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _obj: ObjectSlot) {
-        self.count = self.count.saturating_add(1);
-    }
-
-    fn remove_from_contain(
-        &mut self,
-        _sim: &mut dyn SimApi,
-        _ctx: ModuleContext,
-        _obj: ObjectSlot,
-        _expose_stealthed: Bool,
-    ) {
-        self.count = self.count.saturating_sub(1);
-    }
-}
-
-impl BehaviorModule for StubContainBehavior {
-    fn module_name_key(&self) -> NameKeyType {
-        self.key
-    }
-
-    fn sync_sidecar(&self) -> ModuleSidecar {
-        ModuleSidecar::Contain {
-            count: self.count,
-            max: 2,
-            enclosing: FALSE,
-            stealth_units: 0,
-            garrisoned: FALSE,
-            rider_id: zh_common::types::ObjectId::INVALID,
-        }
-    }
-
-    fn xfer(&mut self, _xfer: &mut dyn Xfer, _sim: &dyn SimView) -> Result<(), XferError> {
-        Ok(())
-    }
-
-    fn as_contain(&self) -> Option<&dyn ContainFacet> {
-        Some(self)
-    }
-
-    fn as_contain_mut(&mut self) -> Option<&mut dyn ContainFacet> {
-        Some(self)
-    }
-}
-
 struct StubPhysicsBehavior {
     key: NameKeyType,
     velocity: Coord3D,
@@ -565,18 +507,6 @@ fn attach_stub_hijacker(api: &mut MockSimApi, slot: ObjectSlot) {
         FacetMask(0x001),
         SleepyUpdatePhase::Normal,
         Box::new(StubHijackerBehavior(key)),
-    );
-}
-
-fn attach_stub_contain(api: &mut MockSimApi, slot: ObjectSlot, count: UnsignedInt) {
-    let key = api.ctx.rules.name_keys.name_to_key("TransportContain");
-    api.ctx.world.attach_module(
-        slot,
-        NameKeyType(904),
-        ModuleDataId::INVALID,
-        FacetMask::CONTAIN,
-        SleepyUpdatePhase::Normal,
-        Box::new(StubContainBehavior { key, count }),
     );
 }
 
@@ -1215,15 +1145,11 @@ fn wp52_collide_crates_golden_vectors() {
         let hj_tgt = match hj_sel {
             0 => spawn(&mut api, "Cr52_BoxTank", team_c, hj_pos, 0.0),
             1 => spawn(&mut api, "Cr52_PlainCar", team_c, hj_pos, 0.0),
-            2 => {
-                let o = spawn(&mut api, "Cr52_Transport", team_c, hj_pos, 0.0);
-                attach_stub_contain(&mut api, o, 0);
-                o
-            }
+            2 => spawn(&mut api, "Cr52_Transport", team_c, hj_pos, 0.0),
             3 => {
                 let o = spawn(&mut api, "Cr52_Transport", team_c, hj_pos, 0.0);
-                attach_stub_contain(&mut api, o, 1);
                 let p = spawn(&mut api, "Cr52_Decoy", team_c, hj_pos, 0.0);
+                api.contain_add(o, p);
                 hj_pass = Some(p);
                 o
             }

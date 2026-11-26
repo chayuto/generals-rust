@@ -451,6 +451,9 @@ impl ModuleSnapshotHeader {
 pub trait BehaviorModule: Send {
     fn module_name_key(&self) -> NameKeyType;
 
+    /// Work the C++ module constructor does against the live world (PRNG draws, status bits).
+    /// Runs once, in module order, while the owner is still being constructed.
+    fn on_construct(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_object_created(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_delete(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_capture(
@@ -1024,6 +1027,8 @@ pub trait ContainFacet {
     fn mark_all_passengers_detected(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn set_evac_disposition(&mut self, _disp: EvacDisposition) {}
     fn set_override_destination(&mut self, _pos: &Coord3D) {}
+    /// `ContainModuleInterface::containReactToTransformChange`.
+    fn contain_react_to_transform_change(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
 }
 
 /// Upgrade trigger facet (`UpgradeModuleInterface`).
@@ -1228,7 +1233,7 @@ pub trait SlowDeathFacet {
 
 /// Exit/door dispatch facet (`ExitInterface`).
 pub trait ExitFacet {
-    fn is_exit_busy(&self) -> Bool {
+    fn is_exit_busy(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
         FALSE
     }
     fn reserve_door_for_exit(

@@ -471,12 +471,8 @@ impl SlowDeathCore {
             if when_to_wake > (self.midpoint_frame as Int) {
                 when_to_wake = self.midpoint_frame as Int;
             }
-            let sleep = if when_to_wake <= 0 {
-                UpdateSleepTime::NONE
-            } else {
-                UpdateSleepTime(when_to_wake as UnsignedInt)
-            };
-            sim.set_wake_frame(ctx.mod_slot, sleep);
+            // `UPDATE_SLEEP(0)` is legal here and wakes the module this very frame.
+            sim.set_wake_frame(ctx.mod_slot, UpdateSleepTime(when_to_wake as UnsignedInt));
         }
 
         self.sink_frame = self.sink_frame.wrapping_add(now);
@@ -486,6 +482,30 @@ impl SlowDeathCore {
         self.flags |= SD_FLAG_SLOW_DEATH_ACTIVATED;
 
         Self::do_phase_stuff(data, sim, owner, SlowDeathPhaseType::Initial);
+    }
+
+    /// `SlowDeathBehavior::onDie` up to the virtual `beginSlowDeath` call: returns `TRUE` when
+    /// this module won the selection and the caller must run its own `begin_slow_death`.
+    pub fn on_die(
+        &self,
+        data: &SlowDeathBehaviorModuleData,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        dmg: &DamageInfo,
+    ) -> Bool {
+        if self.is_die_applicable(data, sim, ctx.owner_slot, dmg) == FALSE {
+            return FALSE;
+        }
+        if sim.object(ctx.owner_slot).is_some_and(|o| o.ai_slot.is_some()) {
+            if sim.ai_is_in_dead_state(ctx.owner_slot) != FALSE {
+                return FALSE;
+            }
+            sim.ai_mark_as_dead(ctx.owner_slot);
+        }
+        sim.deselect_object(ctx.owner_slot, PLAYERMASK_ALL, TRUE);
+
+        let caller_prob = self.get_probability_modifier(data, sim, ctx.owner_slot, dmg);
+        sim.trigger_slow_death_with_caller(ctx.owner_slot, ctx.mod_slot, TRUE, caller_prob, dmg)
     }
 
     /// Standard `SlowDeathBehavior::update` tick shared with subclasses.
@@ -673,23 +693,7 @@ impl DieFacet for SlowDeathBehavior {
     }
 
     fn on_die(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, dmg: &DamageInfo) {
-        if self.core.is_die_applicable(&self.data, sim, ctx.owner_slot, dmg) == FALSE {
-            return;
-        }
-        if sim.object(ctx.owner_slot).is_some_and(|o| o.ai_slot.is_some()) {
-            if sim.ai_is_in_dead_state(ctx.owner_slot) != FALSE {
-                return;
-            }
-            sim.ai_mark_as_dead(ctx.owner_slot);
-        }
-        sim.deselect_object(ctx.owner_slot, PLAYERMASK_ALL, TRUE);
-
-        let caller_prob =
-            self.core
-                .get_probability_modifier(&self.data, sim, ctx.owner_slot, dmg);
-        if sim.trigger_slow_death_with_caller(ctx.owner_slot, ctx.mod_slot, TRUE, caller_prob, dmg)
-            != FALSE
-        {
+        if self.core.on_die(&self.data, sim, ctx, dmg) != FALSE {
             self.core.begin_slow_death(&self.data, sim, ctx, dmg);
         }
     }

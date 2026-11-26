@@ -250,6 +250,16 @@ pub enum DeferredSelfOp {
     SpecialPowerSetReadyFrame(UnsignedInt),
     UpgradeResetKey(NameKeyType),
     AiSetIdle,
+    /// `Object::onDie` reaching a die module that is itself executing (it killed its own owner).
+    Die {
+        damage_type: u8,
+        death_type: u8,
+        source_id: ObjectId,
+        amount: Real,
+        kill: Bool,
+        actual_damage_dealt: Real,
+        actual_damage_clipped: Real,
+    },
     ContainAdd(ObjectSlot),
     ContainRemove {
         obj: ObjectSlot,
