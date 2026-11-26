@@ -18,14 +18,14 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # TIER 1: Fast Linux Gate (about 3 min with `cargo test` on ubuntu-latest, 20-job free concurrency)
+  # TIER 1: Fast Linux Gate (about 4 min with `cargo test` on ubuntu-latest, 20-job free concurrency)
   # Runs on EVERY push (including packet/** and wp/** worker branches) & PR.
   # Uses pre-installed runner Python 3 (zero setup-python download overhead).
   # ---------------------------------------------------------------------------
   fast-linux-gate:
     name: "Fast Gate V1 Linter, Manifest & Hook V&V (ubuntu-latest)"
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     steps:
       - name: Checkout repository (LF preserved via .gitattributes)
         uses: actions/checkout@v4
