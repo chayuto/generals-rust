@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`215` implemented, `0` seeded skeletons, `248` unported)
-- **Golden Vector Oracles:** `60` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `59` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `61` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `60` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -252,6 +252,7 @@
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/special_power_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/scheduler/sleepy_heap.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/spatial/partition_collide.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/spatial/partition_grid.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/spatial/partition_query.rs` | `implemented` |
 
@@ -259,6 +260,7 @@
 
 | Oracle JSON | Declared Vectors | `source_sha256` |
 |---|---:|---|
+| `docs/golden_vectors/PARTITION_COLLIDE.json` | 520 | no |
 | `docs/golden_vectors/PARTITION_GRID.json` | 1200 | no |
 | `docs/golden_vectors/PARTITION_QUERY.json` | 3609 | no |
 | `docs/golden_vectors/PKT-001.json` | 1000 | no |
@@ -339,6 +341,7 @@
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2_big_vfs.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2b_compression.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_xfer.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_partition_collide.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_query.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt003.rs` | `active` |

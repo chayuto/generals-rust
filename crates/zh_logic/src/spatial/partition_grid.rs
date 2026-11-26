@@ -7,7 +7,9 @@
 //!
 //! Ported: `init`, `registerObject`, `unRegisterObject`, `makeDirty`, the filing
 //! half of `update`, the cell fill routines and the radius-ring table. The
-//! searches are in `partition_query`. Not ported: collisions, shroud and fog, threat and value maps, ghost objects,
+//! searches are in `partition_query`, the shape tests and contact processing in
+//! `partition_collide` (`update` gathers the contacts here). Not ported: shroud and
+//! fog, threat and value maps, ghost objects,
 //! cached terrain heights.
 //!
 //! # List order
@@ -34,13 +36,13 @@
 //! bound and the radius-ring precision follow the retail branches. The golden
 //! vectors cover only the default branches.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{
     gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D, Region3D,
 };
-use zh_common::types::{Bool, Int, ObjectId, Real};
+use zh_common::types::{Bool, Int, ObjectId, Real, FALSE};
 
 /// What the filing code and the searches read from an object.
 #[derive(Debug, Clone)]
@@ -93,6 +95,8 @@ pub struct PartitionGrid {
     module_list: Vec<ObjectId>,
     /// `m_dirtyModules`, stored tail first.
     dirty_list: Vec<ObjectId>,
+    /// The unprocessed part of `PartitionContactList`, stored tail first.
+    contacts: Vec<(ObjectId, ObjectId)>,
     updated_since_last_reset: bool,
     /// `m_radiusVec`: offsets `(x, y)` by minimum ring distance.
     radius_vec: Vec<Vec<(Int, Int)>>,
@@ -127,6 +131,7 @@ impl PartitionGrid {
             entries: BTreeMap::new(),
             module_list: Vec::new(),
             dirty_list: Vec::new(),
+            contacts: Vec::new(),
             updated_since_last_reset: false,
             radius_vec: Vec::new(),
         };
@@ -165,6 +170,7 @@ impl PartitionGrid {
         self.entries.remove(&id);
         self.module_list.retain(|&other| other != id);
         self.dirty_list.retain(|&other| other != id);
+        self.contacts.retain(|&(a, b)| a != id && b != id);
     }
 
     /// `PartitionData::makeDirty(true)`: re-file at the next update. An object
@@ -195,9 +201,12 @@ impl PartitionGrid {
     // Update
     // ------------------------------------------------------------------
 
-    /// The filing half of `PartitionManager::update`.
+    /// `PartitionManager::update` up to `processContactList`.
     ///
-    /// Drains the dirty list from its head, re-filing the objects that need it.
+    /// Drains the dirty list from its head, re-filing the objects that need it and
+    /// gathering the possible collisions of each mobile one. Contacts left over
+    /// from the previous update are discarded; run
+    /// `partition_collide::process_contacts` afterwards.
     /// An object `lookup` does not know keeps the cells it had.
     ///
     /// Returns, in processing order, the objects whose center cell changed: the
@@ -208,6 +217,9 @@ impl PartitionGrid {
         lookup: &dyn Fn(ObjectId) -> Option<PartitionObject>,
     ) -> Vec<ObjectId> {
         self.updated_since_last_reset = true;
+        self.contacts.clear();
+        // Unordered pairs already listed.
+        let mut listed = BTreeSet::new();
         let mut cell_changes = Vec::new();
         while let Some(id) = self.dirty_list.pop() {
             let Some(entry) = self.entries.get_mut(&id) else {
@@ -221,17 +233,50 @@ impl PartitionGrid {
             if update_cells && self.update_cells_touched(id, &object) {
                 cell_changes.push(id);
             }
-            // Collision check point (not ported). Every object popped here was
-            // dirty, so unless `object.is_immobile`, the C++ now runs
-            // `addPossibleCollisions`: for each cell in `object_cells(id)` order
-            // that holds at least two objects, it offers a contact with every
-            // other object of `cell_objects` in list order. It must run here,
-            // between re-filings, because it sees the lists as they are now.
+            // This must run between re-filings: it sees the lists as they are now.
+            if object.is_immobile == FALSE {
+                self.add_possible_collisions(id, &mut listed);
+            }
         }
-        // After the loop the C++ runs `processContactList`, which calls
-        // `make_dirty_for_collision_check` on colliding mobile objects. Those stay
-        // listed until the next update, so they fix the processing order there.
         cell_changes
+    }
+
+    /// `PartitionData::addPossibleCollisions`.
+    fn add_possible_collisions(
+        &mut self,
+        id: ObjectId,
+        listed: &mut BTreeSet<(ObjectId, ObjectId)>,
+    ) {
+        let Some(entry) = self.entries.get(&id) else {
+            return;
+        };
+        for &index in &entry.touched {
+            let cell = &self.cells[index];
+            if cell.len() < 2 {
+                continue;
+            }
+            for &other in cell.iter().rev() {
+                if other == id {
+                    continue;
+                }
+                let key = if id < other { (id, other) } else { (other, id) };
+                if listed.insert(key) {
+                    // Listed oldest first here; the C++ prepends.
+                    self.contacts.push((id, other));
+                }
+            }
+        }
+    }
+
+    /// Removes and returns the next contact to process: the newest one.
+    pub(crate) fn take_contact(&mut self) -> Option<(ObjectId, ObjectId)> {
+        self.contacts.pop()
+    }
+
+    /// The contacts still to process, in processing order. The first of each pair
+    /// is the object whose check found it.
+    pub fn pending_contacts(&self) -> impl Iterator<Item = (ObjectId, ObjectId)> + '_ {
+        self.contacts.iter().rev().copied()
     }
 
     /// `PartitionData::updateCellsTouched`. True if the center cell changed.

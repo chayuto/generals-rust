@@ -3,6 +3,7 @@
 
 pub mod cave_system;
 pub mod crate_system;
+pub mod partition_collide;
 pub mod partition_grid;
 pub mod partition_query;
 pub mod polygon_trigger;
@@ -13,6 +14,7 @@ pub mod terrain_types;
 
 pub use cave_system::*;
 pub use crate_system::*;
+pub use partition_collide::*;
 pub use partition_grid::*;
 pub use partition_query::*;
 pub use polygon_trigger::*;
