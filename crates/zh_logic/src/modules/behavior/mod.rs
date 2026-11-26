@@ -4,6 +4,8 @@ pub mod auto_heal_behavior;
 pub mod battle_bus_slow_death_behavior;
 pub mod behavior_module;
 pub mod bridge_scaffold_behavior;
+pub mod bridge_tower_behavior;
+pub mod bunker_buster_behavior;
 pub mod fire_weapon_when_damaged_behavior;
 pub mod fire_weapon_when_dead_behavior;
 pub mod grant_stealth_behavior;
@@ -12,6 +14,7 @@ pub mod jet_slow_death_behavior;
 pub mod overcharge_behavior;
 pub mod poisoned_behavior;
 pub mod prison_behavior;
+pub mod propaganda_tower_behavior;
 pub mod slow_death_behavior;
 pub mod supply_warehouse_crippling_behavior;
 pub mod tech_building_behavior;
@@ -153,6 +156,36 @@ pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGener
         false,
         tech_building_behavior::parse_tech_building_behavior_data,
         tech_building_behavior::create_tech_building_behavior,
+    );
+    reg.register_module(
+        nk,
+        "BridgeTowerBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x006 | FacetMask::BRIDGE_TOWER.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        bridge_tower_behavior::parse_bridge_tower_behavior_data,
+        bridge_tower_behavior::create_bridge_tower_behavior,
+    );
+    reg.register_module(
+        nk,
+        "BunkerBusterBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x003),
+        SleepyUpdatePhase::Normal,
+        false,
+        bunker_buster_behavior::parse_bunker_buster_behavior_data,
+        bunker_buster_behavior::create_bunker_buster_behavior,
+    );
+    reg.register_module(
+        nk,
+        "PropagandaTowerBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x003 | FacetMask::PROPAGANDA_TOWER.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        propaganda_tower_behavior::parse_propaganda_tower_behavior_data,
+        propaganda_tower_behavior::create_propaganda_tower_behavior,
     );
 }
 

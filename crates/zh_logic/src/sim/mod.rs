@@ -1046,6 +1046,12 @@ pub trait SimView {
     /// `Player::getRelationship` from the controller of `team_id` toward `player_index`.
     fn team_relationship_to_player(&self, team_id: TeamId, player_index: Int) -> Relationship;
     fn contain_is_special_zero_slot(&self, owner: ObjectSlot) -> Bool;
+    /// `ContainModuleInterface::isBustable`.
+    fn contain_is_bustable(&self, owner: ObjectSlot) -> Bool;
+    /// `ContainModuleInterface::isEnclosingContainerFor`.
+    fn contain_is_enclosing_container_for(&self, owner: ObjectSlot, rider: ObjectSlot) -> Bool;
+    /// `BridgeBehaviorInterface::getTowerID`; `None` if the object has no such interface.
+    fn bridge_tower_id(&self, owner: ObjectSlot, tower_type: BridgeTowerType) -> Option<ObjectId>;
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool;
     fn contain_items(&self, owner: ObjectSlot) -> Vec<ObjectId>;
     fn contain_is_passenger_allowed_to_fire(&self, owner: ObjectSlot, id: ObjectId) -> Bool;
@@ -1349,6 +1355,8 @@ pub trait SimApi: SimView {
     );
     fn contain_remove_all(&mut self, container: ObjectSlot, expose_stealthed: Bool);
     fn contain_kill_all(&mut self, container: ObjectSlot);
+    /// `ContainModuleInterface::harmAndForceExitAllContained`.
+    fn contain_harm_and_force_exit_all(&mut self, container: ObjectSlot, dmg: &DamageInfo);
     fn set_contained_by(&mut self, passenger: ObjectSlot, container: Option<ObjectSlot>);
     /// `BodyModuleInterface::setDamageState`.
     fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType);
@@ -3209,6 +3217,37 @@ impl SimView for SimContext {
             .payload(cs)
             .and_then(|p| p.as_contain())
             .map_or(FALSE, |c| c.is_special_zero_slot_container())
+    }
+
+    fn contain_is_bustable(&self, owner: ObjectSlot) -> Bool {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        self.world
+            .modules
+            .payload(cs)
+            .and_then(|p| p.as_contain())
+            .map_or(FALSE, |c| c.is_bustable())
+    }
+
+    fn contain_is_enclosing_container_for(&self, owner: ObjectSlot, rider: ObjectSlot) -> Bool {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        self.world
+            .modules
+            .payload(cs)
+            .and_then(|p| p.as_contain())
+            .map_or(FALSE, |c| c.is_enclosing_container_for(rider))
+    }
+
+    fn bridge_tower_id(&self, owner: ObjectSlot, tower_type: BridgeTowerType) -> Option<ObjectId> {
+        let bs = self.world.objects.get(owner)?.bridge_slot?;
+        self.world
+            .modules
+            .payload(bs)
+            .and_then(|p| p.as_bridge())
+            .map(|b| b.get_tower_id(tower_type))
     }
 
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool {
@@ -5343,6 +5382,19 @@ impl SimApi for SimContext {
         }
     }
 
+    fn contain_harm_and_force_exit_all(&mut self, container: ObjectSlot, dmg: &DamageInfo) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(cs) {
+            let _ = self.dispatch_module(cs, |m, sim, ctx| {
+                if let Some(c) = m.as_contain_mut() {
+                    c.harm_and_force_exit_all_contained(sim, ctx, dmg);
+                }
+            });
+        }
+    }
+
     fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType) {
         let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
             return;
@@ -6856,6 +6908,18 @@ impl SimView for MockSimApi {
         self.ctx.contain_is_special_zero_slot(owner)
     }
 
+    fn contain_is_bustable(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.contain_is_bustable(owner)
+    }
+
+    fn contain_is_enclosing_container_for(&self, owner: ObjectSlot, rider: ObjectSlot) -> Bool {
+        self.ctx.contain_is_enclosing_container_for(owner, rider)
+    }
+
+    fn bridge_tower_id(&self, owner: ObjectSlot, tower_type: BridgeTowerType) -> Option<ObjectId> {
+        self.ctx.bridge_tower_id(owner, tower_type)
+    }
+
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool {
         self.ctx.contain_is_special_overlord_style(owner)
     }
@@ -7579,6 +7643,10 @@ impl SimApi for MockSimApi {
 
     fn contain_kill_all(&mut self, container: ObjectSlot) {
         self.ctx.contain_kill_all(container);
+    }
+
+    fn contain_harm_and_force_exit_all(&mut self, container: ObjectSlot, dmg: &DamageInfo) {
+        self.ctx.contain_harm_and_force_exit_all(container, dmg);
     }
 
     fn set_body_damage_state(&mut self, owner: ObjectSlot, new_state: BodyDamageType) {
