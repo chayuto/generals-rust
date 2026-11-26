@@ -53,6 +53,8 @@ python3 scripts/test_lint_determinism.py
 python3 scripts/test_port_map.py
 python3 scripts/test_build_oracle.py
 python3 scripts/test_pack_wave.py
+python3 scripts/test_check_replays.py
+python3 scripts/test_build_rust_engine.py
 python3 scripts/lint_determinism.py
 python3 scripts/port_map.py --check
 if command -v cargo >/dev/null 2>&1 && [[ -f Cargo.toml ]]; then
