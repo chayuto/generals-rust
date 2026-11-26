@@ -268,6 +268,7 @@ fn run_vector(index: usize, line: &str, grids: &[GridConfig]) -> usize {
                 angle: 0.0,
                 geometry: geometry(&row[..7], &format!("vector {index} object {}", i + 1)),
                 is_immobile: 0,
+                build_cost: 0,
             };
             place(&mut object, &row[7..]);
             object

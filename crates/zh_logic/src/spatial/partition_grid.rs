@@ -6,8 +6,8 @@
 //! (harness `tests/cpp_harness/gen_partition_grid.cpp`).
 //!
 //! Ported: `init`, `registerObject`, `unRegisterObject`, `makeDirty`, the filing
-//! half of `update`, the cell fill routines and the radius-ring table. Not ported:
-//! searches, collisions, shroud and fog, threat and value maps, ghost objects,
+//! half of `update`, the cell fill routines and the radius-ring table. The
+//! searches are in `partition_query`. Not ported: collisions, shroud and fog, threat and value maps, ghost objects,
 //! cached terrain heights.
 //!
 //! # List order
@@ -42,7 +42,7 @@ use zh_common::math::{
 };
 use zh_common::types::{Bool, Int, ObjectId, Real};
 
-/// What the filing code reads from an object.
+/// What the filing code and the searches read from an object.
 #[derive(Debug, Clone)]
 pub struct PartitionObject {
     pub id: ObjectId,
@@ -52,6 +52,9 @@ pub struct PartitionObject {
     pub geometry: GeometryInfo,
     /// `KINDOF_IMMOBILE`. Filing ignores it; the collision check does not.
     pub is_immobile: Bool,
+    /// `ThingTemplate::friend_getBuildCost()`. Read only by the searches that
+    /// sort by cost.
+    pub build_cost: Int,
 }
 
 /// `PartitionData::DirtyStatus`.

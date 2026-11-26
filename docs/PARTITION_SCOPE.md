@@ -1,6 +1,6 @@
 # Spatial grid (`PKT-160 PartitionManager`) scope
 
-Stage 1a (cell filing, `spatial/partition_grid.rs`, golden `golden_partition_grid`) is ported and not wired into the sim. Sizes are approximate line counts of `PartitionManager.cpp` (5,921 lines; the header adds 1,601), grouped by function name.
+Stage 1 is ported and not wired into the sim: cell filing (`spatial/partition_grid.rs`, golden `golden_partition_grid`) and searches (`spatial/partition_query.rs`, golden `golden_partition_query`). Sizes are approximate line counts of `PartitionManager.cpp` (5,921 lines; the header adds 1,601), grouped by function name.
 
 ## Why it matters
 
@@ -32,6 +32,12 @@ Not needed yet: threat and value maps (~340), position finding and line of sight
 
 ## For wiring into the sim (stage 2)
 
+Suggested order: port stage 3 standalone first, then wire both in together.
+
+- The caller supplies per object: id, position, angle, geometry, immobile flag and the raw template build cost.
+- The sim's `find_objects_in_range` is inclusive (`<=`), measures 2D centre distance, skips destroyed objects and walks the world list. It is not a drop-in swap: match each caller to its C++ distance rule, order type, filters and from-object or from-position form.
+- All grid distance comparisons are strict. Objects awaiting the destroy list stay registered.
+- A closest search finishes the ring where it first accepts an object, so it is not always the nearest.
 - Mark an object dirty only where C++ does: `reactToTransformChange` (past its thresholds) and the other `makeDirty(true)` sites in `Object.cpp`, including script disabled and unpowered changes.
 - `setGeometryInfo` is unregister then register. `setGeometryInfoZ` does neither.
 - A map boundary change rebuilds the grid and registers everything again.
@@ -41,13 +47,12 @@ Not needed yet: threat and value maps (~340), position finding and line of sight
 
 ## Decisions taken
 
-The owner accepted the behaviour change and asked for a faithful port.
+The owner accepted the behaviour change and asked for a faithful port: new objects become invisible to queries until the next grid update, and some existing harnesses and vectors may have to be regenerated.
 
 ## Open questions
 
-1. **Stage 2 changes existing behaviour.** New objects become invisible to queries until the next grid update. Some existing harnesses and vectors may have to be regenerated.
-2. **Terrain interface.** The grid is sized from the map extent and reads cell heights. `ThingTerrainAccess` needs those.
-3. **Where it lives.** Proposed: a field of `SimWorld`, because it is hashed state.
+1. **Terrain interface.** The grid is sized from the map extent and reads cell heights. `ThingTerrainAccess` needs those.
+2. **Where it lives.** Proposed: a field of `SimWorld`, because it is hashed state.
 
 ## Risks
 
