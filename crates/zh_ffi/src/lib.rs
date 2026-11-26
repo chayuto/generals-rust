@@ -214,6 +214,38 @@ pub struct ZhExpTrackerParentCallbacks {
 struct FfiExperienceParent<'a> {
     cb: &'a ZhExpTrackerParentCallbacks,
     killer_ctx: *const c_void,
+    /// A level change to report once the new state is in place.
+    level_change: Option<(VeterancyLevel, VeterancyLevel, Bool)>,
+}
+
+/// Runs `op` on the tracker in `state`, stores the result, then reports a level change.
+///
+/// C++ writes the new level and experience before `onVeterancyLevelChanged`, which
+/// reads them and may change the tracker again, so nothing is written after it.
+/// An operation that leaves its own tracker alone (forwarding to a sink) writes
+/// nothing, so changes the sink makes to it survive.
+unsafe fn run_tracker_op<R>(
+    state: *mut ZhExpTrackerState,
+    cb: &ZhExpTrackerParentCallbacks,
+    op: impl FnOnce(&mut ExperienceTrackerState, &mut FfiExperienceParent<'_>) -> R,
+) -> R {
+    let mut parent = FfiExperienceParent {
+        cb,
+        killer_ctx: core::ptr::null(),
+        level_change: None,
+    };
+    let before = unsafe { (*state).to_rust() };
+    let mut after = before.clone();
+    let out = op(&mut after, &mut parent);
+    if after != before {
+        unsafe { (*state).write_from_rust(&after) };
+    }
+    if let (Some((old, new, feedback)), Some(f)) =
+        (parent.level_change, cb.on_veterancy_level_changed)
+    {
+        unsafe { f(cb.parent_ctx, old.as_i32(), new.as_i32(), feedback) };
+    }
+    out
 }
 
 impl<'a> ExperienceParentAccess for FfiExperienceParent<'a> {
@@ -255,16 +287,8 @@ impl<'a> ExperienceParentAccess for FfiExperienceParent<'a> {
         new_level: VeterancyLevel,
         provide_feedback: Bool,
     ) {
-        if let Some(f) = self.cb.on_veterancy_level_changed {
-            unsafe {
-                f(
-                    self.cb.parent_ctx,
-                    old_level.as_i32(),
-                    new_level.as_i32(),
-                    provide_feedback,
-                );
-            }
-        }
+        // Each tracker operation reports at most one change, as its last step.
+        self.level_change = Some((old_level, new_level, provide_feedback));
     }
 
     fn forward_experience_to_sink(
@@ -305,6 +329,7 @@ pub unsafe extern "C" fn zh_exp_tracker_init(
     let parent = FfiExperienceParent {
         cb: unsafe { &*cb },
         killer_ctx: core::ptr::null(),
+        level_change: None,
     };
     let s = ExperienceTrackerState::new(&parent);
     unsafe { (*state).write_from_rust(&s) };
@@ -322,6 +347,7 @@ pub unsafe extern "C" fn zh_exp_tracker_get_experience_value(
     let parent = FfiExperienceParent {
         cb: unsafe { &*cb },
         killer_ctx,
+        level_change: None,
     };
     let s = unsafe { (*state).to_rust() };
     s.get_experience_value(&parent)
@@ -348,17 +374,10 @@ pub unsafe extern "C" fn zh_exp_tracker_set_min_veterancy_level(
     if state.is_null() || cb.is_null() {
         return;
     }
-    let mut parent = FfiExperienceParent {
-        cb: unsafe { &*cb },
-        killer_ctx: core::ptr::null(),
-    };
-    let mut s = unsafe { (*state).to_rust() };
-    s.set_min_veterancy_level(
-        &mut parent,
-        VeterancyLevel::from_i32(new_level),
-        provide_feedback,
-    );
-    unsafe { (*state).write_from_rust(&s) };
+    let level = VeterancyLevel::from_i32(new_level);
+    unsafe {
+        run_tracker_op(state, &*cb, |s, p| s.set_min_veterancy_level(p, level, provide_feedback));
+    }
 }
 
 #[no_mangle]
@@ -371,17 +390,10 @@ pub unsafe extern "C" fn zh_exp_tracker_set_veterancy_level(
     if state.is_null() || cb.is_null() {
         return;
     }
-    let mut parent = FfiExperienceParent {
-        cb: unsafe { &*cb },
-        killer_ctx: core::ptr::null(),
-    };
-    let mut s = unsafe { (*state).to_rust() };
-    s.set_veterancy_level(
-        &mut parent,
-        VeterancyLevel::from_i32(new_level),
-        provide_feedback,
-    );
-    unsafe { (*state).write_from_rust(&s) };
+    let level = VeterancyLevel::from_i32(new_level);
+    unsafe {
+        run_tracker_op(state, &*cb, |s, p| s.set_veterancy_level(p, level, provide_feedback));
+    }
 }
 
 #[no_mangle]
@@ -394,14 +406,11 @@ pub unsafe extern "C" fn zh_exp_tracker_gain_exp_for_level(
     if state.is_null() || cb.is_null() {
         return FALSE;
     }
-    let mut parent = FfiExperienceParent {
-        cb: unsafe { &*cb },
-        killer_ctx: core::ptr::null(),
-    };
-    let mut s = unsafe { (*state).to_rust() };
-    let res = s.gain_exp_for_level(&mut parent, levels_to_gain, can_scale_for_bonus);
-    unsafe { (*state).write_from_rust(&s) };
-    res
+    unsafe {
+        run_tracker_op(state, &*cb, |s, p| {
+            s.gain_exp_for_level(p, levels_to_gain, can_scale_for_bonus)
+        })
+    }
 }
 
 #[no_mangle]
@@ -426,13 +435,11 @@ pub unsafe extern "C" fn zh_exp_tracker_add_experience_points(
     if state.is_null() || cb.is_null() {
         return;
     }
-    let mut parent = FfiExperienceParent {
-        cb: unsafe { &*cb },
-        killer_ctx: core::ptr::null(),
-    };
-    let mut s = unsafe { (*state).to_rust() };
-    s.add_experience_points(&mut parent, experience_gain, can_scale_for_bonus);
-    unsafe { (*state).write_from_rust(&s) };
+    unsafe {
+        run_tracker_op(state, &*cb, |s, p| {
+            s.add_experience_points(p, experience_gain, can_scale_for_bonus)
+        });
+    }
 }
 
 #[no_mangle]
@@ -445,13 +452,11 @@ pub unsafe extern "C" fn zh_exp_tracker_set_experience_and_level(
     if state.is_null() || cb.is_null() {
         return;
     }
-    let mut parent = FfiExperienceParent {
-        cb: unsafe { &*cb },
-        killer_ctx: core::ptr::null(),
-    };
-    let mut s = unsafe { (*state).to_rust() };
-    s.set_experience_and_level(&mut parent, experience_in, provide_feedback);
-    unsafe { (*state).write_from_rust(&s) };
+    unsafe {
+        run_tracker_op(state, &*cb, |s, p| {
+            s.set_experience_and_level(p, experience_in, provide_feedback)
+        });
+    }
 }
 
 #[no_mangle]
@@ -509,4 +514,90 @@ pub unsafe extern "C" fn zh_exp_tracker_xfer_load(
     }
     unsafe { (*state).write_from_rust(&s) };
     TRUE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Parent {
+        state: *mut ZhExpTrackerState,
+        seen: Vec<(i32, i32, i32, i32)>,
+        sink_hits: u32,
+    }
+
+    unsafe extern "C" fn required(_ctx: *mut c_void, level: i32) -> i32 {
+        level * 10
+    }
+
+    unsafe extern "C" fn changed(ctx: *mut c_void, old: i32, new: i32, _feedback: u8) {
+        let p = unsafe { &mut *ctx.cast::<Parent>() };
+        let state = unsafe { &mut *p.state };
+        p.seen
+            .push((old, new, state.current_level, state.current_experience));
+        // A change made while handling the notice must survive.
+        state.experience_scalar = 7.0;
+    }
+
+    unsafe extern "C" fn sink(ctx: *mut c_void, _id: i32, _gain: i32, _can: u8) -> u8 {
+        let p = unsafe { &mut *ctx.cast::<Parent>() };
+        p.sink_hits += 1;
+        unsafe { (*p.state).experience_scalar = 3.0 };
+        1
+    }
+
+    fn setup(parent: &mut Parent, state: &mut ZhExpTrackerState) -> ZhExpTrackerParentCallbacks {
+        parent.state = state;
+        ZhExpTrackerParentCallbacks {
+            parent_ctx: (parent as *mut Parent).cast(),
+            is_template_trainable: None,
+            get_experience_required: Some(required),
+            get_experience_value: None,
+            get_relationship_with_killer: None,
+            on_veterancy_level_changed: Some(changed),
+            forward_experience_to_sink: Some(sink),
+            forward_set_exp_and_level_to_sink: None,
+        }
+    }
+
+    fn fresh() -> (Parent, ZhExpTrackerState) {
+        (
+            Parent {
+                state: core::ptr::null_mut(),
+                seen: Vec::new(),
+                sink_hits: 0,
+            },
+            ZhExpTrackerState {
+                current_level: 0,
+                current_experience: 0,
+                experience_sink: 0,
+                experience_scalar: 1.0,
+                is_trainable: 1,
+            },
+        )
+    }
+
+    #[test]
+    fn level_change_is_reported_after_the_state_is_stored() {
+        let (mut parent, mut state) = fresh();
+        let cb = setup(&mut parent, &mut state);
+        let state_ptr = parent.state;
+        unsafe { zh_exp_tracker_add_experience_points(state_ptr, &cb, 25, 1) };
+        assert_eq!(parent.seen, vec![(0, 2, 2, 25)]);
+        assert_eq!(state.experience_scalar, 7.0);
+        unsafe { zh_exp_tracker_set_veterancy_level(state_ptr, &cb, 3, 0) };
+        assert_eq!(parent.seen[1], (2, 3, 3, 30));
+    }
+
+    #[test]
+    fn forwarding_to_a_sink_does_not_overwrite_the_tracker() {
+        let (mut parent, mut state) = fresh();
+        state.experience_sink = 9;
+        let cb = setup(&mut parent, &mut state);
+        let state_ptr = parent.state;
+        unsafe { zh_exp_tracker_add_experience_points(state_ptr, &cb, 25, 1) };
+        assert_eq!(parent.sink_hits, 1);
+        assert_eq!(state.experience_scalar, 3.0);
+        assert_eq!(state.current_experience, 0);
+    }
 }

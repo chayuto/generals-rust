@@ -12,13 +12,15 @@ link line, so the linker never pulls the original member.
   python3 scripts/build_rust_engine.py
   python3 scripts/check_replays.py --check --expect-rust --binary <printed path>
 
-Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002).
-`--mutate` builds a deliberately wrong variant to prove the replay check fails.
+Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002) and
+experience and veterancy (`ExperienceTracker.cpp`, PKT-003).
+`--mutate <swap>` builds a deliberately wrong variant to prove the replay check fails.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import pathlib
 import shlex
@@ -31,13 +33,48 @@ import build_oracle  # noqa: E402
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 BUILD_DIR = REPO_ROOT / "vendor/GeneralsX/build/macos-vulkan"
 GAME_TARGET = "GeneralsMD/GeneralsXZH"
-RANDOM_SOURCE = (
-    REPO_ROOT / "vendor/GeneralsX/Core/GameEngine/Source/Common/RandomValue.cpp"
+VENDOR = REPO_ROOT / "vendor/GeneralsX"
+
+
+@dataclasses.dataclass(frozen=True)
+class Swap:
+    """One engine source file whose functions are replaced by calls into Rust."""
+
+    name: str
+    source: pathlib.Path
+    # (first line replaced, first line kept again, replacement text)
+    regions: tuple[tuple[str, str, str], ...]
+
+
+SWAPS = (
+    Swap(
+        "random",
+        VENDOR / "Core/GameEngine/Source/Common/RandomValue.cpp",
+        (
+            (
+                "static const Real theMultFactor",
+                "const char *const GameClientRandomVariable::DistributionTypeNames[] =",
+                '#include "zh_ffi_random_value.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "experience",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/ExperienceTracker.cpp",
+        (
+            (
+                "Int ExperienceTracker::getExperienceValue(",
+                "Bool ExperienceTracker::isTrainable() const",
+                '#include "zh_ffi_experience_tracker.inc"',
+            ),
+            (
+                "void ExperienceTracker::setMinVeterancyLevel(",
+                "void ExperienceTracker::crc(",
+                "// the veterancy functions are in the included file above",
+            ),
+        ),
+    ),
 )
-# The generators lie between these two lines of the original file.
-RANDOM_BEGIN = "static const Real theMultFactor"
-RANDOM_END = "const char *const GameClientRandomVariable::DistributionTypeNames[] ="
-RANDOM_INCLUDE = '#include "zh_ffi_random_value.inc"'
 
 
 class BuildError(Exception):
@@ -96,29 +133,17 @@ def run(args: list[str], cwd: pathlib.Path) -> None:
         raise BuildError(f"{args[0]} failed:\n{done.stderr[-4000:]}")
 
 
-def build(mutate: bool) -> pathlib.Path:
+def build(mutate: str | None) -> pathlib.Path:
+    """Builds the swapped engine; `mutate` names one swap to compile with a fault."""
     if not (BUILD_DIR / "compile_commands.json").is_file():
         raise BuildError(f"no reference build tree at {BUILD_DIR}")
     run(["cargo", "build", "--release", "-p", "zh_ffi"], REPO_ROOT)
 
-    suffix = "-mutant" if mutate else ""
+    suffix = f"-mutant-{mutate}" if mutate else ""
     work = REPO_ROOT / "target" / f"rust_seam{suffix}"
     work.mkdir(parents=True, exist_ok=True)
-    patched = work / "RandomValue.cpp"
-    patched.write_text(
-        swap_region(
-            RANDOM_SOURCE.read_text(encoding="utf-8", errors="surrogateescape"),
-            RANDOM_BEGIN,
-            RANDOM_END,
-            RANDOM_INCLUDE,
-        ),
-        encoding="utf-8",
-        errors="surrogateescape",
-    )
 
     entries = json.loads((BUILD_DIR / "compile_commands.json").read_text())
-    entry = next(e for e in entries if e["file"].endswith("/Common/RandomValue.cpp"))
-    raw_compile = shlex.split(entry["command"])
     raw_link = subprocess.run(
         ["ninja", "-t", "commands", GAME_TARGET],
         cwd=str(BUILD_DIR),
@@ -128,26 +153,44 @@ def build(mutate: bool) -> pathlib.Path:
     ).stdout.strip().splitlines()[-1]
     link_tokens = shlex.split(raw_link)
 
-    # The tree may have been configured under another folder name.
-    stale = build_oracle.detect_stale_prefixes(raw_compile + link_tokens)
+    objects = []
+    stale: list[str] = []
+    for swap in SWAPS:
+        text = swap.source.read_text(encoding="utf-8", errors="surrogateescape")
+        for begin, end, replacement in swap.regions:
+            text = swap_region(text, begin, end, replacement)
+        patched = work / swap.source.name
+        patched.write_text(text, encoding="utf-8", errors="surrogateescape")
 
-    def fix(tokens: list[str]) -> list[str]:
-        return [build_oracle.rewrite_repo_path(t, stale, REPO_ROOT) for t in tokens]
+        tail = "/" + "/".join(swap.source.parts[-3:])
+        matches = [e for e in entries if e["file"].endswith(tail) and "z_gameengine" in e["command"]]
+        if len(matches) != 1:
+            raise BuildError(f"{tail}: {len(matches)} compile commands, expected one")
+        raw_compile = shlex.split(matches[0]["command"])
+        # The tree may have been configured under another folder name.
+        stale = build_oracle.detect_stale_prefixes(raw_compile + link_tokens)
+        command = [build_oracle.rewrite_repo_path(t, stale, REPO_ROOT) for t in raw_compile]
 
-    extra = [f"-I{REPO_ROOT / 'crates/zh_ffi/include'}"]
-    if mutate:
-        extra.append("-DZH_SEAM_MUTATE")
-    obj = work / "RandomValue.cpp.o"
-    run(compile_args(fix(raw_compile), patched, obj, extra), BUILD_DIR)
+        extra = [f"-I{REPO_ROOT / 'crates/zh_ffi/include'}"]
+        if mutate == swap.name:
+            extra.append("-DZH_SEAM_MUTATE")
+        obj = work / f"{swap.source.name}.o"
+        run(compile_args(command, patched, obj, extra), BUILD_DIR)
+        objects.append(obj)
 
+    link = [build_oracle.rewrite_repo_path(t, stale, REPO_ROOT) for t in link_tokens]
     output = f"{GAME_TARGET}-rust{suffix}"
-    run(link_args(fix(link_tokens), [obj], output), BUILD_DIR)
+    run(link_args(link, objects, output), BUILD_DIR)
     return BUILD_DIR / output
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the engine with Rust code swapped in.")
-    parser.add_argument("--mutate", action="store_true", help="build the deliberately wrong variant")
+    parser.add_argument(
+        "--mutate",
+        choices=[swap.name for swap in SWAPS],
+        help="build a variant with a deliberate fault in this swap",
+    )
     args = parser.parse_args(argv)
     try:
         binary = build(args.mutate)

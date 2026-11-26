@@ -46,14 +46,25 @@ class BuildRustEngineTest(unittest.TestCase):
             bre.link_args(["c++", "-o", "game", "libz.a"], [], "game-rust")
 
     def test_every_forwarder_calls_a_declared_and_exported_symbol(self) -> None:
-        inc = (FFI / "include/zh_ffi_random_value.inc").read_text()
         header = (FFI / "include/zh_ffi.h").read_text()
         lib = (FFI / "src/lib.rs").read_text()
-        called = set(re.findall(r"\b(zh_random_[a-z_]+)\(", inc))
-        self.assertEqual(len(called), 12)
-        for name in called:
-            self.assertRegex(header, rf"\b{name}\(")
-            self.assertRegex(lib, rf"fn {name}\(")
+        for name, prefix, count in (
+            ("zh_ffi_random_value.inc", "zh_random_", 12),
+            ("zh_ffi_experience_tracker.inc", "zh_exp_tracker_", 7),
+        ):
+            inc = (FFI / "include" / name).read_text()
+            called = set(re.findall(rf"\b({prefix}[a-z_]+)\(", inc))
+            self.assertEqual(len(called), count, (name, sorted(called)))
+            for symbol in called:
+                self.assertRegex(header, rf"\b{symbol}\(")
+                self.assertRegex(lib, rf"fn {symbol}\(")
+
+    def test_each_swap_has_a_fault_variant(self) -> None:
+        for swap in bre.SWAPS:
+            includes = [r for _, _, r in swap.regions if r.startswith("#include")]
+            self.assertEqual(len(includes), 1, swap.name)
+            inc = includes[0].split('"')[1]
+            self.assertIn("ZH_SEAM_MUTATE", (FFI / "include" / inc).read_text(), swap.name)
 
 
 if __name__ == "__main__":
