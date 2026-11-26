@@ -4,6 +4,7 @@ pub mod economy;
 pub mod engine_sim;
 mod engine_sim_generated;
 pub mod lifetime_update;
+pub mod sleepy_heap;
 
 use core::ffi::c_void;
 use core::slice;

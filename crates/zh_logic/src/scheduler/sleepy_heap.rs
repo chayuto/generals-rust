@@ -178,9 +178,149 @@ pub trait ScheduleStore<Handle> {
     fn schedule_mut(&mut self, handle: Handle) -> &mut UpdateModuleScheduleState;
 }
 
+/// What the heap needs from an update module: its priority and somewhere to keep its slot.
+pub trait HeapStore<Handle> {
+    fn priority(&self, handle: Handle) -> UnsignedInt;
+    fn set_index(&mut self, handle: Handle, index: Int);
+}
+
+impl<Handle, S: ScheduleStore<Handle>> HeapStore<Handle> for S {
+    #[inline]
+    fn priority(&self, handle: Handle) -> UnsignedInt {
+        self.schedule(handle).priority()
+    }
+
+    #[inline]
+    fn set_index(&mut self, handle: Handle, index: Int) {
+        self.schedule_mut(handle).set_index_in_logic(index);
+    }
+}
+
 #[inline]
 const fn is_lower_priority(a_pri: UnsignedInt, b_pri: UnsignedInt) -> bool {
     a_pri > b_pri
+}
+
+fn swap_slots<Handle: Copy, S: HeapStore<Handle>>(
+    entries: &mut [Handle],
+    store: &mut S,
+    upper: usize,
+    lower: usize,
+) {
+    let (a, b) = (entries[upper], entries[lower]);
+    entries[lower] = a;
+    entries[upper] = b;
+    store.set_index(a, lower as Int);
+    store.set_index(b, upper as Int);
+}
+
+/// `GameLogic::rebalanceParentSleepyUpdate`. Returns where the entry ended up.
+pub fn sift_up<Handle: Copy, S: HeapStore<Handle>>(
+    entries: &mut [Handle],
+    store: &mut S,
+    mut i: usize,
+) -> usize {
+    while i > 0 {
+        let parent = (i - 1) >> 1;
+        if !is_lower_priority(store.priority(entries[parent]), store.priority(entries[i])) {
+            break;
+        }
+        swap_slots(entries, store, parent, i);
+        i = parent;
+    }
+    i
+}
+
+/// `GameLogic::rebalanceChildSleepyUpdate`. Returns where the entry ended up.
+pub fn sift_down<Handle: Copy, S: HeapStore<Handle>>(
+    entries: &mut [Handle],
+    store: &mut S,
+    mut i: usize,
+) -> usize {
+    let sz = entries.len();
+    let mut child = (i << 1) + 1;
+    while child < sz {
+        if child + 1 < sz
+            && is_lower_priority(
+                store.priority(entries[child]),
+                store.priority(entries[child + 1]),
+            )
+        {
+            child += 1;
+        }
+        if !is_lower_priority(store.priority(entries[i]), store.priority(entries[child])) {
+            break;
+        }
+        swap_slots(entries, store, i, child);
+        i = child;
+        child = (i << 1) + 1;
+    }
+    i
+}
+
+/// `GameLogic::rebalanceSleepyUpdate`.
+pub fn rebalance_slot<Handle: Copy, S: HeapStore<Handle>>(
+    entries: &mut [Handle],
+    store: &mut S,
+    i: usize,
+) {
+    let next = sift_up(entries, store, i);
+    sift_down(entries, store, next);
+}
+
+/// `GameLogic::pushSleepyUpdate`, once the new module is the last entry.
+pub fn push_appended<Handle: Copy, S: HeapStore<Handle>>(entries: &mut [Handle], store: &mut S) {
+    let Some(last) = entries.len().checked_sub(1) else {
+        return;
+    };
+    store.set_index(entries[last], last as Int);
+    sift_up(entries, store, last);
+}
+
+/// `GameLogic::eraseSleepyUpdate`. Returns the new length; the caller drops the tail.
+pub fn remove_slot<Handle: Copy, S: HeapStore<Handle>>(
+    entries: &mut [Handle],
+    store: &mut S,
+    i: usize,
+) -> usize {
+    store.set_index(entries[i], INVALID_LOGIC_INDEX);
+    let last = entries.len() - 1;
+    if i < last {
+        entries[i] = entries[last];
+        store.set_index(entries[i], i as Int);
+        rebalance_slot(&mut entries[..last], store, i);
+    }
+    last
+}
+
+/// `GameLogic::remakeSleepyUpdate`: bottom-up heapify after loading.
+pub fn heapify<Handle: Copy, S: HeapStore<Handle>>(entries: &mut [Handle], store: &mut S) {
+    if entries.is_empty() {
+        return;
+    }
+    let mut parent = entries.len() / 2;
+    loop {
+        sift_down(entries, store, parent);
+        if parent == 0 {
+            break;
+        }
+        parent -= 1;
+    }
+}
+
+/// The cases where `GameLogic::friend_awakenUpdateModule` leaves the module alone.
+#[inline]
+pub const fn awaken_is_ignored(
+    is_current_module: bool,
+    next_call_frame: UnsignedInt,
+    now: UnsignedInt,
+    when_to_wake_up: UnsignedInt,
+) -> bool {
+    // A module inside its own update() is rescheduled by the return value instead, and
+    // a module already awake this frame must not be pushed back to the next one.
+    is_current_module
+        || when_to_wake_up == next_call_frame
+        || (now > 0 && next_call_frame == now && when_to_wake_up == now.wrapping_add(1))
 }
 
 /// Deterministic array-backed min-heap with O(1) index tracking matching `GameLogic::m_sleepyUpdates`.
@@ -258,10 +398,8 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
 
     /// Pushes `handle` onto the heap and sifts up to its parent (`GameLogic::pushSleepyUpdate`).
     pub fn push<S: ScheduleStore<Handle>>(&mut self, store: &mut S, handle: Handle) {
-        let idx = self.entries.len();
         self.entries.push(handle);
-        store.schedule_mut(handle).set_index_in_logic(idx as Int);
-        self.rebalance_parent(store, idx);
+        push_appended(&mut self.entries, store);
     }
 
     /// Appends `handle` for bulk load reconstruction prior to [`Self::remake`].
@@ -273,119 +411,41 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
 
     /// Removes and returns the root handle (`GameLogic::popSleepyUpdate`).
     pub fn pop<S: ScheduleStore<Handle>>(&mut self, store: &mut S) -> Option<Handle> {
-        let sz = self.entries.len();
-        if sz == 0 {
-            return None;
-        }
-        let root = self.entries[0];
-        store.schedule_mut(root).set_index_in_logic(INVALID_LOGIC_INDEX);
-        if sz > 1 {
-            let last = self.entries[sz - 1];
-            self.entries[0] = last;
-            store.schedule_mut(last).set_index_in_logic(0);
-            self.entries.pop();
-            self.rebalance_child(store, 0);
-        } else {
-            self.entries.pop();
-        }
+        let root = self.peek()?;
+        self.erase(store, 0);
         Some(root)
     }
 
     /// Erases the entry at `idx` (`GameLogic::eraseSleepyUpdate`).
     pub fn erase<S: ScheduleStore<Handle>>(&mut self, store: &mut S, idx: usize) {
-        let sz = self.entries.len();
-        debug_assert!(idx < sz, "erase index out of bounds");
-        if idx >= sz {
+        debug_assert!(idx < self.entries.len(), "erase index out of bounds");
+        if idx >= self.entries.len() {
             return;
         }
-        let removed = self.entries[idx];
-        store.schedule_mut(removed).set_index_in_logic(INVALID_LOGIC_INDEX);
-        let last_idx = sz - 1;
-        if idx < last_idx {
-            let moved = self.entries[last_idx];
-            self.entries[idx] = moved;
-            store.schedule_mut(moved).set_index_in_logic(idx as Int);
-            self.entries.pop();
-            self.rebalance(store, idx);
-        } else {
-            self.entries.pop();
-        }
+        let len = remove_slot(&mut self.entries, store, idx);
+        self.entries.truncate(len);
     }
 
     pub fn rebalance_parent<S: ScheduleStore<Handle>>(
         &mut self,
         store: &mut S,
-        mut i: usize,
+        i: usize,
     ) -> usize {
-        while i > 0 {
-            let parent = (i - 1) >> 1;
-            let h_parent = self.entries[parent];
-            let h_i = self.entries[i];
-            let pri_parent = store.schedule(h_parent).priority();
-            let pri_i = store.schedule(h_i).priority();
-            if !is_lower_priority(pri_parent, pri_i) {
-                break;
-            }
-            self.entries[i] = h_parent;
-            self.entries[parent] = h_i;
-            store.schedule_mut(h_parent).set_index_in_logic(i as Int);
-            store.schedule_mut(h_i).set_index_in_logic(parent as Int);
-            i = parent;
-        }
-        i
+        sift_up(&mut self.entries, store, i)
     }
 
-    pub fn rebalance_child<S: ScheduleStore<Handle>>(
-        &mut self,
-        store: &mut S,
-        mut i: usize,
-    ) -> usize {
-        let sz = self.entries.len();
-        let mut child = (i << 1) + 1;
-        while child < sz {
-            if child + 1 < sz {
-                let pri_left = store.schedule(self.entries[child]).priority();
-                let pri_right = store.schedule(self.entries[child + 1]).priority();
-                if is_lower_priority(pri_left, pri_right) {
-                    child += 1;
-                }
-            }
-            let h_i = self.entries[i];
-            let h_child = self.entries[child];
-            let pri_i = store.schedule(h_i).priority();
-            let pri_child = store.schedule(h_child).priority();
-            if !is_lower_priority(pri_i, pri_child) {
-                break;
-            }
-            self.entries[i] = h_child;
-            self.entries[child] = h_i;
-            store.schedule_mut(h_child).set_index_in_logic(i as Int);
-            store.schedule_mut(h_i).set_index_in_logic(child as Int);
-            i = child;
-            child = (i << 1) + 1;
-        }
-        i
+    pub fn rebalance_child<S: ScheduleStore<Handle>>(&mut self, store: &mut S, i: usize) -> usize {
+        sift_down(&mut self.entries, store, i)
     }
 
     #[inline]
     pub fn rebalance<S: ScheduleStore<Handle>>(&mut self, store: &mut S, i: usize) {
-        let next_i = self.rebalance_parent(store, i);
-        self.rebalance_child(store, next_i);
+        rebalance_slot(&mut self.entries, store, i);
     }
 
     /// Bottom-up heapify after loading (`GameLogic::remakeSleepyUpdate`).
     pub fn remake<S: ScheduleStore<Handle>>(&mut self, store: &mut S) {
-        if self.entries.is_empty() {
-            return;
-        }
-        let mut parent = self.entries.len() / 2;
-        loop {
-            self.rebalance_child(store, parent);
-            if parent == 0 {
-                break;
-            }
-            parent -= 1;
-        }
+        heapify(&mut self.entries, store);
     }
 
     /// Registers an update module into the scheduler (`GameLogic::registerObject`).
@@ -413,14 +473,9 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
         now: UnsignedInt,
         when_to_wake_up: UnsignedInt,
     ) -> bool {
-        if self.cur_update_module == Some(handle) {
-            return false;
-        }
-        let cur_next = store.schedule(handle).next_call_frame();
-        if when_to_wake_up == cur_next {
-            return false;
-        }
-        if now > 0 && cur_next == now && when_to_wake_up == now.wrapping_add(1) {
+        let is_current = self.cur_update_module == Some(handle);
+        let next = store.schedule(handle).next_call_frame();
+        if awaken_is_ignored(is_current, next, now, when_to_wake_up) {
             return false;
         }
 
@@ -444,7 +499,10 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
         }
     }
 
-    /// Finalizes a dispatched update module (`handle`) at its live heap index after `update()` completes.
+    /// Reschedules the module that just ran and rebalances **slot 0**, as
+    /// `GameLogic.cpp:4108-4109` does. `update()` can put another module there (an object
+    /// created this frame whose phase runs earlier); C++ then leaves the updated module
+    /// where it is, so the heap order is not restored, and this must match.
     pub fn finish_due_update<S: ScheduleStore<Handle>>(
         &mut self,
         store: &mut S,
@@ -458,13 +516,9 @@ impl<Handle: Copy + Eq> SleepyUpdateHeap<Handle> {
         }
         store
             .schedule_mut(handle)
-            .set_next_call_frame(now.saturating_add(sleep_len.0));
-        let idx = store.schedule(handle).index_in_logic();
-        if idx >= 0 {
-            let usize_idx = idx as usize;
-            if usize_idx < self.entries.len() && self.entries[usize_idx] == handle {
-                self.rebalance(store, usize_idx);
-            }
+            .set_next_call_frame(now.wrapping_add(sleep_len.0));
+        if !self.entries.is_empty() {
+            self.rebalance(store, 0);
         }
     }
 

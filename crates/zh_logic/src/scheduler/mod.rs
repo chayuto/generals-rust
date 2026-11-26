@@ -3,7 +3,8 @@
 pub mod sleepy_heap;
 
 pub use sleepy_heap::{
-    should_process_disabled_update, ScheduleStore, SleepyUpdateHeap, SleepyUpdatePhase,
-    UpdateModuleScheduleState, INVALID_LOGIC_INDEX, MAX_SLEEPY_UPDATES_PER_OBJECT,
-    UPDATE_SLEEP_FOREVER, UPDATE_SLEEP_INVALID, UPDATE_SLEEP_NONE,
+    awaken_is_ignored, heapify, push_appended, rebalance_slot, remove_slot,
+    should_process_disabled_update, sift_down, sift_up, HeapStore, ScheduleStore, SleepyUpdateHeap,
+    SleepyUpdatePhase, UpdateModuleScheduleState, INVALID_LOGIC_INDEX,
+    MAX_SLEEPY_UPDATES_PER_OBJECT, UPDATE_SLEEP_FOREVER, UPDATE_SLEEP_INVALID, UPDATE_SLEEP_NONE,
 };

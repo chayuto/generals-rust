@@ -220,6 +220,26 @@ int32_t zh_energy_add_bonus(ZhEnergyState* state, int32_t bonus, uint32_t frame)
 int32_t zh_energy_remove_bonus(ZhEnergyState* state, int32_t bonus, uint8_t disabled,
                                uint32_t frame);
 
+/* The sleepy-update heap runs on the engine's own array of module pointers. The
+   callbacks must not touch that array. */
+typedef struct ZhSleepyCallbacks {
+    uint32_t (*priority)(void* module);
+    void     (*set_index)(void* module, int32_t index);
+} ZhSleepyCallbacks;
+
+int32_t zh_sleepy_sift_up(void** entries, int32_t len, int32_t i,
+                          const ZhSleepyCallbacks* callbacks);
+int32_t zh_sleepy_sift_down(void** entries, int32_t len, int32_t i,
+                            const ZhSleepyCallbacks* callbacks);
+void    zh_sleepy_rebalance(void** entries, int32_t len, int32_t i,
+                            const ZhSleepyCallbacks* callbacks);
+void    zh_sleepy_pushed(void** entries, int32_t len, const ZhSleepyCallbacks* callbacks);
+int32_t zh_sleepy_remove(void** entries, int32_t len, int32_t i,
+                         const ZhSleepyCallbacks* callbacks);
+void    zh_sleepy_remake(void** entries, int32_t len, const ZhSleepyCallbacks* callbacks);
+uint8_t zh_sleepy_awaken_ignored(uint8_t is_current_module, uint32_t next_call_frame,
+                                 uint32_t now, uint32_t when_to_wake_up);
+
 #ifdef __cplusplus
 }
 #endif
