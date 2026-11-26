@@ -25,6 +25,19 @@ class BuildRustEngineTest(unittest.TestCase):
             with self.assertRaises(bre.BuildError):
                 bre.swap_region(source, "BEGIN", "END", "NEW")
 
+    def test_insert_into_function(self) -> None:
+        source = "void A::crc( X *x )\n{\n\tbody();\n}\n"
+        out = bre.insert_into_function(source, "void A::crc(", "NEW")
+        self.assertEqual(out, "void A::crc( X *x )\n{\nNEW\n\tbody();\n}\n")
+        for bad in ("nothing\n", source + source, "void A::crc() {}\n"):
+            with self.assertRaises(bre.BuildError):
+                bre.insert_into_function(bad, "void A::crc(", "NEW")
+
+    def test_witness_replaces_nothing_and_its_file_exists(self) -> None:
+        self.assertEqual(bre.WITNESS.regions, ())
+        for _, text in bre.WITNESS.inserts:
+            self.assertTrue((FFI / "include" / text.split('"')[1]).is_file())
+
     def test_compile_args_replace_input_and_output(self) -> None:
         out = bre.compile_args(
             ["c++", "-O2", "-o", "old.o", "-c", "old.cpp"],
@@ -52,6 +65,8 @@ class BuildRustEngineTest(unittest.TestCase):
             ("zh_ffi_random_value.inc", "zh_random_", 12),
             ("zh_ffi_experience_tracker.inc", "zh_exp_tracker_", 7),
             ("zh_ffi_lifetime_update.inc", "zh_lifetime_", 3),
+            ("zh_ffi_money.inc", "zh_money_", 4),
+            ("zh_ffi_energy.inc", "zh_energy_", 8),
         ):
             inc = (FFI / "include" / name).read_text()
             called = set(re.findall(rf"\b({prefix}[a-z_]+)\(", inc))

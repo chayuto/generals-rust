@@ -176,6 +176,50 @@ uint32_t zh_lifetime_set_range(const ZhEngineSimCallbacks* callbacks,
                                uint32_t min_frames, uint32_t max_frames);
 uint32_t zh_lifetime_update(const ZhEngineSimCallbacks* callbacks);
 
+/* ============================================================================
+ * PKT-121 Money and PKT-118 Energy: C++ keeps the members
+ * ============================================================================ */
+
+typedef struct ZhMoneyState {
+    uint32_t money;
+    int32_t  player_index;
+    uint32_t income_buckets[60];
+    uint32_t current_bucket;
+    uint32_t cash_per_minute;
+} ZhMoneyState;
+
+#define ZH_MONEY_WITHDRAW_SOUND 1
+#define ZH_MONEY_DEPOSIT_SOUND 2
+#define ZH_MONEY_RECORD_INCOME 4
+
+uint32_t zh_money_withdraw(ZhMoneyState* state, uint32_t amount, uint8_t play_sound,
+                           uint32_t* notices);
+uint32_t zh_money_deposit(ZhMoneyState* state, uint32_t amount, uint8_t play_sound,
+                          uint8_t track_income);
+void     zh_money_set_starting_cash(ZhMoneyState* state, uint32_t amount);
+void     zh_money_update_income_bucket(ZhMoneyState* state, uint32_t frame);
+
+typedef struct ZhEnergyState {
+    int32_t  production;
+    int32_t  consumption;
+    uint32_t sabotaged_till_frame;
+    uint8_t  has_owner;
+} ZhEnergyState;
+
+/* The changing calls return this, or the brownout flag the owner must be told. */
+#define ZH_ENERGY_NO_NOTICE (-1)
+
+int32_t zh_energy_get_production(const ZhEnergyState* state, uint32_t frame);
+float   zh_energy_supply_ratio(const ZhEnergyState* state, uint32_t frame);
+uint8_t zh_energy_has_sufficient_power(const ZhEnergyState* state, uint32_t frame);
+int32_t zh_energy_adjust_power(ZhEnergyState* state, int32_t delta, uint8_t adding,
+                               uint32_t frame);
+int32_t zh_energy_object_entering(ZhEnergyState* state, int32_t production, uint32_t frame);
+int32_t zh_energy_object_leaving(ZhEnergyState* state, int32_t production, uint32_t frame);
+int32_t zh_energy_add_bonus(ZhEnergyState* state, int32_t bonus, uint32_t frame);
+int32_t zh_energy_remove_bonus(ZhEnergyState* state, int32_t bonus, uint8_t disabled,
+                               uint32_t frame);
+
 #ifdef __cplusplus
 }
 #endif

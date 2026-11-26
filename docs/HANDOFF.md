@@ -6,7 +6,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
-- The Rust random generator, experience tracker and one behavior module (`LifetimeUpdate`) now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
+- The Rust random generator, experience tracker, money, energy and one behavior module (`LifetimeUpdate`) now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
 - Packets: 219 of 463 implemented, 244 unported (Phase 2: 102, Phase 4: 4, Phase 5: 92, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
@@ -23,7 +23,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Not verified
 
-- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the three swapped files; the Rust sim has no frame driver or game-wide CRC.
+- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the five swapped files; the Rust sim has no frame driver or game-wide CRC.
 - `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
 - No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
 
@@ -43,7 +43,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 1. C++ oracle in `tests/cpp_harness/`, built three ways with `scripts/build_oracle.py` (`--opt O0`, `--opt O2`, `--opt O2 --sanitize`), run with `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`. The three outputs must be byte-identical.
 2. Rust suite in `crates/zh_logic/tests/` against the JSON in `docs/golden_vectors/`.
 3. Mutation check: plant bugs in a copy of the tree and confirm the suite fails each one. A suite that passes first time is not proof until this is done.
-4. For engine swaps: `python3 scripts/build_rust_engine.py`, then `check_replays.py --check --expect-rust --binary ...` and the fault variants (`BASELINE.md`).
+4. For engine swaps: `python3 scripts/build_rust_engine.py`, then `check_replays.py --check --expect-rust --binary ...` and the fault variants (`BASELINE.md`). State the stock CRC leaves out needs the witness check there.
 5. `python3 scripts/lint_determinism.py crates/`; `cargo check --workspace --tests` with `--features zh_logic/retail-crc` and again with `zh_logic/retail-xfer-save`; `cargo test --workspace`; `python3 scripts/port_map.py --check`.
 
 ## Practical notes

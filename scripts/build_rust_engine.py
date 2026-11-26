@@ -16,6 +16,10 @@ Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002),
 experience and veterancy (`ExperienceTracker.cpp`, PKT-003) and the first behavior
 module (`LifetimeUpdate.cpp`, PKT-339, through `scripts/gen_engine_sim.py`'s adapter).
 `--mutate <swap>` builds a deliberately wrong variant to prove the replay check fails.
+
+The stock CRC does not cover money or energy. `--witness` builds two engines that
+add them to it, `GeneralsXZH-witness` (stock) and `GeneralsXZH-rust-witness`;
+record `docs/baselines/replay_crc_witness.json` from the first and check the second.
 """
 
 from __future__ import annotations
@@ -45,6 +49,8 @@ class Swap:
     source: pathlib.Path
     # (first line replaced, first line kept again, replacement text)
     regions: tuple[tuple[str, str, str], ...]
+    # (start of a function's signature line, text put after its opening brace)
+    inserts: tuple[tuple[str, str], ...] = ()
 
 
 SWAPS = (
@@ -76,6 +82,28 @@ SWAPS = (
         ),
     ),
     Swap(
+        "money",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/Common/RTS/Money.cpp",
+        (
+            (
+                "UnsignedInt Money::withdraw(",
+                "void Money::triggerAudioEvent(",
+                '#include "zh_ffi_money.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "energy",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/Common/RTS/Energy.cpp",
+        (
+            (
+                "Int Energy::getProduction() const",
+                "void Energy::crc(",
+                '#include "zh_ffi_energy.inc"',
+            ),
+        ),
+    ),
+    Swap(
         "lifetime",
         VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/LifetimeUpdate.cpp",
         (
@@ -94,8 +122,27 @@ SWAPS = (
 )
 
 
+# Applied to the stock build as well as the Rust one; it replaces nothing.
+WITNESS = Swap(
+    "witness",
+    VENDOR / "GeneralsMD/Code/GameEngine/Source/Common/RTS/Player.cpp",
+    (),
+    (("void Player::crc(", '#include "zh_witness_player_crc.inc"'),),
+)
+
+
 class BuildError(Exception):
     pass
+
+
+def insert_into_function(source: str, signature: str, text: str) -> str:
+    """Puts `text` after the opening brace of the one function starting `signature`."""
+    lines = source.splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if line.startswith(signature)]
+    if len(starts) != 1 or starts[0] + 1 >= len(lines) or lines[starts[0] + 1].strip() != "{":
+        raise BuildError(f"expected one '{signature}' followed by a brace, found {len(starts)}")
+    after = starts[0] + 2
+    return "".join(lines[:after]) + text + "\n" + "".join(lines[after:])
 
 
 def swap_region(source: str, begin: str, end: str, replacement: str) -> str:
@@ -150,15 +197,22 @@ def run(args: list[str], cwd: pathlib.Path) -> None:
         raise BuildError(f"{args[0]} failed:\n{done.stderr[-4000:]}")
 
 
-def build(mutate: str | None) -> pathlib.Path:
-    """Builds the swapped engine; `mutate` names one swap to compile with a fault."""
+def build(mutate: str | None, witness: bool = False, rust: bool = True) -> pathlib.Path:
+    """
+    Builds the swapped engine; `mutate` names one swap to compile with a fault.
+    `witness` adds the extra CRC fields; `rust=False` leaves every swap out.
+    """
+    swaps = (SWAPS if rust else ()) + ((WITNESS,) if witness else ())
+    if not swaps:
+        raise BuildError("nothing to build: the stock engine already exists")
     if not (BUILD_DIR / "compile_commands.json").is_file():
         raise BuildError(f"no reference build tree at {BUILD_DIR}")
     run([sys.executable, str(REPO_ROOT / "scripts/gen_engine_sim.py"), "--check"], REPO_ROOT)
     run(["cargo", "build", "--release", "-p", "zh_ffi"], REPO_ROOT)
 
-    suffix = f"-mutant-{mutate}" if mutate else ""
-    work = REPO_ROOT / "target" / f"rust_seam{suffix}"
+    suffix = ("-rust" if rust else "") + ("-witness" if witness else "")
+    suffix += f"-mutant-{mutate}" if mutate else ""
+    work = REPO_ROOT / "target" / f"seam{suffix}"
     work.mkdir(parents=True, exist_ok=True)
 
     entries = json.loads((BUILD_DIR / "compile_commands.json").read_text())
@@ -173,10 +227,12 @@ def build(mutate: str | None) -> pathlib.Path:
 
     objects = []
     stale: list[str] = []
-    for swap in SWAPS:
+    for swap in swaps:
         text = swap.source.read_text(encoding="utf-8", errors="surrogateescape")
         for begin, end, replacement in swap.regions:
             text = swap_region(text, begin, end, replacement)
+        for signature, insert in swap.inserts:
+            text = insert_into_function(text, signature, insert)
         patched = work / swap.source.name
         patched.write_text(text, encoding="utf-8", errors="surrogateescape")
 
@@ -197,7 +253,7 @@ def build(mutate: str | None) -> pathlib.Path:
         objects.append(obj)
 
     link = [build_oracle.rewrite_repo_path(t, stale, REPO_ROOT) for t in link_tokens]
-    output = f"{GAME_TARGET}-rust{suffix}"
+    output = f"{GAME_TARGET}{suffix}"
     run(link_args(link, objects, output), BUILD_DIR)
     return BUILD_DIR / output
 
@@ -209,9 +265,16 @@ def main(argv: list[str] | None = None) -> int:
         choices=[swap.name for swap in SWAPS],
         help="build a variant with a deliberate fault in this swap",
     )
+    parser.add_argument(
+        "--witness",
+        action="store_true",
+        help="add money and energy to the CRC, in a stock and a Rust engine",
+    )
     args = parser.parse_args(argv)
     try:
-        binary = build(args.mutate)
+        if args.witness and not args.mutate:
+            print(build(None, witness=True, rust=False))
+        binary = build(args.mutate, witness=args.witness)
     except (BuildError, subprocess.CalledProcessError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

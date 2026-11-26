@@ -27,6 +27,8 @@ A full check takes about 10 seconds. The baseline is `docs/baselines/replay_crc.
 |---|---|---|
 | Random number generator (logic, client, audio) | `Core/GameEngine/Source/Common/RandomValue.cpp` | `PKT-002` |
 | Experience and veterancy (members, `crc` and `xfer` stay in C++) | `GeneralsMD/.../GameLogic/Object/ExperienceTracker.cpp` | `PKT-003` |
+| Player money (members and `xfer` stay in C++) | `GeneralsMD/.../Common/RTS/Money.cpp` | `PKT-121` |
+| Player power (members and `xfer` stay in C++) | `GeneralsMD/.../Common/RTS/Energy.cpp` | `PKT-118` |
 | `LifetimeUpdate`, a behavior module (`m_dieFrame`, `crc` and `xfer` stay in C++) | `GeneralsMD/.../GameLogic/Object/Update/LifetimeUpdate.cpp` | `PKT-339` |
 
 Nothing else. `zh_ffi` also exports the byte CRC, but the engine does not call it.
@@ -45,6 +47,8 @@ A check that passes proves nothing until a wrong build fails it. Each swap has a
 python3 scripts/build_rust_engine.py --mutate random       # one extra logic draw
 python3 scripts/build_rust_engine.py --mutate experience   # one experience point too many
 python3 scripts/build_rust_engine.py --mutate lifetime     # every lifetime one frame too long
+python3 scripts/build_rust_engine.py --mutate money        # all income halved
+python3 scripts/build_rust_engine.py --mutate energy       # power plants give half
 python3 scripts/check_replays.py --check --expect-rust \
   --binary vendor/GeneralsX/build/macos-vulkan/GeneralsMD/GeneralsXZH-rust-mutant-<swap>   # must FAIL
 ```
@@ -54,8 +58,25 @@ python3 scripts/check_replays.py --check --expect-rust \
 | `random` | all six, at frame 100 |
 | `experience` | `macos_2p_custom_map` (frame 14700) and `macos_6p_custom_map` (frame 17600) only |
 | `lifetime` | `linux_2p_custom_map` (frame 2000) only |
+| `money` | **none** (see the witness check) |
+| `energy` | `linux_6p` (2800), `macos_6p` (5300), `linux_2p_vanilla` and `macos_2p_custom` (6700) |
 
 So the experience swap is exercised by two replays, and the other four say nothing about it. The lifetime swap is exercised by one. One-off faults showed that replay also reaches the other two entry points: removing the kill in `update` diverges at frame 1800, and an extra random draw after `setLifetimeRange` diverges at frame 2000. A first generator fault that only changed one returned value passed, because the CRC covers the generator state and whatever the value goes on to change. Add a fault for every new swap and record which replays catch it.
+
+## The witness check
+
+`Player::crc` leaves money and energy out, so the check above sees them only when they change what happens. Halving all income passes it; only cutting deposits to a twentieth made it fail. `--witness` inserts money, income per minute, production, consumption, supply ratio and the power flag into `Player::crc`, in a stock engine and a Rust engine alike. The stock CRC values then no longer apply, so it has its own baseline, `docs/baselines/replay_crc_witness.json`, recorded from `GeneralsXZH-witness`.
+
+```bash
+python3 scripts/build_rust_engine.py --witness   # builds the stock and Rust witness engines
+python3 scripts/check_replays.py --check --expect-rust \
+  --binary vendor/GeneralsX/build/macos-vulkan/GeneralsMD/GeneralsXZH-rust-witness \
+  --baseline docs/baselines/replay_crc_witness.json
+```
+
+Under it the `money` fault fails all six replays at frame 100, and `energy` all six by frame 1000. One-off faults showed it also catches a `withdraw` that takes one too little and an income bucket that never updates, both in all six.
+
+Run both checks after changing a swap. When a swapped part keeps state that the stock CRC leaves out, add that state to `zh_witness_player_crc.inc` and record the witness baseline again.
 
 ## How the swap is built
 

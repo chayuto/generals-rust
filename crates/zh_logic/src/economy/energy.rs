@@ -37,6 +37,27 @@ impl Energy {
         Self::default()
     }
 
+    /// An `Energy` with the members a caller keeps itself (`zh_ffi`).
+    pub fn from_parts(
+        energy_production: Int,
+        energy_consumption: Int,
+        power_sabotaged_till_frame: UnsignedInt,
+        owner_player_index: Option<Int>,
+    ) -> Self {
+        Self {
+            energy_production,
+            energy_consumption,
+            power_sabotaged_till_frame,
+            owner_player_index,
+        }
+    }
+
+    /// The stored production, ignoring sabotage.
+    #[inline]
+    pub fn raw_production(&self) -> Int {
+        self.energy_production
+    }
+
     pub fn init(&mut self, owner_player_index: Option<Int>) {
         self.energy_production = 0;
         self.energy_consumption = 0;

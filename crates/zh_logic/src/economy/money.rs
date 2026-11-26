@@ -20,6 +20,16 @@ pub struct NoopMoneyCallbacks;
 
 impl MoneyCallbacks for NoopMoneyCallbacks {}
 
+/// The members of C++ `Money`, for a caller that keeps them itself (`zh_ffi`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoneyState {
+    pub money: UnsignedInt,
+    pub player_index: Int,
+    pub income_buckets: [UnsignedInt; INCOME_BUCKET_COUNT],
+    pub current_bucket: UnsignedInt,
+    pub cash_per_minute: UnsignedInt,
+}
+
 /// Player money balance and rolling 60-second income tracker matching C++ `Money`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Money {
@@ -47,6 +57,26 @@ impl Money {
         };
         out.init();
         out
+    }
+
+    pub fn from_state(state: MoneyState) -> Self {
+        Self {
+            money: state.money,
+            player_index: state.player_index,
+            income_buckets: state.income_buckets,
+            current_bucket: state.current_bucket,
+            cash_per_minute: state.cash_per_minute,
+        }
+    }
+
+    pub fn state(&self) -> MoneyState {
+        MoneyState {
+            money: self.money,
+            player_index: self.player_index,
+            income_buckets: self.income_buckets,
+            current_bucket: self.current_bucket,
+            cash_per_minute: self.cash_per_minute,
+        }
     }
 
     pub fn init(&mut self) {
