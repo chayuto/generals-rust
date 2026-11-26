@@ -11,7 +11,7 @@ pub mod fire_weapon_when_dead_behavior;
 pub mod grant_stealth_behavior;
 pub mod instant_death_behavior;
 pub mod jet_slow_death_behavior;
-pub mod neutron_blast_behavior;
+pub mod neuton_blast_behavior;
 pub mod overcharge_behavior;
 pub mod poisoned_behavior;
 pub mod prison_behavior;
@@ -185,8 +185,8 @@ pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGener
         FacetMask(0x003),
         SleepyUpdatePhase::Normal,
         false,
-        neutron_blast_behavior::parse_neutron_blast_behavior_data,
-        neutron_blast_behavior::create_neutron_blast_behavior,
+        neuton_blast_behavior::parse_neutron_blast_behavior_data,
+        neuton_blast_behavior::create_neutron_blast_behavior,
     );
     reg.register_module(
         nk,
