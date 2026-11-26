@@ -762,6 +762,10 @@ impl ContainBehavior for GarrisonContain {
     fn is_enclosing(&self) -> Bool {
         self.data.is_enclosing_container
     }
+    fn recalc_apparent_controller_hook(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+        self.recalc_apparent_controlling_player(sim, ctx);
+    }
+
     fn is_garrisonable_container(&self) -> Bool {
         TRUE
     }

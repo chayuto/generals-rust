@@ -24,7 +24,7 @@ pub use module::{
     ModuleSnapshotHeader, ModuleType, ObjectEnterExitType, OverchargeFacet, ParkingPlaceFacet,
     ParkingPlaceInfo, PhysicsFacet, ProjectileFacet, RebuildHoleFacet, RunwayReservationType,
     ScaffoldTargetMotion, SlavedUpdateFacet, SlowDeathFacet, SlowDeathPhaseType,
-    SpawnBehaviorFacet, SpecialPowerFacet, StealthFacet, StubModuleData,
+    SpawnBehaviorFacet, SpecialPowerFacet, StealthDetectorFacet, StealthFacet, StealthParams, StubModuleData,
     TransportPassengerFacet, UpdateFacet, UpgradeFacet, INVALID_BODY_TIMESTAMP,
     MAX_HEALTH_CHANGE_NAMES,
 };

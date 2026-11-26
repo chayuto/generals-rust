@@ -23,6 +23,8 @@ pub mod radius_decal_update;
 pub mod smart_bomb_target_homing_update;
 pub mod special_power_update_module;
 pub mod spy_vision_update;
+pub mod stealth_detector_update;
+pub mod stealth_update;
 pub mod weapon_bonus_update;
 
 use crate::arena::FacetMask;
@@ -72,6 +74,26 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         physics_update::parse_physics_behavior_data,
         physics_update::create_physics_behavior,
+    );
+    reg.register_module(
+        nk,
+        "StealthDetectorUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        stealth_detector_update::parse_stealth_detector_update_data,
+        stealth_detector_update::create_stealth_detector_update,
+    );
+    reg.register_module(
+        nk,
+        "StealthUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::STEALTH_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        stealth_update::parse_stealth_update_data,
+        stealth_update::create_stealth_update,
     );
     reg.register_module(
         nk,

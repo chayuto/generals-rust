@@ -580,7 +580,13 @@ pub trait BehaviorModule: Send {
     fn as_physics_mut(&mut self) -> Option<&mut dyn PhysicsFacet> {
         None
     }
+    fn as_stealth(&self) -> Option<&dyn StealthFacet> {
+        None
+    }
     fn as_stealth_mut(&mut self) -> Option<&mut dyn StealthFacet> {
+        None
+    }
+    fn as_stealth_detector_mut(&mut self) -> Option<&mut dyn StealthDetectorFacet> {
         None
     }
     fn as_helper(&self) -> Option<&dyn HelperFacet> {
@@ -1023,6 +1029,8 @@ pub trait ContainFacet {
     fn is_rider_change_contain(&self) -> Bool {
         FALSE
     }
+    /// `recalcApparentControllingPlayer`; only `GarrisonContain` does anything here.
+    fn recalc_apparent_controlling_player(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn is_bustable(&self) -> Bool {
         FALSE
     }
@@ -1874,14 +1882,63 @@ pub trait SupplyTruckAiFacet {
     fn set_force_wanting_state(&mut self, wanting: Bool);
 }
 
+/// What other objects read from a `StealthUpdate`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StealthParams {
+    pub stealth_delay: UnsignedInt,
+    pub stealth_level: UnsignedInt,
+    pub order_idle_enemies_on_reveal: Bool,
+    /// `Some` is `isDisguised`.
+    pub disguised_template: Option<ThingTemplateId>,
+    pub disguised_player_index: Int,
+    pub granted_by_special_power: Bool,
+    /// `isTemporaryGrant`.
+    pub temporary_grant: Bool,
+}
+
 /// Stealth & disguise facet (`StealthUpdate`).
 pub trait StealthFacet {
     fn is_disguised(&self) -> Bool {
         FALSE
     }
+    fn stealth_params(&self) -> Option<StealthParams> {
+        None
+    }
+    /// `markAsDetected`; zero frames means the module's own stealth delay.
     fn mark_as_detected(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _frames: UnsignedInt) {
     }
-    fn receive_grant(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    /// `receiveGrant`.
+    fn receive_grant(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _active: Bool,
+        _frames: UnsignedInt,
+    ) {
+    }
+    /// `disguiseAsObject`; no target reveals.
+    fn disguise_as_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: Option<ObjectSlot>,
+    ) {
+    }
+    /// `allowedToStealth`.
+    fn allowed_to_stealth(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _stealth_owner: ObjectSlot,
+    ) -> Bool {
+        FALSE
+    }
+}
+
+/// `StealthDetectorUpdate`, which `BattlePlanUpdate` switches on and off.
+pub trait StealthDetectorFacet {
+    fn is_sd_enabled(&self) -> Bool;
+    fn set_sd_enabled(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, enabled: Bool);
 }
 
 /// Slaved update facet (`SlavedUpdateInterface`).

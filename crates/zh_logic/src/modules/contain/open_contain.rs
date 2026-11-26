@@ -515,6 +515,8 @@ pub trait ContainBehavior: Any + Send {
     fn is_enclosing(&self) -> Bool {
         TRUE
     }
+    /// `recalcApparentControllingPlayer`, empty in `OpenContain`.
+    fn recalc_apparent_controller_hook(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn is_garrisonable_container(&self) -> Bool {
         FALSE
     }
@@ -1638,6 +1640,13 @@ macro_rules! impl_contain_module {
 
                 fn is_tunnel_contain(&self) -> Bool {
                     self.is_tunnel()
+                }
+                fn recalc_apparent_controlling_player(
+                    &mut self,
+                    sim: &mut dyn SimApi,
+                    ctx: ModuleContext,
+                ) {
+                    self.recalc_apparent_controller_hook(sim, ctx);
                 }
 
                 fn is_kick_out_on_capture(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {

@@ -8,21 +8,19 @@ or weapon code outside modules). The replays do not match their recordings
 (`BASELINE.md`), so they are a sample of play, not the original games.
 
 - Classes created: 104; in every replay: 50.
-- Classes with a ported packet: 69 of 104; in every replay: 37 of 50.
-- Instances with a ported packet: 11786 of 14355.
+- Classes with a ported packet: 71 of 104; in every replay: 39 of 50.
+- Instances with a ported packet: 12515 of 14355.
 
 ## Not ported
 
 | Module | Packet | Replays | Instances | C++ bytes in packet |
 |---|---|---|---|---|
-| `StealthUpdate` | `PKT-374` | 6 | 610 | 46745 |
 | `ProductionUpdate` | `PKT-354` | 6 | 347 | 60927 |
 | `AIUpdateInterface` | `PKT-301` | 6 | 178 | 221431 |
 | `AutoDepositUpdate` | `PKT-305` | 6 | 156 | 15532 |
 | `DefaultProductionExitUpdate` | `PKT-315` | 6 | 138 | 12787 |
 | `GenerateMinefieldBehavior` | `PKT-272` | 6 | 137 | 26449 |
 | `SpecialAbilityUpdate` | `PKT-368` | 6 | 123 | 85607 |
-| `StealthDetectorUpdate` | `PKT-373` | 6 | 119 | 21447 |
 | `CommandButtonHuntUpdate` | `PKT-314` | 6 | 108 | 19021 |
 | `DozerAIUpdate` | `PKT-321` | 6 | 45 | 105594 |
 | `SpawnBehavior` | `PKT-296` | 6 | 23 | 46341 |

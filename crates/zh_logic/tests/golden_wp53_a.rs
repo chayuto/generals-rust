@@ -408,8 +408,14 @@ impl StealthFacet for TestStealthUpdate {
     fn mark_as_detected(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, _frames: UnsignedInt) {
         sim.clear_status(ctx.owner_slot, ObjectStatusType::Stealthed);
     }
-    fn receive_grant(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        self.enabled = TRUE;
+    fn receive_grant(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        active: Bool,
+        _frames: UnsignedInt,
+    ) {
+        self.enabled = active;
         sim.set_status(ctx.owner_slot, ObjectStatusType::CanStealth);
         sim.set_status(ctx.owner_slot, ObjectStatusType::Stealthed);
     }

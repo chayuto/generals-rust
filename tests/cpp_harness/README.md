@@ -135,6 +135,26 @@ A small object normally spans at most two cells per axis, and its cell array has
 
 - **What happens:** constant folding gives other bits than the run-time call, so `-O0` and `-O2` outputs differ although the module is fine.
 - **Rule:** build harness inputs with `WWMath::Cosf` / `Sinf`.
+### A rider without `StealthUpdate` leaves locals uninitialised
+
+`StealthUpdate::update` and `markAsDetected` declare `stealthDelay` (and `orderIdlesToAttack`) without a value and assign them only if the stealth owner is the object itself or has a `StealthUpdate`. With `UseRiderStealth` and a plain first passenger the result is whatever was in the register. The port uses the container's own data; no vector covers it.
+
+### Disguise change dereferences physics and needs transition frames
+
+- `changeVisualDisguise` calls `getPhysics()->resetDynamicPhysics()` unchecked, and `disguiseAsObject` does not require `DisguisesAsTeam`, so a harness must never disguise an object without `PhysicsBehavior`.
+- With `DisguiseTransitionTime = 0` the disguise template is recorded but never applied; with `DisguiseRevealTransitionTime = 0` a disguised unit never loses `DISGUISED`. The port keeps both.
+
+### The black market is only checked now and then
+
+`allowedToStealth` looks for a black market only when `m_nextBlackMarketCheckFrame < now`; every other frame passes without one. The frame is not saved, and it advances from its old value rather than from `now`, so a module first checked late draws once per frame until it catches up.
+
+### Loading into a live update module loses its scheduler index
+
+`UpdateModule::xfer` sets `m_indexInLogic = -1` on load, expecting `GameLogic` to rebuild the heap. A harness that round-trips a registered module must restore the index, or the next `setWakeFrame` or destroy release-crashes with "sleepy update module illegal index".
+
+### Going under construction destroys mines
+
+`Object::setStatus` with `OBJECT_STATUS_UNDER_CONSTRUCTION` also detonates mines it finds. The port does not do this, so vectors with mines must not toggle it.
 
 ## Shared world fixture (`oracle_wp51_world.h`)
 

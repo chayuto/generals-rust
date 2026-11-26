@@ -16,8 +16,7 @@ use zh_logic::arena::{FacetMask, ModuleContext, ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::DamageInfo;
 use zh_logic::combat::locomotor::LocomotorTemplate;
 use zh_logic::modules::module::{
-    AiUpdateFacet, BehaviorModule, DockFacet, ModuleData, ModuleType, StealthFacet,
-    SupplyTruckAiFacet,
+    AiUpdateFacet, BehaviorModule, DockFacet, ModuleData, ModuleType, SupplyTruckAiFacet,
 };
 use zh_logic::modules::module_factory::ModuleParseContext;
 use zh_logic::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpdate;
@@ -36,7 +35,6 @@ type Real = f32;
 // -----------------------------------------------------------------------------
 
 const AI_MASK: FacetMask = FacetMask(0x001 | FacetMask::AI_UPDATE.0);
-const STEALTH_MASK: FacetMask = FacetMask(0x001 | FacetMask::STEALTH_UPDATE.0);
 
 #[derive(Clone)]
 struct StubData {
@@ -146,22 +144,6 @@ impl BehaviorModule for Truck {
     }
 }
 
-struct Stealth(NameKeyType);
-
-impl StealthFacet for Stealth {}
-
-impl BehaviorModule for Stealth {
-    fn module_name_key(&self) -> NameKeyType {
-        self.0
-    }
-    fn xfer(&mut self, _xfer: &mut dyn Xfer, _sim: &dyn SimView) -> Result<(), XferError> {
-        Ok(())
-    }
-    fn as_stealth_mut(&mut self) -> Option<&mut dyn StealthFacet> {
-        Some(self)
-    }
-}
-
 fn parse_stub(
     reader: &mut IniReader<'_>,
     mut data: StubData,
@@ -171,8 +153,6 @@ fn parse_stub(
             r.parse_int(&mut data.max_boxes)
         } else if field.eq_ignore_ascii_case("UpgradedSupplyBoost") {
             r.parse_int(&mut data.boost)
-        } else if field.eq_ignore_ascii_case("InnateStealth") {
-            r.parse_bool(&mut FALSE.clone())
         } else {
             Err(IniError::UnknownToken)
         }
@@ -215,15 +195,6 @@ fn parse_plain_ai(
     parse_stub(r, stub(t, n, AI_MASK))
 }
 
-fn parse_stealth(
-    r: &mut IniReader<'_>,
-    t: NameKeyType,
-    n: NameKeyType,
-    _c: &mut ModuleParseContext<'_>,
-) -> Result<Box<dyn ModuleData>, IniError> {
-    parse_stub(r, stub(t, n, STEALTH_MASK))
-}
-
 fn create_ai(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
     let data = data
         .as_any()
@@ -235,10 +206,6 @@ fn create_ai(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModu
         boxes: 0,
         force_wanting: FALSE,
     })
-}
-
-fn create_stealth(data: &dyn ModuleData, _ctx: ModuleContext) -> Box<dyn BehaviorModule> {
-    Box::new(Stealth(data.module_name_key()))
 }
 
 // -----------------------------------------------------------------------------
@@ -472,16 +439,6 @@ fn context() -> SimContext {
             create_ai,
         );
     }
-    rules.module_registry.register_module(
-        &mut rules.name_keys,
-        "StealthUpdate",
-        ModuleType::Behavior,
-        STEALTH_MASK,
-        SleepyUpdatePhase::Normal,
-        false,
-        parse_stealth,
-        create_stealth,
-    );
     for (name, block) in [
         (
             "P320_Ground",

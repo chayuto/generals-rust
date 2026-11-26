@@ -27,7 +27,7 @@ use crate::modules::update::spy_vision_update::SpyVisionUpdate;
 use crate::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
-    ParkingPlaceInfo,
+    ParkingPlaceInfo, StealthParams,
 };
 use crate::modules::module::SupplyTruckAiFacet;
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
@@ -612,6 +612,10 @@ pub struct ObjectRecord {
     pub layer: PathfindLayerEnum,
     pub contained_by: Option<ObjectSlot>,
     pub contained_by_frame: UnsignedInt,
+    /// `Object::m_scriptStatus`; scripts are unported.
+    pub script_status: u8,
+    /// `AIUpdateInterface::m_lastCommandSource`; the AI update is unported.
+    pub ai_last_command_source: CommandSourceType,
     pub producer_id: ObjectId,
     pub builder_id: ObjectId,
     pub sole_healing_benefactor_id: ObjectId,
@@ -708,6 +712,8 @@ impl ObjectRecord {
             layer: PathfindLayerEnum::Ground,
             contained_by: None,
             contained_by_frame: 0,
+            script_status: 0,
+            ai_last_command_source: CommandSourceType::FromAi,
             producer_id: ObjectId::INVALID,
             builder_id: ObjectId::INVALID,
             sole_healing_benefactor_id: ObjectId::INVALID,
@@ -1158,6 +1164,23 @@ pub trait SimView {
     fn object_shroud_clearing_range(&self, owner: ObjectSlot) -> Real;
     fn object_shroud_range(&self, owner: ObjectSlot) -> Real;
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool;
+    /// `getStealth()` and its accessors. `None` without a `StealthUpdate`, or while it runs.
+    fn stealth_params(&self, owner: ObjectSlot) -> Option<StealthParams>;
+    /// `*getBodyModule()->getLastDamageTimestamp()`.
+    fn object_last_damage_timestamp(&self, owner: ObjectSlot) -> Option<UnsignedInt>;
+    /// `getWeaponInWeaponSlot(slot)->getLastShotFrame()`.
+    fn weapon_slot_last_shot_frame(&self, owner: ObjectSlot, slot: usize) -> Option<UnsignedInt>;
+    fn object_has_contain(&self, owner: ObjectSlot) -> Bool;
+    fn contain_stealth_units_contained(&self, owner: ObjectSlot) -> UnsignedInt;
+    fn contain_is_rider_change(&self, owner: ObjectSlot) -> Bool;
+    /// `areAllSlavesStealthed`; `None` without a spawn behavior.
+    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool>;
+    /// `AIUpdateInterface::getLastCommandSource`.
+    fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType;
+    /// The controlling player's objects, in `Player::iterateObjects` order.
+    fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot>;
+    /// The objects of every player who counts `team_id`'s player as an enemy, in player order.
+    fn enemy_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot>;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -1564,7 +1587,22 @@ pub trait SimApi: SimView {
     fn apply_fling_physics(&mut self, owner: ObjectSlot, force: &Coord3D, orientation: Real);
     fn notify_slaver_die(&mut self, owner: ObjectSlot);
     fn mark_stealth_detected(&mut self, owner: ObjectSlot, frames: UnsignedInt);
-    fn receive_stealth_grant(&mut self, owner: ObjectSlot);
+    /// `StealthUpdate::receiveGrant`.
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot, active: Bool, frames: UnsignedInt);
+    /// `GameClientRandomValueReal`.
+    fn rng_client_real(&mut self, lo: Real, hi: Real) -> Real;
+    /// `PhysicsBehavior::resetDynamicPhysics`.
+    fn reset_dynamic_physics(&mut self, owner: ObjectSlot);
+    /// `AcademyStats::recordVehicleDisguised` on the controlling player.
+    fn record_vehicle_disguised(&mut self, owner: ObjectSlot);
+    /// `recalcApparentControllingPlayer` of the object's contain module.
+    fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot);
+    /// `SpawnBehaviorInterface::revealSlaves`.
+    fn spawn_reveal_slaves(&mut self, owner: ObjectSlot);
+    /// `StealthUpdate::disguiseAsObject`.
+    fn stealth_disguise_as_object(&mut self, owner: ObjectSlot, target: Option<ObjectSlot>);
+    /// `setSDEnabled` on the owner's first `StealthDetectorUpdate`.
+    fn set_stealth_detector_enabled(&mut self, owner: ObjectSlot, enabled: Bool);
     fn order_ai_exit(
         &mut self,
         rider: ObjectSlot,
@@ -1697,8 +1735,6 @@ pub struct SimWorld {
     pub special_power_uses_delay: Bool,
     /// `ScoreKeeper::m_totalMoneyEarned` (players have no score keeper yet).
     pub player_money_earned: BTreeMap<TeamId, Int>,
-    /// `StealthUpdate::m_framesGranted` where positive (`StealthUpdate` is unported).
-    pub stealth_frames_granted: BTreeMap<ObjectId, UnsignedInt>,
     /// Teams whose controlling player is a playable side (`Player::isPlayableSide`).
     pub playable_side_teams: BTreeSet<TeamId>,
     pub car_bombed_objects: Vec<(ObjectId, ObjectId)>,
@@ -1733,6 +1769,8 @@ pub struct SimWorld {
     pub hulk_max_lifetime_override: Int,
     pub deselected_objects: Vec<(ObjectId, UnsignedShort, Bool)>,
     pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
+    /// `AcademyStats::m_vehiclesDisguised` by player index (academy stats are not in the world).
+    pub vehicles_disguised: BTreeMap<Int, UnsignedInt>,
     pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
     pub ai_commands: Vec<(ObjectId, String)>,
@@ -1796,7 +1834,6 @@ impl SimWorld {
             shared_special_power_ready_frames: BTreeMap::new(),
             special_power_uses_delay: TRUE,
             player_money_earned: BTreeMap::new(),
-            stealth_frames_granted: BTreeMap::new(),
             playable_side_teams: BTreeSet::new(),
             car_bombed_objects: Vec::new(),
             hijacked_objects: Vec::new(),
@@ -1829,6 +1866,7 @@ impl SimWorld {
             hulk_max_lifetime_override: -1,
             deselected_objects: Vec::new(),
             stealth_detected_events: Vec::new(),
+            vehicles_disguised: BTreeMap::new(),
             slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
             ai_commands: Vec::new(),
@@ -3753,12 +3791,14 @@ impl SimView for SimContext {
     }
 
     fn stealth_is_temporary_grant(&self, owner: ObjectSlot) -> Bool {
-        Bool::from(
-            self.world
-                .objects
-                .id_of(owner)
-                .is_some_and(|id| self.world.stealth_frames_granted.contains_key(&id)),
-        )
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.stealth_slot)
+            .and_then(|slot| self.world.modules.payload(slot))
+            .and_then(|m| m.as_stealth())
+            .and_then(|st| st.stealth_params())
+            .map_or(FALSE, |p| p.temporary_grant)
     }
 
     fn player_is_playable_side(&self, team_id: TeamId) -> Bool {
@@ -4462,6 +4502,72 @@ impl SimView for SimContext {
             .objects
             .get(owner)
             .map_or(0.0, |o| o.shroud_range)
+    }
+
+    fn stealth_params(&self, owner: ObjectSlot) -> Option<StealthParams> {
+        let ss = self.world.objects.get(owner)?.stealth_slot?;
+        self.world.modules.payload(ss)?.as_stealth()?.stealth_params()
+    }
+
+    fn object_last_damage_timestamp(&self, owner: ObjectSlot) -> Option<UnsignedInt> {
+        let bs = self.world.objects.get(owner)?.body_slot?;
+        self.world.modules.payload(bs)?.as_body()?.get_last_damage_timestamp()
+    }
+
+    fn weapon_slot_last_shot_frame(&self, owner: ObjectSlot, slot: usize) -> Option<UnsignedInt> {
+        let weapon = self.world.objects.get(owner)?.weapon_set.weapons.get(slot)?;
+        weapon.as_ref().map(|w| w.last_fire_frame)
+    }
+
+    fn object_has_contain(&self, owner: ObjectSlot) -> Bool {
+        Bool::from(self.world.objects.get(owner).is_some_and(|o| o.contain_slot.is_some()))
+    }
+
+    fn contain_stealth_units_contained(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.contain_slot)
+            .and_then(|cs| self.world.modules.payload(cs))
+            .and_then(|p| p.as_contain())
+            .map_or(0, |c| c.get_stealth_units_contained())
+    }
+
+    fn contain_is_rider_change(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.contain_slot)
+            .and_then(|cs| self.world.modules.payload(cs))
+            .and_then(|p| p.as_contain())
+            .map_or(FALSE, |c| c.is_rider_change_contain())
+    }
+
+    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool> {
+        let ss = self.world.objects.get(owner)?.spawn_slot?;
+        let spawn = self.world.modules.payload(ss)?.as_spawn_behavior()?;
+        Some(spawn.are_all_slaves_stealthed(self))
+    }
+
+    fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(CommandSourceType::FromAi, |o| o.ai_last_command_source)
+    }
+
+    fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
+        self.player_object_slots(self.player_index_for_team(team_id))
+    }
+
+    fn enemy_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
+        let them = self.player_index_for_team(team_id);
+        (0..MAX_PLAYER_COUNT as Int)
+            .filter(|&n| {
+                self.world.player_relationships.get(&(n, them)) == Some(&Relationship::Enemies)
+            })
+            .flat_map(|n| self.player_object_slots(n))
+            .collect()
     }
 
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
@@ -6069,20 +6175,7 @@ impl SimApi for SimContext {
     }
 
     fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
-        let Some(id) = self
-            .world
-            .objects
-            .get(owner)
-            .filter(|o| o.stealth_slot.is_some())
-            .map(|o| o.id)
-        else {
-            return;
-        };
-        self.receive_stealth_grant(owner);
-        self.set_status(owner, ObjectStatusType::Stealthed);
-        if frames > 0 {
-            self.world.stealth_frames_granted.insert(id, frames);
-        }
+        self.receive_stealth_grant(owner, TRUE, frames);
     }
 
     fn extend_power_plant(&mut self, owner: ObjectSlot) {
@@ -7283,8 +7376,8 @@ impl SimApi for SimContext {
         }
     }
 
-    fn receive_stealth_grant(&mut self, owner: ObjectSlot) {
-        let Some((obj_id, stealth_slot)) = self
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot, active: Bool, frames: UnsignedInt) {
+        let Some((obj_id, Some(ss))) = self
             .world
             .objects
             .get(owner)
@@ -7292,18 +7385,84 @@ impl SimApi for SimContext {
         else {
             return;
         };
-        let Some(ss) = stealth_slot else {
-            return;
-        };
-        self.world.stealth_granted.insert(obj_id);
-        self.world.stealth_frames_granted.remove(&obj_id);
-        self.set_status(owner, ObjectStatusType::CanStealth);
+        if active != FALSE {
+            self.world.stealth_granted.insert(obj_id);
+        }
         if !self.world.modules.is_executing(ss) {
             let _ = self.dispatch_module(ss, |m, sim, ctx| {
                 if let Some(st) = m.as_stealth_mut() {
-                    st.receive_grant(sim, ctx);
+                    st.receive_grant(sim, ctx, active, frames);
                 }
             });
+        }
+    }
+
+    fn rng_client_real(&mut self, lo: Real, hi: Real) -> Real {
+        self.world.rng.get_game_client_random_value_real(lo, hi)
+    }
+
+    fn reset_dynamic_physics(&mut self, owner: ObjectSlot) {
+        physics_update::reset_dynamic_physics(self, owner);
+    }
+
+    fn record_vehicle_disguised(&mut self, owner: ObjectSlot) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        let player = self.player_index_for_team(team);
+        let count = self.world.vehicles_disguised.entry(player).or_insert(0);
+        *count = count.wrapping_add(1);
+    }
+
+    fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot) {
+        let Some(cs) = self.world.objects.get(container).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(cs) {
+            let _ = self.dispatch_module(cs, |m, sim, ctx| {
+                if let Some(c) = m.as_contain_mut() {
+                    c.recalc_apparent_controlling_player(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn spawn_reveal_slaves(&mut self, owner: ObjectSlot) {
+        let Some(ss) = self.world.objects.get(owner).and_then(|o| o.spawn_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, _| {
+                if let Some(s) = m.as_spawn_behavior_mut() {
+                    s.reveal_slaves(sim);
+                }
+            });
+        }
+    }
+
+    fn stealth_disguise_as_object(&mut self, owner: ObjectSlot, target: Option<ObjectSlot>) {
+        let Some(ss) = self.world.objects.get(owner).and_then(|o| o.stealth_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(ss) {
+            let _ = self.dispatch_module(ss, |m, sim, ctx| {
+                if let Some(st) = m.as_stealth_mut() {
+                    st.disguise_as_object(sim, ctx, target);
+                }
+            });
+        }
+    }
+
+    fn set_stealth_detector_enabled(&mut self, owner: ObjectSlot, enabled: Bool) {
+        for ms in self.behavior_slots(owner) {
+            let found = self.dispatch_module(ms, |m, sim, ctx| {
+                m.as_stealth_detector_mut()
+                    .map(|f| f.set_sd_enabled(sim, ctx, enabled))
+                    .is_some()
+            });
+            if found == Ok(true) {
+                break;
+            }
         }
     }
 
@@ -8343,6 +8502,46 @@ impl SimView for MockSimApi {
         self.ctx.object_shroud_range(owner)
     }
 
+    fn stealth_params(&self, owner: ObjectSlot) -> Option<StealthParams> {
+        self.ctx.stealth_params(owner)
+    }
+
+    fn object_last_damage_timestamp(&self, owner: ObjectSlot) -> Option<UnsignedInt> {
+        self.ctx.object_last_damage_timestamp(owner)
+    }
+
+    fn weapon_slot_last_shot_frame(&self, owner: ObjectSlot, slot: usize) -> Option<UnsignedInt> {
+        self.ctx.weapon_slot_last_shot_frame(owner, slot)
+    }
+
+    fn object_has_contain(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.object_has_contain(owner)
+    }
+
+    fn contain_stealth_units_contained(&self, owner: ObjectSlot) -> UnsignedInt {
+        self.ctx.contain_stealth_units_contained(owner)
+    }
+
+    fn contain_is_rider_change(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.contain_is_rider_change(owner)
+    }
+
+    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool> {
+        self.ctx.spawn_all_slaves_stealthed(owner)
+    }
+
+    fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
+        self.ctx.ai_last_command_source(owner)
+    }
+
+    fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
+        self.ctx.controlling_player_objects(team_id)
+    }
+
+    fn enemy_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
+        self.ctx.enemy_player_objects(team_id)
+    }
+
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
         self.ctx.contain_is_garrisonable(owner)
     }
@@ -9254,8 +9453,36 @@ impl SimApi for MockSimApi {
         self.ctx.mark_stealth_detected(owner, frames);
     }
 
-    fn receive_stealth_grant(&mut self, owner: ObjectSlot) {
-        self.ctx.receive_stealth_grant(owner);
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot, active: Bool, frames: UnsignedInt) {
+        self.ctx.receive_stealth_grant(owner, active, frames);
+    }
+
+    fn rng_client_real(&mut self, lo: Real, hi: Real) -> Real {
+        self.ctx.rng_client_real(lo, hi)
+    }
+
+    fn reset_dynamic_physics(&mut self, owner: ObjectSlot) {
+        self.ctx.reset_dynamic_physics(owner);
+    }
+
+    fn record_vehicle_disguised(&mut self, owner: ObjectSlot) {
+        self.ctx.record_vehicle_disguised(owner);
+    }
+
+    fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot) {
+        self.ctx.contain_recalc_apparent_controlling_player(container);
+    }
+
+    fn spawn_reveal_slaves(&mut self, owner: ObjectSlot) {
+        self.ctx.spawn_reveal_slaves(owner);
+    }
+
+    fn stealth_disguise_as_object(&mut self, owner: ObjectSlot, target: Option<ObjectSlot>) {
+        self.ctx.stealth_disguise_as_object(owner, target);
+    }
+
+    fn set_stealth_detector_enabled(&mut self, owner: ObjectSlot, enabled: Bool) {
+        self.ctx.set_stealth_detector_enabled(owner, enabled);
     }
 
     fn order_ai_exit(

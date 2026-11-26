@@ -11,7 +11,7 @@ use crate::rules::kind_of::{KindOfMaskType, KINDOF_NAMES};
 use crate::sim::{SimApi, SimView, PRIVATE_STATUS_OFF_MAP};
 use std::any::Any;
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
-use zh_common::types::{NameKeyType, Real, Relationship, UnsignedInt, UpdateSleepTime, FALSE};
+use zh_common::types::{NameKeyType, Real, Relationship, UnsignedInt, UpdateSleepTime, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
 const INVALID_PARTICLE_SYSTEM_ID: UnsignedInt = 0;
@@ -101,7 +101,7 @@ impl GrantStealthBehavior {
         if !matches_kind {
             return;
         }
-        sim.receive_stealth_grant(target);
+        sim.receive_stealth_grant(target, TRUE, 0);
     }
 }
 

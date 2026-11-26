@@ -53,18 +53,20 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - A null `Team*` is `TeamId::INVALID`, which only a cave defecting to no team produces. `capture_object` and `defect_object` handle it, but `player_index(TeamId::INVALID)` answers 0, the neutral player, where C++ has no controlling player. Code that reads a teamless object's player has not been checked.
 - `defect_object` leaves out the end of `Object::defect` that moves the object's mines to the new team.
 - `CaveContain` does nothing where the reference dereferences a null tracker, and `CaveSystem` ignores a negative index, where the reference runs out of memory. A map or script with such a cave would crash the original.
-- `Player` and `StealthUpdate` call `recalcApparentControllingPlayer` on containers. Ported modules have no such hook; `CaveFacet` offers it for caves only.
+- `Player` calls `recalcApparentControllingPlayer` on containers; only the `StealthUpdate` half is wired (garrisons).
 - `FireSpreadUpdate`: `OCLEmbers` goes through `spawn_ocl`, which only records the call, so the objects an embers list creates and their PRNG draws are missing.
 - `FlammableUpdate` plays no burning sound (client audio).
 - `FlammableUpdate` takes its own aflame damage while executing. `attempt_damage_watching` replays that one `onDamage`; further damage to the same object from inside that call chain would not reach the module.
 - `set_wake_frame` saturates where C++ wraps, and the scheduler does not read a sleep above `0x7fffffff` as negative, as the signed `UpdateSleepTime` does. No fire-module INI duration reaches either.
 - Docks: no models are loaded, so every dock behaves as boneless. Enter, dock, exit and waiting positions differ from retail, and they are saved. Loading a retail save re-zeroes the fixed waiting positions.
 - `RailedTransportDockUpdate` and `PrisonDockUpdate` are unported: `set_dock_open` / `set_dock_crippled` do nothing on them and they read as open.
-- No supply truck AI is ported, so nothing drives a dock. An AI port must implement `supply_truck()`. The warehouse's `getBoxesStored` / `setCashValue` have no `SimApi` route yet. `player_money_earned` and `stealth_frames_granted` are stand-ins (no score keeper). A dock whose module is executing is not found by `dock_slot`.
+- No supply truck AI is ported, so nothing drives a dock. An AI port must implement `supply_truck()`. The warehouse's `getBoxesStored` / `setCashValue` have no `SimApi` route yet. `player_money_earned` is a stand-in (no score keeper). A dock whose module is executing is not found by `dock_slot`.
 - `find_position_around` lacks the cliff-cell and path-exists checks.
 - `PhysicsBehavior`: `processCollision` always answers FALSE and the ignored obstacle defaults to invalid (no AI); `carrier_deck_height` is always 0; a contain module's own mass omits its passengers while it executes; `MinFallHeightForDamage` is converted with the gravity at object construction, not at INI parse; no bounce sound or `transferObjectName`. Not covered by vectors: a real AI or projectile update, non-ground layer heights, crash-weapon effects, frames above 2^24, ordering between modules.
 - `object_can_crush` differs from C++ `canCrushOrSquish`: it requires a level above 1 and has no ally or unmanned check. Found while porting physics, not fixed.
 - `fire_weapon_template` records a shot even when the C++ temporary weapon would refuse (frames above 2^24).
+- Stealth: `ObjectRecord::script_status` and `ai_last_command_source` have nothing that sets them; `SimWorld::vehicles_disguised` stands in for academy stats; radar object list and radar events (saved by the original) are not modelled; the client PRNG draw for the pulse phase matches only when the stream is reseeded. Mark, grant and disguise calls are skipped when the target module is executing. Not wired from unported callers: `SpecialAbilityUpdate`, `BattlePlanUpdate`, `SlavedUpdate`, `OverlordContain`, `RiderChangeContain`, `SpawnBehavior`, and the disguised-player lookups in `Player`, the partition and weapon sets.
+- `Object::setStatus(UNDER_CONSTRUCTION)` does not detonate mines.
 
 ## Waiting on unported code
 

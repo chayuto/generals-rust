@@ -351,7 +351,7 @@ impl ContainBehavior for HelixBase {
                 .object(ctx.owner_slot)
                 .is_some_and(|o| o.status.test(ObjectStatusType::Stealthed.as_i32()) != FALSE)
         {
-            sim.receive_stealth_grant(rider);
+            sim.receive_stealth_grant(rider, TRUE, 0);
         }
     }
 

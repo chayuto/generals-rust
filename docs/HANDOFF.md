@@ -7,7 +7,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
-- Packets: 230 of 463 implemented, 233 unported (Phase 2: 102, Phase 4: 4, Phase 5: 81, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 232 of 463 implemented, 231 unported (Phase 2: 102, Phase 4: 4, Phase 5: 79, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -23,6 +23,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | after `2b88a3b` | Module census (`MODULE_USAGE.md`); `PKT-330 FlammableUpdate` and `PKT-327 FireSpreadUpdate`; fixed `HighlanderBody` on NaN damage |
 | after `2daf832` | `PKT-358 RadarUpdate` and `PKT-351 PowerPlantUpdate`; `RadarUpgrade` now extends the radar; CI time limit raised to 6 minutes |
 | `a8a882a`, `5fdee17` | `PKT-320/381/378/363` dock updates (dock state in the module); `PKT-348 PhysicsBehavior`, replacing the physics stand-ins; `find_position_around` uses the reference collision shapes |
+| after `c5f37a3` | `PKT-374 StealthUpdate` and `PKT-373 StealthDetectorUpdate`; dock stealth grants reach the real module |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 

@@ -24,7 +24,7 @@ use zh_logic::modules::update::spy_vision_update::SpyVisionUpdate;
 use zh_logic::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
-    ParkingPlaceInfo,
+    ParkingPlaceInfo, StealthParams,
 };
 use zh_logic::modules::module::SupplyTruckAiFacet;
 use zh_logic::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
@@ -416,6 +416,36 @@ impl SimView for EngineSim<'_> {
     }
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
         not_wired("contain_is_garrisonable")
+    }
+    fn stealth_params(&self, owner: ObjectSlot) -> Option<StealthParams> {
+        not_wired("stealth_params")
+    }
+    fn object_last_damage_timestamp(&self, owner: ObjectSlot) -> Option<UnsignedInt> {
+        not_wired("object_last_damage_timestamp")
+    }
+    fn weapon_slot_last_shot_frame(&self, owner: ObjectSlot, slot: usize) -> Option<UnsignedInt> {
+        not_wired("weapon_slot_last_shot_frame")
+    }
+    fn object_has_contain(&self, owner: ObjectSlot) -> Bool {
+        not_wired("object_has_contain")
+    }
+    fn contain_stealth_units_contained(&self, owner: ObjectSlot) -> UnsignedInt {
+        not_wired("contain_stealth_units_contained")
+    }
+    fn contain_is_rider_change(&self, owner: ObjectSlot) -> Bool {
+        not_wired("contain_is_rider_change")
+    }
+    fn spawn_all_slaves_stealthed(&self, owner: ObjectSlot) -> Option<Bool> {
+        not_wired("spawn_all_slaves_stealthed")
+    }
+    fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
+        not_wired("ai_last_command_source")
+    }
+    fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
+        not_wired("controlling_player_objects")
+    }
+    fn enemy_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
+        not_wired("enemy_player_objects")
     }
 }
 
@@ -912,8 +942,29 @@ impl SimApi for EngineSim<'_> {
     fn mark_stealth_detected(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
         not_wired("mark_stealth_detected")
     }
-    fn receive_stealth_grant(&mut self, owner: ObjectSlot) {
+    fn receive_stealth_grant(&mut self, owner: ObjectSlot, active: Bool, frames: UnsignedInt) {
         not_wired("receive_stealth_grant")
+    }
+    fn rng_client_real(&mut self, lo: Real, hi: Real) -> Real {
+        not_wired("rng_client_real")
+    }
+    fn reset_dynamic_physics(&mut self, owner: ObjectSlot) {
+        not_wired("reset_dynamic_physics")
+    }
+    fn record_vehicle_disguised(&mut self, owner: ObjectSlot) {
+        not_wired("record_vehicle_disguised")
+    }
+    fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot) {
+        not_wired("contain_recalc_apparent_controlling_player")
+    }
+    fn spawn_reveal_slaves(&mut self, owner: ObjectSlot) {
+        not_wired("spawn_reveal_slaves")
+    }
+    fn stealth_disguise_as_object(&mut self, owner: ObjectSlot, target: Option<ObjectSlot>) {
+        not_wired("stealth_disguise_as_object")
+    }
+    fn set_stealth_detector_enabled(&mut self, owner: ObjectSlot, enabled: Bool) {
+        not_wired("set_stealth_detector_enabled")
     }
     fn order_ai_exit( &mut self, rider: ObjectSlot, container: ObjectSlot, cmd_source: CommandSourceType, ) {
         not_wired("order_ai_exit")
