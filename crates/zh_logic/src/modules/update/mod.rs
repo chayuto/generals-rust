@@ -3,6 +3,7 @@
 pub mod base_renerate_update;
 pub mod deletion_update;
 pub mod dynamic_geometry_info_update;
+pub mod dynamic_shroud_clearing_range_update;
 pub mod float_update;
 pub mod height_die_update;
 pub mod fire_weapon_update;
@@ -12,6 +13,7 @@ pub mod prone_update;
 pub mod radius_decal_update;
 pub mod smart_bomb_target_homing_update;
 pub mod special_power_update_module;
+pub mod spy_vision_update;
 pub mod weapon_bonus_update;
 
 use crate::arena::FacetMask;
@@ -141,5 +143,25 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         weapon_bonus_update::parse_weapon_bonus_update_data,
         weapon_bonus_update::create_weapon_bonus_update,
+    );
+    reg.register_module(
+        nk,
+        "DynamicShroudClearingRangeUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        dynamic_shroud_clearing_range_update::parse_dynamic_shroud_clearing_range_update_data,
+        dynamic_shroud_clearing_range_update::create_dynamic_shroud_clearing_range_update,
+    );
+    reg.register_module(
+        nk,
+        "SpyVisionUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x081),
+        SleepyUpdatePhase::Normal,
+        false,
+        spy_vision_update::parse_spy_vision_update_data,
+        spy_vision_update::create_spy_vision_update,
     );
 }

@@ -45,4 +45,3 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `PKT-305 AutoDepositUpdate`: a hook for `Player::becomingTeamMember`, a per-player `ScoreKeeper`, construction percent on objects, and a home for the upgrade template that `getUpgradedSupplyBoost` caches across all instances.
 - `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly`.
 - `PKT-327 FireSpreadUpdate`, `PKT-330 FlammableUpdate`: they call each other (`tryToIgnite`, `wouldIgnite`, `startFireSpreading`), and no facet carries those calls.
-- `PKT-372 SpyVisionUpdate`: the player vision-spied state (`setUnitsVisionSpied`).

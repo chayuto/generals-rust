@@ -118,6 +118,7 @@ impl CrateCollideImpl for SabotageInternetCenterCrateCollide {
             .do_sabotage_feedback_fx(sim, ctx, other, SabotageVictimType::InternetCenter);
 
         let until_frame = sim.frame().saturating_add(self.sabotage_frames);
+        sim.disable_internet_center_spy_vision(other, until_frame);
         sim.set_disabled_until(other, DisabledType::Hacked, until_frame);
 
         let contained: Vec<ObjectSlot> = sim

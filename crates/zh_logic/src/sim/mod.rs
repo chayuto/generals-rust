@@ -22,6 +22,7 @@ use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::update::deletion_update::DeletionUpdate;
+use crate::modules::update::spy_vision_update::SpyVisionUpdate;
 use crate::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
@@ -1331,6 +1332,14 @@ pub trait SimApi: SimView {
     fn set_shroud_range(&mut self, owner: ObjectSlot, range: Real);
     fn set_vision_spied(&mut self, owner: ObjectSlot, setting: Bool, by_whom: Int);
     fn handle_partition_cell_maintenance(&mut self, owner: ObjectSlot);
+    fn set_enemy_units_vision_spied(
+        &mut self,
+        actor_team: TeamId,
+        setting: Bool,
+        which_units: &KindOfMaskType,
+    );
+    fn activate_spy_vision(&mut self, owner: ObjectSlot, duration: UnsignedInt);
+    fn disable_internet_center_spy_vision(&mut self, victim: ObjectSlot, until_frame: UnsignedInt);
     fn set_deletion_lifetime(
         &mut self,
         owner: ObjectSlot,
@@ -1964,6 +1973,24 @@ impl SimContext {
             .get(&team_id)
             .copied()
             .unwrap_or(team_id.0)
+    }
+
+    /// Collects all object slots controlled by `player_idx` in `Player::iterateObjects`
+    /// (`defaultTeam` first, then other teams owned by `player_idx` in `team_members` order).
+    fn player_object_slots(&self, player_idx: Int) -> Vec<ObjectSlot> {
+        let default_team = self.world.player_default_teams.get(&player_idx).copied();
+        let mut out = Vec::new();
+        if let Some(def_team) = default_team {
+            if let Some(members) = self.world.team_members.get(&def_team) {
+                out.extend_from_slice(members);
+            }
+        }
+        for (&team_id, members) in &self.world.team_members {
+            if Some(team_id) != default_team && self.player_index_for_team(team_id) == player_idx {
+                out.extend_from_slice(members);
+            }
+        }
+        out
     }
 
     /// Sets the map extent, rebuilds the partition grid with `cell_size` over it,
@@ -5618,6 +5645,101 @@ impl SimApi for SimContext {
         self.handle_shroud(owner);
     }
 
+    fn set_enemy_units_vision_spied(
+        &mut self,
+        actor_team: TeamId,
+        setting: Bool,
+        which_units: &KindOfMaskType,
+    ) {
+        if actor_team == TeamId::INVALID {
+            return;
+        }
+        let actor_player_idx = self.player_index_for_team(actor_team);
+        let actor_def_team = self.player_default_team(actor_team);
+        let players: Vec<Int> = self.world.player_default_teams.keys().copied().collect();
+        for target_idx in players {
+            if self.team_relationship_to_player(actor_def_team, target_idx)
+                == Relationship::Enemies
+            {
+                for slot in self.player_object_slots(target_idx) {
+                    if self.world.objects.get(slot).is_some_and(|o| {
+                        o.thing
+                            .template_override()
+                            .get_final(&self.rules.thing_factory)
+                            .is_some_and(|t| t.is_any_kind_of(which_units) != FALSE)
+                    }) {
+                        self.set_vision_spied(slot, setting, actor_player_idx);
+                    }
+                }
+            }
+        }
+    }
+
+    fn activate_spy_vision(&mut self, owner: ObjectSlot, duration: UnsignedInt) {
+        let Some(sv_key) = self.rules.name_keys.lookup_key("SpyVisionUpdate") else {
+            return;
+        };
+        let slot = self.world.objects.get(owner).and_then(|obj| {
+            obj.behaviors.iter().find_map(|&(ms, mask)| {
+                if !mask.contains(FacetMask::UPDATE) {
+                    return None;
+                }
+                let name_key = self
+                    .world
+                    .modules
+                    .payload(ms)
+                    .map(|m| m.module_name_key());
+                (name_key == Some(sv_key)).then_some(ms)
+            })
+        });
+        if let Some(ms) = slot {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(sv) = m.as_any_mut().and_then(|a| a.downcast_mut::<SpyVisionUpdate>())
+                {
+                    sv.activate_spy_vision(sim, ctx, duration);
+                }
+            });
+        }
+    }
+
+    fn disable_internet_center_spy_vision(&mut self, victim: ObjectSlot, until_frame: UnsignedInt) {
+        let Some(victim_team) = self.world.objects.get(victim).map(|o| o.team_id) else {
+            return;
+        };
+        if victim_team == TeamId::INVALID {
+            return;
+        }
+        let victim_player_idx = self.player_index_for_team(victim_team);
+        for slot in self.player_object_slots(victim_player_idx) {
+            if self.object_is_kind_of(slot, KindOfType::FsInternetCenter) == FALSE {
+                continue;
+            }
+            let beh_slots: Vec<ModuleSlot> = self
+                .world
+                .objects
+                .get(slot)
+                .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
+            for ms in beh_slots {
+                if self.world.modules.is_alive(ms)
+                    && self
+                        .world
+                        .modules
+                        .payload(ms)
+                        .and_then(|m| m.as_any())
+                        .is_some_and(|a| a.is::<SpyVisionUpdate>())
+                {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        if let Some(sv) =
+                            m.as_any_mut().and_then(|a| a.downcast_mut::<SpyVisionUpdate>())
+                        {
+                            sv.set_disabled_until_frame(sim, ctx, until_frame);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     fn set_deletion_lifetime(
         &mut self,
         owner: ObjectSlot,
@@ -8482,6 +8604,25 @@ impl SimApi for MockSimApi {
 
     fn handle_partition_cell_maintenance(&mut self, owner: ObjectSlot) {
         self.ctx.handle_partition_cell_maintenance(owner);
+    }
+
+    fn set_enemy_units_vision_spied(
+        &mut self,
+        actor_team: TeamId,
+        setting: Bool,
+        which_units: &KindOfMaskType,
+    ) {
+        self.ctx
+            .set_enemy_units_vision_spied(actor_team, setting, which_units);
+    }
+
+    fn activate_spy_vision(&mut self, owner: ObjectSlot, duration: UnsignedInt) {
+        self.ctx.activate_spy_vision(owner, duration);
+    }
+
+    fn disable_internet_center_spy_vision(&mut self, victim: ObjectSlot, until_frame: UnsignedInt) {
+        self.ctx
+            .disable_internet_center_spy_vision(victim, until_frame);
     }
 
     fn set_deletion_lifetime(

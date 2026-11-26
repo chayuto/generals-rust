@@ -126,8 +126,8 @@ impl SpecialPowerBehaviorImpl for SpyVisionSpecialPower {
         }
         SpecialPowerFacet::do_special_power(&mut self.base, sim, ctx, command_options);
 
-        let _duration = self.compute_duration(sim, ctx.owner_slot);
-        // `SpyVisionUpdate::activateSpyVision(_duration)` wires in once `PKT-372` is ported.
+        let duration = self.compute_duration(sim, ctx.owner_slot);
+        sim.activate_spy_vision(ctx.owner_slot, duration);
     }
 }
 

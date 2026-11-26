@@ -4,9 +4,9 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## State
 
-- Spatial grid Stage 4b (`PKT-160 PartitionManager`) complete in the working tree (`golden_partition_object_shroud`, 500 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified).
+- `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original.
-- Packets: 217 of 463 implemented, 246 unported (Phase 2: 102, Phase 4: 4, Phase 5: 94, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 219 of 463 implemented, 244 unported (Phase 2: 102, Phase 4: 4, Phase 5: 92, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -15,8 +15,8 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | `e898491` to `6f759e0` | `WP-5.4` batches A to C, the shared weapon firing state machine, `FireWeaponUpdate` |
 | `c64ccb4` to `920ee37` | Spatial grid stages 1 to 3: filing, searches, collisions, wired into the sim |
 | `213bdc7`, `fb975a9` | `PKT-388 WeaponBonusUpdate`; `FiringTracker` attached; undetected defectors honoured |
-| `a31f330` | Spatial grid stage 4a: shroud cells |
-| uncommitted | Spatial grid stage 4b (`PKT-160`): object-side vision/shroud/jamming, `SightingInfo`, refresh sites, `TerrainLogic::setActiveBoundary`, faithful `Object::onDestroy` (`on_delete`) + `TeamMemberList` ordering, Stage 4b stand-ins replaced (`golden_partition_object_shroud`) |
+| `a31f330`, `2700f1d` | Spatial grid stage 4a–4b (`PKT-160 PartitionManager`): shroud cells, object-side vision/shroud/jamming, `SightingInfo`, refresh sites, `TerrainLogic::setActiveBoundary`, faithful `Object::onDestroy` + `TeamMemberList` ordering |
+| latest | `PKT-372 SpyVisionUpdate` (plus `SpyVisionSpecialPower` / `SabotageInternetCenterCrateCollide` wiring and `SimApi` vision-spied helpers) & `PKT-323 DynamicShroudClearingRangeUpdate` (`golden_shroud_updates`) |
 
 ## Not verified
 
@@ -26,7 +26,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Next
 
-- Modules now unblocked by Stage 4b: `PKT-372 SpyVisionUpdate`, `PKT-323 DynamicShroudClearingRangeUpdate`, and sight parts of `PKT-309 BattlePlanUpdate`.
+- Next unblocked module with Stage 4b complete: sight parts of `PKT-309 BattlePlanUpdate` (alongside `Player::changeBattlePlan`, `StealthDetectorUpdate`, and turret control), or `PKT-348 PhysicsUpdate` / `PKT-156 TerrainLogic` spines.
 - Spatial grid Stage 4c (`PartitionData::getShroudedStatus` lazy cache + ghost objects) remains deferred per `PARTITION_SCOPE.md`.
 
 ## Waiting on the owner
