@@ -25,6 +25,7 @@ use zh_logic::modules::{
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
     ParkingPlaceInfo,
 };
+use zh_logic::modules::module::SupplyTruckAiFacet;
 use zh_logic::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use zh_logic::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
 use zh_logic::object::thing_factory::ThingFactory;
@@ -55,13 +56,15 @@ use zh_logic::scheduler::{
 };
 use zh_logic::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use zh_logic::spatial::crate_system::CrateSystem;
-use zh_logic::spatial::partition_collide::{process_contacts, CollisionHost};
+use zh_logic::spatial::partition_collide::{
+    geom_collides_with_geom, process_contacts, CollideInfo, CollisionHost,
+};
 use zh_logic::spatial::partition_grid::{PartitionGrid, PartitionObject};
 use zh_logic::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
 use zh_logic::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
-use zh_common::math::geometry::GeometryInfo;
+use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{
     div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D,
     Region3D,
@@ -181,6 +184,9 @@ impl SimView for EngineSim<'_> {
     }
     fn dock_is_open(&self, owner: ObjectSlot) -> Bool {
         not_wired("dock_is_open")
+    }
+    fn stealth_is_temporary_grant(&self, owner: ObjectSlot) -> Bool {
+        not_wired("stealth_is_temporary_grant")
     }
     fn player_is_playable_side(&self, team_id: TeamId) -> Bool {
         not_wired("player_is_playable_side")
@@ -664,6 +670,15 @@ impl SimApi for EngineSim<'_> {
     }
     fn set_dock_crippled(&mut self, owner: ObjectSlot, crippled: Bool) {
         not_wired("set_dock_crippled")
+    }
+    fn with_supply_truck( &mut self, owner: ObjectSlot, f: &mut dyn FnMut(&mut dyn SupplyTruckAiFacet, &mut dyn SimApi, ModuleContext), ) -> Bool {
+        not_wired("with_supply_truck")
+    }
+    fn add_money_earned(&mut self, team_id: TeamId, amount: Int) {
+        not_wired("add_money_earned")
+    }
+    fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        not_wired("receive_temporary_stealth_grant")
     }
     fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
         not_wired("add_power_bonus")

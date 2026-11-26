@@ -28,6 +28,7 @@ use crate::modules::{
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
     ParkingPlaceInfo,
 };
+use crate::modules::module::SupplyTruckAiFacet;
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
 use crate::object::thing_factory::ThingFactory;
@@ -58,13 +59,15 @@ use crate::scheduler::{
 };
 use crate::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use crate::spatial::crate_system::CrateSystem;
-use crate::spatial::partition_collide::{process_contacts, CollisionHost};
+use crate::spatial::partition_collide::{
+    geom_collides_with_geom, process_contacts, CollideInfo, CollisionHost,
+};
 use crate::spatial::partition_grid::{PartitionGrid, PartitionObject};
 use crate::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
 use crate::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
-use zh_common::math::geometry::GeometryInfo;
+use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{
     div_safe_f32, gm_cosf, gm_sinf, gm_sqrtf, real_to_int_ceil, real_to_int_floor, Coord3D,
     Region3D,
@@ -1061,8 +1064,10 @@ pub trait SimView {
     fn object_health(&self, owner: ObjectSlot) -> Real;
     /// `BodyModuleInterface::getDamageState`.
     fn object_body_damage_state(&self, owner: ObjectSlot) -> BodyDamageType;
-    /// `DockUpdateInterface::isDockOpen`; `TRUE` when nothing has closed it.
+    /// `DockUpdateInterface::isDockOpen`; `TRUE` for an object without a dock.
     fn dock_is_open(&self, owner: ObjectSlot) -> Bool;
+    /// `StealthUpdate::isTemporaryGrant` of the owner.
+    fn stealth_is_temporary_grant(&self, owner: ObjectSlot) -> Bool;
     /// `Player::isPlayableSide` of the player controlling `team_id`.
     fn player_is_playable_side(&self, team_id: TeamId) -> Bool;
     fn object_has_upgrade(&self, owner: ObjectSlot, mask: &UpgradeMaskType) -> Bool;
@@ -1386,6 +1391,17 @@ pub trait SimApi: SimView {
     fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool);
     /// `DockUpdateInterface::setDockCrippled`.
     fn set_dock_crippled(&mut self, owner: ObjectSlot, crippled: Bool);
+    /// Runs `f` on the `SupplyTruckAIInterface` of the owner's AI module. `FALSE`
+    /// when there is none.
+    fn with_supply_truck(
+        &mut self,
+        owner: ObjectSlot,
+        f: &mut dyn FnMut(&mut dyn SupplyTruckAiFacet, &mut dyn SimApi, ModuleContext),
+    ) -> Bool;
+    /// `ScoreKeeper::addMoneyEarned` of the player controlling `team_id`.
+    fn add_money_earned(&mut self, team_id: TeamId, amount: Int);
+    /// `StealthUpdate::receiveGrant(TRUE, frames)`; nothing without a `StealthUpdate`.
+    fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt);
     fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot);
     fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot);
     fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool);
@@ -1692,10 +1708,10 @@ pub struct SimWorld {
     pub player_captured_objects: BTreeMap<TeamId, Int>,
     pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
     pub special_power_uses_delay: Bool,
-    /// `DockUpdateInterface::m_dockOpen == FALSE` (dock updates are unported).
-    pub dock_closed: BTreeSet<ObjectId>,
-    /// `DockUpdateInterface::m_dockCrippled` (dock updates are unported).
-    pub dock_crippled: BTreeSet<ObjectId>,
+    /// `ScoreKeeper::m_totalMoneyEarned` (players have no score keeper yet).
+    pub player_money_earned: BTreeMap<TeamId, Int>,
+    /// `StealthUpdate::m_framesGranted` where positive (`StealthUpdate` is unported).
+    pub stealth_frames_granted: BTreeMap<ObjectId, UnsignedInt>,
     /// Teams whose controlling player is a playable side (`Player::isPlayableSide`).
     pub playable_side_teams: BTreeSet<TeamId>,
     pub car_bombed_objects: Vec<(ObjectId, ObjectId)>,
@@ -1793,8 +1809,8 @@ impl SimWorld {
             player_captured_objects: BTreeMap::new(),
             shared_special_power_ready_frames: BTreeMap::new(),
             special_power_uses_delay: TRUE,
-            dock_closed: BTreeSet::new(),
-            dock_crippled: BTreeSet::new(),
+            player_money_earned: BTreeMap::new(),
+            stealth_frames_granted: BTreeMap::new(),
             playable_side_teams: BTreeSet::new(),
             car_bombed_objects: Vec::new(),
             hijacked_objects: Vec::new(),
@@ -2601,6 +2617,16 @@ impl SimContext {
                 }
             });
         }
+    }
+
+    /// `Object::getDockUpdateInterface`: the first behavior with a dock facet. A dock
+    /// whose module is executing is not found.
+    pub fn dock_slot(&self, owner: ObjectSlot) -> Option<ModuleSlot> {
+        self.world.objects.get(owner)?.behaviors.iter().find_map(|&(ms, mask)| {
+            (mask.contains(FacetMask::DOCK_UPDATE)
+                && self.world.modules.payload(ms)?.as_dock().is_some())
+            .then_some(ms)
+        })
     }
 
     /// Dispatches `f` on `mod_slot` via Take-and-Restore, draining any re-entrant [`DeferredSelfOp`]s
@@ -3735,11 +3761,18 @@ impl SimView for SimContext {
     }
 
     fn dock_is_open(&self, owner: ObjectSlot) -> Bool {
+        self.dock_slot(owner)
+            .and_then(|ds| self.world.modules.payload(ds))
+            .and_then(|p| p.as_dock())
+            .map_or(TRUE, |d| d.is_dock_open())
+    }
+
+    fn stealth_is_temporary_grant(&self, owner: ObjectSlot) -> Bool {
         Bool::from(
             self.world
                 .objects
                 .id_of(owner)
-                .is_none_or(|id| !self.world.dock_closed.contains(&id)),
+                .is_some_and(|id| self.world.stealth_frames_granted.contains_key(&id)),
         )
     }
 
@@ -4504,6 +4537,12 @@ impl SimContext {
         }
 
         if (options.flags & FPF_IGNORE_ALL_OBJECTS) == 0 {
+            // `iteratePotentialCollisions` with a sphere of radius 5.
+            let probe = CollideInfo {
+                pos,
+                geometry: GeometryInfo::new(GeometryType::Sphere, TRUE, 5.0, 5.0, 5.0),
+                angle,
+            };
             for other in self.world_object_slots() {
                 if Some(other) == options.ignore_object || Some(other) == options.source_to_path_to_dest {
                     continue;
@@ -4515,10 +4554,19 @@ impl SimContext {
                     continue;
                 }
                 let opos = o.thing.get_position();
-                let radius = o.geometry.get_bounding_circle_radius() + 5.0_f32;
                 let dx = opos.x - pos.x;
                 let dy = opos.y - pos.y;
-                if dx * dx + dy * dy > radius * radius {
+                // Within 1.1 sphere radii of the other's bounding circle, and touching.
+                let gap = gm_sqrtf(dx * dx + dy * dy) - o.geometry.get_bounding_circle_radius();
+                if gap >= 5.0_f32 * 1.1_f32 {
+                    continue;
+                }
+                let shape = CollideInfo {
+                    pos: *opos,
+                    geometry: o.geometry.clone(),
+                    angle: o.thing.get_orientation(),
+                };
+                if !geom_collides_with_geom(&probe, &shape) {
                     continue;
                 }
                 if let Some(rel_slot) = options.relationship_object {
@@ -5983,22 +6031,66 @@ impl SimApi for SimContext {
     }
 
     fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool) {
-        if let Some(id) = self.world.objects.id_of(owner) {
-            if open != FALSE {
-                self.world.dock_closed.remove(&id);
-            } else {
-                self.world.dock_closed.insert(id);
+        let Some(ds) = self.dock_slot(owner) else {
+            return;
+        };
+        let _ = self.dispatch_module(ds, |m, _, _| {
+            if let Some(d) = m.as_dock_mut() {
+                d.set_dock_open(open);
             }
-        }
+        });
     }
 
     fn set_dock_crippled(&mut self, owner: ObjectSlot, crippled: Bool) {
-        if let Some(id) = self.world.objects.id_of(owner) {
-            if crippled != FALSE {
-                self.world.dock_crippled.insert(id);
-            } else {
-                self.world.dock_crippled.remove(&id);
+        let Some(ds) = self.dock_slot(owner) else {
+            return;
+        };
+        let _ = self.dispatch_module(ds, |m, sim, ctx| {
+            if let Some(d) = m.as_dock_mut() {
+                d.set_dock_crippled(sim, ctx, crippled);
             }
+        });
+    }
+
+    fn with_supply_truck(
+        &mut self,
+        owner: ObjectSlot,
+        f: &mut dyn FnMut(&mut dyn SupplyTruckAiFacet, &mut dyn SimApi, ModuleContext),
+    ) -> Bool {
+        let Some(ai) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return FALSE;
+        };
+        self.dispatch_module(ai, |m, sim, ctx| {
+            match m.as_ai_mut().and_then(|ai| ai.supply_truck()) {
+                Some(truck) => {
+                    f(truck, sim, ctx);
+                    TRUE
+                }
+                None => FALSE,
+            }
+        })
+        .unwrap_or(FALSE)
+    }
+
+    fn add_money_earned(&mut self, team_id: TeamId, amount: Int) {
+        let total = self.world.player_money_earned.entry(team_id).or_insert(0);
+        *total = total.wrapping_add(amount);
+    }
+
+    fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        let Some(id) = self
+            .world
+            .objects
+            .get(owner)
+            .filter(|o| o.stealth_slot.is_some())
+            .map(|o| o.id)
+        else {
+            return;
+        };
+        self.receive_stealth_grant(owner);
+        self.set_status(owner, ObjectStatusType::Stealthed);
+        if frames > 0 {
+            self.world.stealth_frames_granted.insert(id, frames);
         }
     }
 
@@ -7179,6 +7271,7 @@ impl SimApi for SimContext {
             return;
         };
         self.world.stealth_granted.insert(obj_id);
+        self.world.stealth_frames_granted.remove(&obj_id);
         self.set_status(owner, ObjectStatusType::CanStealth);
         if !self.world.modules.is_executing(ss) {
             let _ = self.dispatch_module(ss, |m, sim, ctx| {
@@ -8089,6 +8182,10 @@ impl SimView for MockSimApi {
         self.ctx.object_body_damage_state(owner)
     }
 
+    fn stealth_is_temporary_grant(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.stealth_is_temporary_grant(owner)
+    }
+
     fn dock_is_open(&self, owner: ObjectSlot) -> Bool {
         self.ctx.dock_is_open(owner)
     }
@@ -8882,6 +8979,22 @@ impl SimApi for MockSimApi {
 
     fn retract_power_plant(&mut self, owner: ObjectSlot) {
         self.ctx.retract_power_plant(owner);
+    }
+
+    fn with_supply_truck(
+        &mut self,
+        owner: ObjectSlot,
+        f: &mut dyn FnMut(&mut dyn SupplyTruckAiFacet, &mut dyn SimApi, ModuleContext),
+    ) -> Bool {
+        self.ctx.with_supply_truck(owner, f)
+    }
+
+    fn add_money_earned(&mut self, team_id: TeamId, amount: Int) {
+        self.ctx.add_money_earned(team_id, amount);
+    }
+
+    fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
+        self.ctx.receive_temporary_stealth_grant(owner, frames);
     }
 
     fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool) {

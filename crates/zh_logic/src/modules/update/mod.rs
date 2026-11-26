@@ -2,6 +2,10 @@
 
 pub mod base_renerate_update;
 pub mod deletion_update;
+pub mod dock_update;
+pub mod repair_dock_update;
+pub mod supply_center_dock_update;
+pub mod supply_warehouse_dock_update;
 pub mod dynamic_geometry_info_update;
 pub mod dynamic_shroud_clearing_range_update;
 pub mod float_update;
@@ -28,6 +32,36 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "SupplyWarehouseDockUpdate",
+        ModuleType::Behavior,
+        dock_update::DockUpdateModuleData::FACET_MASK,
+        SleepyUpdatePhase::Normal,
+        false,
+        supply_warehouse_dock_update::parse_supply_warehouse_dock_update_data,
+        supply_warehouse_dock_update::create_supply_warehouse_dock_update,
+    );
+    reg.register_module(
+        nk,
+        "SupplyCenterDockUpdate",
+        ModuleType::Behavior,
+        dock_update::DockUpdateModuleData::FACET_MASK,
+        SleepyUpdatePhase::Normal,
+        false,
+        supply_center_dock_update::parse_supply_center_dock_update_data,
+        supply_center_dock_update::create_supply_center_dock_update,
+    );
+    reg.register_module(
+        nk,
+        "RepairDockUpdate",
+        ModuleType::Behavior,
+        dock_update::DockUpdateModuleData::FACET_MASK,
+        SleepyUpdatePhase::Normal,
+        false,
+        repair_dock_update::parse_repair_dock_update_data,
+        repair_dock_update::create_repair_dock_update,
+    );
     reg.register_module(
         nk,
         "BaseRegenerateUpdate",

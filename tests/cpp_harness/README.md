@@ -128,3 +128,26 @@ After changing the fixture, rebuild every oracle that uses the changed function 
 ## Registering a module changes what existing templates do
 
 A `Behavior = X` line in a test template is inert until `X` is registered. Once a wave registers it, the object gets a real module that can claim `contain_slot` and similar slots ahead of a test's stand-in. `WP-5.3-A` broke `golden_wp52_special_power` this way, and a targeted test run missed it. Run `cargo test --workspace --no-fail-fast` before committing any wave that registers modules.
+
+### The warehouse jostle is a whole-number draw
+
+- **Where:** `SupplyWarehouseDockUpdate::action`, `newPos.x += GameLogicRandomValue(-range, range)` with a `Real` range of 4.
+- **What happens:** `GameLogicRandomValue` is the integer draw, so the docker moves by a whole number in -4..4. A real draw would give a different position and a different stream.
+- **Guard:** `golden_pkt320_381_378_363_docks` compares the docker position and the seed CRC after every action.
+
+### Dock queries that look at the wrong member
+
+- **Where:** `DockUpdate::getDockPosition` and `getExitPosition`.
+- **What happens:** both test `m_enterPosition` against zero, not the position they return.
+- **Guard:** `golden_pkt320_381_378_363_docks` writes bone positions with a zero enter position and non-zero dock and exit positions.
+
+### A repair keeps the rate of whoever started it
+
+- **Where:** `RepairDockUpdate::action`.
+- **What happens:** the healing per frame is fixed while `m_lastRepair` is zero, which is only restored when a docker is found at full health. A docker that leaves early passes its rate to the next one. `TimeForFullHeal = 0` gives a NaN or infinite rate that is saved.
+- **Guard:** `golden_pkt320_381_378_363_docks`, scripted vectors.
+
+### `SupplyCenterDockUpdate` needs the floating text switched off
+
+- **What happens:** `action` ends in `InGameUI::addFloatingText`, which needs fonts and a display and crashes headless.
+- **How the oracle handles it:** `TheGameLogic->setDrawIconUI(FALSE)` in `gen_pkt320_381_378_363_docks.cpp`.

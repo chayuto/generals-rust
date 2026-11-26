@@ -846,7 +846,12 @@ fn run_supply(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
         }
         let obs = vec![
             sim.object_health(o).to_bits(),
-            u32::from(sim.world.dock_crippled.contains(&id)),
+            u32::from(
+                sim.dock_slot(o)
+                    .and_then(|ds| sim.world.modules.payload(ds))
+                    .and_then(|p| p.as_dock())
+                    .is_some_and(|d| d.dock_state().dock_crippled != FALSE),
+            ),
             sim.object_body_damage_state(o) as u32,
         ];
         rows.push(row(sim, m, obs));

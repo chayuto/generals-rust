@@ -13,6 +13,7 @@ use crate::arena::{
 };
 use crate::combat::damage::DamageInfo;
 use crate::gamelogic::global_data::{BodyDamageType, WeaponBonusConditionType};
+use crate::modules::update::dock_update::DockUpdateState;
 pub use crate::object::thing_template::ModuleType;
 use crate::rules::combat_types::ArmorSetType;
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
@@ -524,6 +525,12 @@ pub trait BehaviorModule: Send {
         None
     }
 
+    fn as_dock(&self) -> Option<&dyn DockFacet> {
+        None
+    }
+    fn as_dock_mut(&mut self) -> Option<&mut dyn DockFacet> {
+        None
+    }
     fn as_power_plant_mut(&mut self) -> Option<&mut dyn PowerPlantFacet> {
         None
     }
@@ -1655,6 +1662,10 @@ pub trait DestroyFacet {
 
 /// AI state-machine / locomotor facet (`AIUpdateInterface`).
 pub trait AiUpdateFacet {
+    /// `getSupplyTruckAIInterface`.
+    fn supply_truck(&mut self) -> Option<&mut dyn SupplyTruckAiFacet> {
+        None
+    }
     fn is_moving(&self) -> Bool {
         FALSE
     }
@@ -1767,6 +1778,118 @@ pub trait PhysicsFacet {
     fn is_stick_to_ground(&self) -> Bool {
         FALSE
     }
+}
+
+/// `DockUpdateInterface`. A dock keeps its state in the module; the provided methods
+/// are `DockUpdate`'s own, which a derived dock may override. A docker is named by
+/// its slot, or by its id where only that is read.
+pub trait DockFacet {
+    fn dock_state(&self) -> &DockUpdateState;
+    fn dock_state_mut(&mut self) -> &mut DockUpdateState;
+
+    /// `action`: what the dock does for the docker this frame.
+    fn action(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        docker: ObjectSlot,
+        drone: Option<ObjectSlot>,
+    ) -> Bool;
+
+    fn is_clear_to_approach(&self, docker: ObjectId) -> Bool {
+        self.dock_state().is_clear_to_approach(docker)
+    }
+    fn reserve_approach_position(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        docker: ObjectSlot,
+    ) -> Option<(Coord3D, Int)> {
+        self.dock_state_mut()
+            .reserve_approach_position(sim, ctx, docker)
+    }
+    fn advance_approach_position(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        docker: ObjectSlot,
+        index: Int,
+    ) -> Option<(Coord3D, Int)> {
+        self.dock_state_mut()
+            .advance_approach_position(sim, ctx, docker, index)
+    }
+    fn is_clear_to_enter(&self, docker: ObjectId) -> Bool {
+        self.dock_state().is_clear_to_enter(docker)
+    }
+    fn is_clear_to_advance(&self, docker: ObjectId, index: Int) -> Bool {
+        self.dock_state().is_clear_to_advance(docker, index)
+    }
+    fn get_enter_position(
+        &mut self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        docker: ObjectSlot,
+    ) -> Coord3D {
+        self.dock_state_mut().get_enter_position(sim, ctx, docker)
+    }
+    fn get_dock_position(
+        &mut self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        docker: ObjectSlot,
+    ) -> Coord3D {
+        self.dock_state_mut().get_dock_position(sim, ctx, docker)
+    }
+    fn get_exit_position(
+        &mut self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        docker: ObjectSlot,
+    ) -> Coord3D {
+        self.dock_state_mut().get_exit_position(sim, ctx, docker)
+    }
+    fn on_approach_reached(&mut self, docker: ObjectId) {
+        self.dock_state_mut().on_approach_reached(docker);
+    }
+    fn on_enter_reached(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, docker: ObjectSlot) {
+        self.dock_state_mut().on_enter_reached(sim, ctx, docker);
+    }
+    fn on_dock_reached(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, docker: ObjectSlot) {
+        self.dock_state_mut().on_dock_reached(sim, ctx, docker);
+    }
+    fn on_exit_reached(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, docker: ObjectSlot) {
+        self.dock_state_mut().on_exit_reached(sim, ctx, docker);
+    }
+    fn cancel_dock(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, docker: ObjectSlot) {
+        self.dock_state_mut().cancel_dock(sim, ctx, docker);
+    }
+    fn is_dock_open(&self) -> Bool {
+        self.dock_state().dock_open
+    }
+    fn set_dock_open(&mut self, open: Bool) {
+        self.dock_state_mut().dock_open = open;
+    }
+    fn is_allow_passthrough_type(&self) -> Bool {
+        self.dock_state().data.allows_passthrough
+    }
+    fn is_rally_point_after_dock_type(&self) -> Bool {
+        FALSE
+    }
+    fn set_dock_crippled(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, crippled: Bool) {
+        self.dock_state_mut().dock_crippled = crippled;
+    }
+}
+
+/// `SupplyTruckAIInterface`, as far as the docks use it. The supply truck AIs are
+/// unported, so only test stand-ins implement it so far.
+pub trait SupplyTruckAiFacet {
+    fn number_boxes(&self) -> Int;
+    /// `getMaxBoxes`.
+    fn max_boxes(&self) -> Int;
+    fn upgraded_supply_boost(&self, sim: &dyn SimView, ctx: ModuleContext) -> Int;
+    fn lose_one_box(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) -> Bool;
+    fn gain_one_box(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, remaining: Int) -> Bool;
+    fn set_force_wanting_state(&mut self, wanting: Bool);
 }
 
 /// Stealth & disguise facet (`StealthUpdate`).
