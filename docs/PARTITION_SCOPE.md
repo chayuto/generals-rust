@@ -1,6 +1,6 @@
 # Spatial grid (`PKT-160 PartitionManager`) scope
 
-Stages 1 to 3 are done: cell filing (`spatial/partition_grid.rs`), searches (`spatial/partition_query.rs`), collisions (`spatial/partition_collide.rs`) and their wiring into the sim (`SimWorld::partition`, golden `golden_partition_wiring`). Of stage 4, shroud and vision, the cells are done (`spatial/partition_shroud.rs`) but not yet used by the sim; the object side is not started. `PKT-160` stays unported until it is.
+Stages 1 to 4b are done: cell filing (`spatial/partition_grid.rs`), searches (`spatial/partition_query.rs`), collisions (`spatial/partition_collide.rs`), cell shroud (`spatial/partition_shroud.rs`), and object-side vision, shroud clearing, active shroud jamming, `SightingInfo` persistence, and wiring (`sim/mod.rs`, `spatial/partition_manager.rs`, golden `golden_partition_wiring`, `golden_partition_shroud`, `golden_partition_object_shroud`). `PKT-160` is marked implemented; Stage 4c (`getShroudedStatus` lazy cache + ghost objects) remains deferred.
 
 ## Ordering rules a port must keep
 
@@ -17,8 +17,8 @@ Stages 1 to 3 are done: cell filing (`spatial/partition_grid.rs`), searches (`sp
 | 1 | Cells, geometry fill, dirty list, radius rings, range and closest queries, four distance rules | ~1,800 to 2,200 | Done: `golden_partition_grid`, `golden_partition_query` |
 | 2 | Sim queries on the grid, registration, dirty marking, collisions in the frame | Rust only | Done: `golden_partition_wiring` |
 | 3 | Collision tests and contact list | ~600 | Done: `golden_partition_collide` |
-| 4a | Cell shroud counts, circle reveal and cover, delayed unlook queue, map reveals, `crc`/`xfer` | ~400 | Done, not wired: `golden_partition_shroud` |
-| 4b | `Object` side: ranges, last-look records, `look`/`shroud`, refresh sites | ~400 | Not started |
+| 4a | Cell shroud counts, circle reveal and cover, delayed unlook queue, map reveals, `crc`/`xfer` | ~400 | Done, wired: `golden_partition_shroud`, `golden_partition_object_shroud` |
+| 4b | `Object` side: ranges, last-look records, `look`/`shroud`, refresh sites | ~400 | Done: `golden_partition_object_shroud` |
 | 4c | Per-object shroud status (`PartitionData::getShroudedStatus`) | ~150 | Deferred |
 
 Not needed yet: threat and value maps (~340), position finding and line of sight (~380). Query filters (~500) are added per caller.
@@ -34,9 +34,9 @@ Not needed yet: threat and value maps (~340), position finding and line of sight
 ## Not mirrored or not verified
 
 - Containment registration (`set_in_partition` from the contain modules and the hijacker crate) has no oracle of its own; the existing contain suites pass.
-- No Rust counterpart yet: the register and unregister calls in `TunnelContain`, `CaveContain`, `TunnelTracker::loadPostProcess`, `HijackerUpdate` and `DeliverPayloadAIUpdate`, and the re-filing on script disabled or unpowered changes. Add them when porting those.
+- No Rust counterpart yet: the register and unregister calls in `TunnelContain`, `CaveContain`, `TunnelTracker::loadPostProcess`, `HijackerUpdate` and `DeliverPayloadAIUpdate`, `TunnelContain::onContaining` (`PKT-284` waits on `OPEN_DECISIONS.md` items 4–5), and the re-filing on script disabled or unpowered changes. Add them when porting those.
 - `Object::setStatus` also detonates mines on an `UnderConstruction` change. Not ported.
-- `onPartitionCellChange` (shroud, threat and value maps) is not ported.
+- Threat and value maps (`onPartitionCellChange`) are not ported (the shroud half of `onPartitionCellChange` is wired in 4b).
 - `iteratePotentialCollisions` and `PartitionFilterWouldCollide` are not ported; `geom_collides_with_geom` is.
 - Ghost objects are not modelled.
 - Terrain is not consulted for cell heights. The shroud code is two-dimensional and does not need them.
@@ -52,36 +52,22 @@ Not needed yet: threat and value maps (~340), position finding and line of sight
 - An unlook is queued, not run: it executes once `frame + UnlookPersistDuration` is less than the current frame. Undoing a permanent reveal and shrouding the map flush the queue first; the two reveals do not.
 - A map boundary change stores the cells around the rebuild. On a map with fewer rows only player 0 is restored, because `restoreFoggedCells` returns early. Kept.
 - The saved cell size and count must match the grid. A load appends to the queue.
-- Not verified against the original: loading (checked only as a Rust save and load round trip).
+- Not verified against the original: standalone `ShroudStatusStoreRestore` load edge cases (live `PartitionGrid::xfer` save/load round-trips and 8-step `init_partition` boundary store/restore are verified by `golden_partition_shroud` and `golden_partition_object_shroud`).
+- Wired in 4b: `update_partition` refreshes changed object IDs before `process_contacts` and drains `process_pending_undo_shroud_reveals(frame, player_count)` after; `init_partition` runs the 8-step `TerrainLogic::setActiveBoundary` flush/store/restore sequence; `game_logic` CRC assembly outside individual objects/partition grid awaits the full frame driver.
 
-Left for 4b, because nothing looks yet:
+### 4b: objects (done, in `sim/mod.rs` and `modules/`)
 
-- `update_partition` does not call `process_pending_undo_shroud_reveals`.
-- `init_partition` does not flush, store and restore the shroud, so it resets it.
-- No game checksum or save includes the grid; the sim has no assembly of either.
-
-### 4b: objects
-
-- Each object has a vision range, a shroud-clearing range (the template's, falling back to vision), a shroud (jamming) range starting at 0, two last-look records, a last-shroud record and per-player vision-spied counts. None of these is in `Object::crc`; they are in `Object::xfer`.
-- `look` uses `Player::getRelationship` to each player's default team, not `Object::getRelationship`, so the defector rule does not apply. Allies and spies get the reveal; `REVEAL_TO_ALL` gives everyone; the template's reveal-to-all range is a second reveal to enemies and neutrals.
-- `look` skips destroyed and effectively dead objects and riders of a non-garrisonable container. An object under construction clears only its bounding circle.
-- A refresh (`handlePartitionCellMaintenance`) is `unlook`, `unshroud`, `shroud`, `look`. It runs on: a change of the cell under the object's centre (from the grid update, including the first filing and leaving the map), containment and release, destroy, die, capture, defect, an `UnderConstruction` change, a clearing-range change away from (0,0,0), a vision-spied change, a map boundary change, a team changing controller, `TunnelContain` and `ActiveShroudUpgrade`.
-- The port has no ordered player list with masks. It must be derived from `player_default_teams`.
+- Each object has `vision_range`, `shroud_clearing_range` (`-1.0` falls back to `vision_range`), `shroud_range` (starting at 0), `partition_last_look`, `partition_reveal_all_last_look`, `partition_last_shroud`, and `vision_spied_by` / `vision_spied_mask`. None of these is in `Object::crc`; all are serialized in `ObjectRecord::xfer_vision_and_shroud` (`Object.cpp:4228-4257`).
+- `look` and `shroud` resolve each player slot's default team's controlling player (`Player::getRelationship` to `currentPlayer->getDefaultTeam()`, not `Object::getRelationship`, so defector rules do not apply). Allies and spies get the clear reveal; `REVEAL_TO_ALL` reveals to `PLAYERMASK_ALL`; `ShroudRevealToAllRange` adds a second reveal to enemies and neutrals unless `UnderConstruction` or un-detected stealthed.
+- `look` skips `Destroyed`, `IsEffectivelyDead`, and riders of a non-garrisonable container (`ModuleSidecar::Contain.garrisonable`). `unlook` keeps the C++ early return when `partition_last_look.is_invalid()`. `shroud` skips `UnderConstruction`, `IsEffectivelyDead`, or `shroud_range <= 0`.
+- A refresh (`handle_partition_cell_maintenance`) runs `object_unlook`, `object_unshroud`, `object_shroud`, `object_look` on: partition cell change in `update_partition`, contain add/remove, `destroy_object_now` (`Object::onDestroy`, after `on_delete`), `dispatch_on_die`, `capture_object`, `defect_object` (two refreshes via `set_object_team` + trailing refresh), `change_status` for `Stealthed`/`Detected`/`Disguised` when `shroud_reveal_to_all_range > 0` (`UnderConstruction` only calls `make_dirty` in `Object::setStatus`), `set_shroud_clearing_range` away from `(0, 0, 0)`, `set_vision_spied`, `set_team_controlling_player` (iterating `SimWorld::team_members` head-prepend order), `init_partition` (`TerrainLogic::setActiveBoundary`), and `ActiveShroudUpgrade`.
+- `SimWorld` has no ordered player list; player slots and `PLAYERMASK_ALL` (`0xFFFF`) are derived from `player_default_teams`.
 - The relationship overrides noted in `OPEN_DECISIONS.md` also affect `look`.
+- Stage 4b stand-ins were replaced: `ActiveShroudUpgrade` sets `shroud_range` and refreshes; `SpecialPowerModule::create_view_object` spawns on `player_default_team` with `shroud_clearing_range` and lifetime; `SpyVisionSpecialPower` drops its stand-in reveal (awaits `PKT-372 SpyVisionUpdate`); car-bomb and hijack conversions copy both `vision_range` and `shroud_clearing_range`; `SimWorld::{shroud_reveals, shroud_removals, map_reveals}` and `SimApi::{reveal_shroud, remove_shroud}` were removed; `reveal_map_for_player` delegates directly to `PartitionGrid`.
 
 ### 4c: deferred
 
 `getShroudedStatus` is a lazy per-player cache that is not hashed. Its callers in the original's logic are `StealthDetectorUpdate` and `LaserUpdate` (local player only) plus command and build checks (`ActionManager`, `BuildAssistant`), none of them ported. It also drives ghost objects.
-
-### Existing stand-ins to replace in 4b
-
-These are wrong today, not only missing:
-
-- `ActiveShroudUpgrade` sets the shroud-clearing range. The original sets the shroud (jamming) range and refreshes.
-- `SpecialPowerModule` records a reveal as well as creating the view object. The original only creates the object (with a range and a lifetime).
-- `SpyVisionSpecialPower` records a reveal. The original activates `SpyVisionUpdate`, which spies on enemy objects.
-- The car bomb and hijack conversions copy only the clearing range. The original also copies the vision range, which objects here do not have.
-- `reveal_shroud`, `remove_shroud` and `reveal_map_for_player` only append to lists.
 
 Modules that become portable or fuller after 4b: `PKT-372 SpyVisionUpdate`, `PKT-323 DynamicShroudClearingRangeUpdate`, and the sight parts of `PKT-309 BattlePlanUpdate`.
 

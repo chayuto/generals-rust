@@ -9,6 +9,9 @@ use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 /// Player bitmask type (`GameCommon.h`: `UnsignedShort`).
 pub type PlayerMaskType = UnsignedShort;
 
+/// Bitmask covering all `MAX_PLAYER_COUNT` player slots (`GameCommon.h`: `PLAYERMASK_ALL`).
+pub const PLAYERMASK_ALL: PlayerMaskType = 0xFFFF;
+
 /// Massive damage sentinel matching `HUGE_DAMAGE_AMOUNT` in `Damage.h`.
 pub const HUGE_DAMAGE_AMOUNT: Real = 999_999.0_f32;
 

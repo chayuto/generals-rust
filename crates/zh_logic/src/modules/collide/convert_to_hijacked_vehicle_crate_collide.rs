@@ -3,8 +3,8 @@
 
 use crate::arena::{FacetMask, ModuleContext, ModuleSidecar, ObjectSlot};
 use crate::modules::collide::crate_collide::{
-    impl_crate_collide_behavior, object_shroud_clearing_range, parse_crate_collide_data_with,
-    CrateCollide, CrateCollideData, CrateCollideImpl,
+    impl_crate_collide_behavior, parse_crate_collide_data_with, CrateCollide, CrateCollideData,
+    CrateCollideImpl,
 };
 use crate::modules::module::{BehaviorModule, ModuleData};
 use crate::modules::module_factory::ModuleParseContext;
@@ -172,7 +172,9 @@ impl CrateCollideImpl for ConvertToHijackedVehicleCrateCollide {
             sim.set_status(ctx.owner_slot, ObjectStatusType::Unselectable);
         }
 
-        let shroud_range = object_shroud_clearing_range(sim, ctx.owner_slot);
+        let vision = sim.object_vision_range(ctx.owner_slot);
+        sim.set_vision_range(other, vision);
+        let shroud_range = sim.object_shroud_clearing_range(ctx.owner_slot);
         sim.set_shroud_clearing_range(other, shroud_range);
         sim.set_in_partition(ctx.owner_slot, FALSE);
         FALSE

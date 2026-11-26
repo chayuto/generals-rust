@@ -215,20 +215,21 @@ impl OpenContainCore {
         }
     }
 
-    pub fn sidecar(&self, contain_max: Int, enclosing: Bool) -> ModuleSidecar {
+    pub fn sidecar(&self, contain_max: Int, enclosing: Bool, garrisonable: Bool) -> ModuleSidecar {
         ModuleSidecar::Contain {
             count: self.contain_list_size,
             max: contain_max,
             enclosing,
             stealth_units: self.stealth_units_contained,
             garrisoned: FALSE,
+            garrisonable,
             rider_id: ObjectId::INVALID,
         }
     }
 
     #[inline]
     pub fn sync_sidecar_to_sim(&self, sim: &mut dyn SimApi, ctx: ModuleContext, contain_max: Int) {
-        sim.set_module_sidecar(ctx.mod_slot, self.sidecar(contain_max, TRUE));
+        sim.set_module_sidecar(ctx.mod_slot, self.sidecar(contain_max, TRUE, FALSE));
     }
 
     #[inline]
@@ -462,9 +463,10 @@ pub trait ContainBehavior: Any + Send {
     fn object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         let max = self.contain_max_value();
         let enclosing = self.is_enclosing();
+        let garrisonable = self.is_garrisonable_container();
         let core = self.open_core_mut();
         core.schedule.bind(ctx);
-        sim.set_module_sidecar(ctx.mod_slot, core.sidecar(max, enclosing));
+        sim.set_module_sidecar(ctx.mod_slot, core.sidecar(max, enclosing, garrisonable));
     }
     fn delete(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         let ids = self.open_core().contain_list.clone();
@@ -495,6 +497,7 @@ pub trait ContainBehavior: Any + Send {
         let enclosing = self.is_enclosing();
         self.open_core_mut()
             .load_post_process(&data, enclosing, sim, ctx);
+        sync_contain_sidecar(self, sim, ctx);
     }
 
     // UpdateModule
@@ -633,7 +636,11 @@ fn sync_contain_sidecar<C: ContainBehavior + ?Sized>(
 ) {
     sim.set_module_sidecar(
         ctx.mod_slot,
-        c.open_core().sidecar(c.contain_max_value(), c.is_enclosing()),
+        c.open_core().sidecar(
+            c.contain_max_value(),
+            c.is_enclosing(),
+            c.is_garrisonable_container(),
+        ),
     );
 }
 
@@ -650,7 +657,7 @@ fn add_or_remove_obj_from_world(sim: &mut dyn SimApi, obj: ObjectSlot, add: Bool
     }
 }
 
-/// `Object::onContainedBy` (status bits plus back pointer).
+/// `Object::onContainedBy` (status bits plus back pointer and shroud refresh).
 fn on_contained_by(sim: &mut dyn SimApi, rider: ObjectSlot, owner: ObjectSlot, enclosing: Bool) {
     sim.set_status(rider, ObjectStatusType::Unselectable);
     if enclosing != FALSE {
@@ -659,6 +666,7 @@ fn on_contained_by(sim: &mut dyn SimApi, rider: ObjectSlot, owner: ObjectSlot, e
         sim.clear_status(rider, ObjectStatusType::Masked);
     }
     sim.set_contained_by(rider, Some(owner));
+    sim.handle_partition_cell_maintenance(rider);
 }
 
 /// `Object::onRemovedFrom`.
@@ -666,6 +674,7 @@ fn on_removed_from(sim: &mut dyn SimApi, rider: ObjectSlot) {
     sim.clear_status(rider, ObjectStatusType::Masked);
     sim.clear_status(rider, ObjectStatusType::Unselectable);
     sim.set_contained_by(rider, None);
+    sim.handle_partition_cell_maintenance(rider);
 }
 
 /// `Object::kill(damageType, deathType)`.
@@ -1234,6 +1243,9 @@ macro_rules! impl_contain_module {
                 fn on_delete(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
                     self.delete(sim, ctx);
                 }
+                fn delete_child_objects(&self) -> Vec<ObjectId> {
+                    self.open_core().contain_list.clone()
+                }
                 fn on_capture(
                     &mut self,
                     sim: &mut dyn SimApi,
@@ -1252,8 +1264,11 @@ macro_rules! impl_contain_module {
                     oc::apply_contain_deferred_op(self, op, sim, ctx);
                 }
                 fn sync_sidecar(&self) -> ModuleSidecar {
-                    self.open_core()
-                        .sidecar(self.contain_max_value(), self.is_enclosing())
+                    self.open_core().sidecar(
+                        self.contain_max_value(),
+                        self.is_enclosing(),
+                        self.is_garrisonable_container(),
+                    )
                 }
                 fn crc(&self, xfer: &mut dyn Xfer) {
                     self.crc_module(xfer);

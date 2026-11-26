@@ -779,9 +779,11 @@ impl ContainBehavior for GarrisonContain {
     /// `GarrisonContain::onObjectCreated`: spawn the initial roster.
     fn object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.core.schedule.bind(ctx);
-        let sidecar = self
-            .core
-            .sidecar(self.data.open.contain_max, self.data.is_enclosing_container);
+        let sidecar = self.core.sidecar(
+            self.data.open.contain_max,
+            self.data.is_enclosing_container,
+            TRUE,
+        );
         sim.set_module_sidecar(ctx.mod_slot, sidecar);
 
         let roster = self.data.initial_roster.clone();

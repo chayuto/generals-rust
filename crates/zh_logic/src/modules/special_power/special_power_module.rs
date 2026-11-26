@@ -371,19 +371,20 @@ impl SpecialPowerModule {
         if vision_range == 0.0 || vision_duration == 0 {
             return;
         }
-        let Some(team_id) = sim.object(ctx.owner_slot).map(|o| o.team_id) else {
+        let view_name = sim.rules().global_data.special_power_view_object_name.clone();
+        if view_name.is_empty() {
+            return;
+        }
+        let Some(tmpl_id) = sim.rules().thing_factory.find_template_id(&view_name) else {
             return;
         };
-
-        sim.reveal_shroud(team_id, location, vision_range, vision_duration);
-
-        let view_name = sim.rules().global_data.special_power_view_object_name.clone();
-        if !view_name.is_empty() {
-            if let Some(tmpl_id) = sim.rules().thing_factory.find_template_id(&view_name) {
-                let view_obj = sim.spawn_object(tmpl_id, team_id, *location, 0.0);
-                sim.set_shroud_clearing_range(view_obj, vision_range);
-            }
-        }
+        let Some(owner_team) = sim.object(ctx.owner_slot).map(|o| o.team_id) else {
+            return;
+        };
+        let default_team = sim.player_default_team(owner_team);
+        let view_obj = sim.spawn_object(tmpl_id, default_team, *location, 0.0);
+        sim.set_shroud_clearing_range(view_obj, vision_range);
+        sim.set_deletion_lifetime(view_obj, vision_duration, vision_duration);
     }
 
     pub fn trigger_special_power(
@@ -888,6 +889,14 @@ macro_rules! impl_special_power_behavior {
             fn as_special_power_mut(
                 &mut self,
             ) -> Option<&mut dyn $crate::modules::module::SpecialPowerFacet> {
+                Some(self)
+            }
+
+            fn as_any(&self) -> Option<&dyn std::any::Any> {
+                Some(self)
+            }
+
+            fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
                 Some(self)
             }
         }

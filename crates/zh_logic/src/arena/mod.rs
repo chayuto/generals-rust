@@ -177,6 +177,7 @@ pub enum ModuleSidecar {
         enclosing: Bool,
         stealth_units: u32,
         garrisoned: Bool,
+        garrisonable: Bool,
         rider_id: ObjectId,
     },
     Bridge {
@@ -283,6 +284,7 @@ pub enum DeferredSelfOp {
         tower_index: u8,
         damage_state: u8,
     },
+    Delete,
 }
 
 /// Disjoint module header record stored separately from the `ModuleArena` payload array so

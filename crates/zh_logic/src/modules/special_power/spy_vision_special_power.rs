@@ -7,7 +7,7 @@ use crate::modules::special_power::special_power_module::{
     impl_special_power_behavior, owner_contain_count, parse_special_power_data_with,
     SpecialPowerBehaviorImpl, SpecialPowerModule, SpecialPowerModuleData,
 };
-use crate::sim::SimApi;
+use crate::sim::{SimApi, SimView};
 use zh_common::ini::{IniError, IniReader};
 use zh_common::types::{NameKeyType, UnsignedInt};
 
@@ -90,6 +90,20 @@ impl SpyVisionSpecialPower {
             data: typed.clone(),
         })
     }
+
+    /// Computes the spy-vision duration scaled by the owner's contain count (`SpyVisionSpecialPower::doSpecialPower`).
+    pub fn compute_duration(&self, sim: &dyn SimView, owner: crate::arena::ObjectSlot) -> UnsignedInt {
+        let mut duration = self.data.base_duration_in_frames;
+        if let Some(count) = owner_contain_count(sim, owner) {
+            duration = duration.saturating_add(
+                count.saturating_mul(self.data.bonus_duration_per_captured_in_frames),
+            );
+            if duration > self.data.max_duration_in_frames {
+                duration = self.data.max_duration_in_frames;
+            }
+        }
+        duration
+    }
 }
 
 impl SpecialPowerBehaviorImpl for SpyVisionSpecialPower {
@@ -112,22 +126,8 @@ impl SpecialPowerBehaviorImpl for SpyVisionSpecialPower {
         }
         SpecialPowerFacet::do_special_power(&mut self.base, sim, ctx, command_options);
 
-        let mut duration = self.data.base_duration_in_frames;
-        if let Some(count) = owner_contain_count(sim, ctx.owner_slot) {
-            duration = duration.saturating_add(
-                count.saturating_mul(self.data.bonus_duration_per_captured_in_frames),
-            );
-            if duration > self.data.max_duration_in_frames {
-                duration = self.data.max_duration_in_frames;
-            }
-        }
-
-        if let Some((team_id, pos)) = sim
-            .object(ctx.owner_slot)
-            .map(|o| (o.team_id, *o.thing.get_position()))
-        {
-            sim.reveal_shroud(team_id, &pos, 0.0, duration);
-        }
+        let _duration = self.compute_duration(sim, ctx.owner_slot);
+        // `SpyVisionUpdate::activateSpyVision(_duration)` wires in once `PKT-372` is ported.
     }
 }
 

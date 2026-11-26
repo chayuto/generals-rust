@@ -672,14 +672,7 @@ fn apply_unresistable_damage(api: &mut MockSimApi, slot: ObjectSlot, amount: Rea
 }
 
 fn object_shroud_range(api: &MockSimApi, slot: ObjectSlot) -> Real {
-    let obj = api.object(slot).unwrap();
-    if obj.shroud_clearing_range_override >= 0.0 {
-        return obj.shroud_clearing_range_override;
-    }
-    obj.thing
-        .template_override()
-        .get_final(&api.ctx.rules.thing_factory)
-        .map_or(0.0, |t| t.friend_calc_shroud_clearing_range().max(0.0))
+    api.object_shroud_clearing_range(slot)
 }
 
 fn test_salvage_armor_mask(api: &MockSimApi, slot: ObjectSlot) -> u32 {
@@ -1534,6 +1527,11 @@ fn wp52_collide_crates_golden_vectors() {
         let m_sh = first_collide_module(&api, sh_crate);
         let sh_would = collide_would(&mut api, m_sh, Some(sh_picker));
         collide_exec(&mut api, m_sh, Some(sh_picker), &col_loc, &col_norm);
+        assert_eq!(
+            api.ctx.world.partition.shroud_status(2, 0, 0),
+            zh_logic::spatial::CellShroudStatus::Fogged,
+            "seed {seed} ShroudCrateCollide should reveal map for picker's player"
+        );
         let sh_dest = is_destroyed_i32(&api, sh_crate);
         let (sh_crc, sh_xfer) = snapshot_mod(&mut api, m_sh);
         let sh_rt = snapshot_load_and_resave(&mut api, m_sh, &sh_xfer);

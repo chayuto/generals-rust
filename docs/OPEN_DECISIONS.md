@@ -19,7 +19,6 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - A module cannot be re-entered while it executes. `SupplyWarehouseCripplingBehavior` and `TechBuildingBehavior` apply their own self-callbacks inline instead.
 - `BridgeScaffoldBehavior`: zero speed on a zero-length leg gives NaN positions. The reference then destroys the object from outside the module; Rust does not. `gen_wp53_c1.cpp` excludes those inputs, so no vector covers this.
 - An unknown `PulseFX` name stays set in Rust but becomes null in C++.
-- `destroy_object` runs the contain removal at once but `on_delete` only in `process_destroy_list`. C++ `Object::onDestroy` runs both inside `destroyObject`, so a destroyed container's riders stay alive until the end of the frame here. `gen_wp53_c2.cpp` never destroys a container outright.
 - `capture_object` / `set_object_team` leave out the rest of `Object::onCapture`: `cancelAllTasks` on a dozer, clearing the `SCRIPT_UNSELLABLE` status and a skirmish AI selling a captured faction building.
 - With `retail-crc`, `WeaponTemplate::get_delay_between_shots` returns the maximum when the minimum exceeds it; the retail PRNG helper draws a value there. The default build matches.
 - `physics_apply_force` and `physics_apply_motive_force` are stand-ins: they add force over mass to velocity. C++ adds to acceleration, keeps only the lateral part while motive, and ignores NaN.

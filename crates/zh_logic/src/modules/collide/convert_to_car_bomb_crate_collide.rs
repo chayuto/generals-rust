@@ -3,8 +3,8 @@
 
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::modules::collide::crate_collide::{
-    impl_crate_collide_behavior, object_shroud_clearing_range, parse_crate_collide_data_with,
-    resolve_fx_name, CrateCollide, CrateCollideData, CrateCollideImpl,
+    impl_crate_collide_behavior, parse_crate_collide_data_with, resolve_fx_name, CrateCollide,
+    CrateCollideData, CrateCollideImpl,
 };
 use crate::modules::module::{BehaviorModule, ModuleData};
 use crate::modules::module_factory::ModuleParseContext;
@@ -172,7 +172,9 @@ impl CrateCollideImpl for ConvertToCarBombCrateCollide {
                 .unwrap_or_default();
             sim.trigger_fx_list(fx_name, &pos);
         }
-        let crate_shroud = object_shroud_clearing_range(sim, ctx.owner_slot);
+        let vision = sim.object_vision_range(ctx.owner_slot);
+        sim.set_vision_range(other, vision);
+        let crate_shroud = sim.object_shroud_clearing_range(ctx.owner_slot);
         sim.set_shroud_clearing_range(other, crate_shroud);
         let crate_vet = sim.object_veterancy_level(ctx.owner_slot);
         sim.set_veterancy_level(other, crate_vet, FALSE, TRUE);

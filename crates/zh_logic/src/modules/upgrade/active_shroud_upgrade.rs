@@ -95,7 +95,8 @@ impl UpgradeBehaviorImpl for ActiveShroudUpgrade {
     }
 
     fn upgrade_implementation(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        sim.set_shroud_clearing_range(ctx.owner_slot, self.new_shroud_range);
+        sim.set_shroud_range(ctx.owner_slot, self.new_shroud_range);
+        sim.handle_partition_cell_maintenance(ctx.owner_slot);
     }
 }
 

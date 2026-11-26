@@ -456,6 +456,12 @@ pub trait BehaviorModule: Send {
     fn on_construct(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_object_created(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_delete(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    /// Child objects destroyed by `on_delete` (`OpenContain::onDelete`, `HelixContain::onDelete`).
+    /// Snapshotted by `SimContext::destroy_object_now` before taking the module payload so each
+    /// rider's `Object::onDestroy` can synchronously re-enter `contain_remove` in C++ order.
+    fn delete_child_objects(&self) -> Vec<ObjectId> {
+        Vec::new()
+    }
     fn on_capture(
         &mut self,
         _sim: &mut dyn SimApi,

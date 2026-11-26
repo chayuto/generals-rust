@@ -4,10 +4,9 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## State
 
-- `main` at `a31f330` plus this note. CI passed on `a31f330` (run `45781221090`).
-- No work in progress, no uncommitted files, nothing running.
+- Spatial grid Stage 4b (`PKT-160 PartitionManager`) complete in the working tree (`golden_partition_object_shroud`, 500 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified).
 - Owner's direction: a **faithful** port, the exact behaviour of the original.
-- Packets: 216 of 463 implemented, 247 unported (Phase 2: 102, Phase 4: 5, Phase 5: 94, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 217 of 463 implemented, 246 unported (Phase 2: 102, Phase 4: 4, Phase 5: 94, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -17,6 +16,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | `c64ccb4` to `920ee37` | Spatial grid stages 1 to 3: filing, searches, collisions, wired into the sim |
 | `213bdc7`, `fb975a9` | `PKT-388 WeaponBonusUpdate`; `FiringTracker` attached; undetected defectors honoured |
 | `a31f330` | Spatial grid stage 4a: shroud cells |
+| uncommitted | Spatial grid stage 4b (`PKT-160`): object-side vision/shroud/jamming, `SightingInfo`, refresh sites, `TerrainLogic::setActiveBoundary`, faithful `Object::onDestroy` (`on_delete`) + `TeamMemberList` ordering, Stage 4b stand-ins replaced (`golden_partition_object_shroud`) |
 
 ## Not verified
 
@@ -24,29 +24,10 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
 - No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
 
-## Next: spatial grid stage 4b (objects looking and jamming)
+## Next
 
-Design is in `PARTITION_SCOPE.md`, "Stage 4". `PKT-160` stays unported until 4b is done. 4c is deferred.
-
-**Original, in `GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Object.cpp`:**
-
-- `onPartitionCellChange` 4975, `handlePartitionCellMaintenance` 4981, `handleShroud` 4989.
-- `look` 5119, `unlook` 5217, `shroud` 5255, `unshroud` 5293.
-- `setVisionRange` 5332, `setShroudClearingRange` 5369, `setShroudRange` 5426, `setVisionSpied` 5432.
-- Other refresh calls: lines 702, 715, 827, 1064, 2916, 4703, 4768, 6397; `Team.cpp` 1423; `TunnelContain.cpp` 229.
-
-**Wiring the cells (`spatial/partition_shroud.rs`):**
-
-- `SimContext::update_partition` drops the changed ids from `partition.update`. Refresh those objects in the returned order, before `process_contacts`.
-- After `process_contacts`, call `process_pending_undo_shroud_reveals(frame, player_count)`.
-- `init_partition` must follow `TerrainLogic::setActiveBoundary`: flush the queue, store fogged cells, objects leave, store revealed cells, rebuild, restore revealed, objects return, restore fogged.
-- Reveal calls take a mask with bit `i` for player `i`. The port has no ordered player list; derive one from `player_default_teams`.
-
-**Stand-ins to replace** (what is wrong with each is in `PARTITION_SCOPE.md`):
-
-- `sim/mod.rs`: `set_shroud_clearing_range`, `reveal_shroud`, `remove_shroud`, `reveal_map_for_player`, `shroud_clearing_range_override`, `SimWorld::{shroud_reveals, shroud_removals, map_reveals}`.
-- Users: `active_shroud_upgrade.rs`, `shroud_crate_collide.rs`, `crate_collide.rs`, both car-bomb and hijack conversion collides, `special_power_module.rs`, `spy_vision_special_power.rs`.
-- Tests that assert the stand-ins: `golden_wp52_special_power`, `golden_wp52_collide_crates`, `golden_wp52_upgrade`.
+- Modules now unblocked by Stage 4b: `PKT-372 SpyVisionUpdate`, `PKT-323 DynamicShroudClearingRangeUpdate`, and sight parts of `PKT-309 BattlePlanUpdate`.
+- Spatial grid Stage 4c (`PartitionData::getShroudedStatus` lazy cache + ghost objects) remains deferred per `PARTITION_SCOPE.md`.
 
 ## Waiting on the owner
 

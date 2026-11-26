@@ -83,14 +83,7 @@ fn upgrade_xfer_and_crc(sim: &mut SimContext, slot: ModuleSlot) -> (Vec<u8>, u32
 }
 
 fn object_shroud_range(sim: &SimContext, slot: ObjectSlot) -> Real {
-    let obj = sim.object(slot).unwrap();
-    if obj.shroud_clearing_range_override >= 0.0 {
-        return obj.shroud_clearing_range_override;
-    }
-    obj.thing
-        .template_override()
-        .get_final(&sim.rules.thing_factory)
-        .map_or(0.0, |t| t.friend_calc_shroud_clearing_range().max(0.0))
+    sim.object_shroud_range(slot)
 }
 
 fn object_command_set_string(sim: &SimContext, slot: ObjectSlot) -> String {

@@ -148,6 +148,23 @@ pub struct SightingInfo {
     pub data: UnsignedInt,
 }
 
+impl SightingInfo {
+    /// `SightingInfo::reset`.
+    #[inline]
+    pub fn reset(&mut self) {
+        self.center = Coord3D::default();
+        self.how_far = 0.0;
+        self.for_whom = 0;
+        self.data = 0;
+    }
+
+    /// `SightingInfo::isInvalid`.
+    #[inline]
+    pub fn is_invalid(&self) -> bool {
+        self.how_far == 0.0
+    }
+}
+
 impl Snapshot for SightingInfo {
     fn crc(&self, _xfer: &mut dyn Xfer) {}
 

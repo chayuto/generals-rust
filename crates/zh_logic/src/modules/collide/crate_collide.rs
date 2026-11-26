@@ -270,25 +270,6 @@ pub(crate) fn resolve_fx_name(tok: &str, parse_ctx: &ModuleParseContext<'_>) -> 
     }
 }
 
-/// Returns an object's effective shroud clearing range (`Object::getShroudClearingRange`).
-pub(crate) fn object_shroud_clearing_range(sim: &dyn SimView, slot: ObjectSlot) -> Real {
-    let Some(obj) = sim.object(slot) else {
-        return 0.0;
-    };
-    if obj.shroud_clearing_range_override >= 0.0 {
-        return obj.shroud_clearing_range_override;
-    }
-    let Some(tmpl) = obj.thing.template_override().get_final(&sim.rules().thing_factory) else {
-        return 0.0;
-    };
-    let r = tmpl.friend_calc_shroud_clearing_range();
-    if r >= 0.0 {
-        r
-    } else {
-        tmpl.friend_calc_vision_range()
-    }
-}
-
 /// Grants enough experience to advance `target` by `levels_to_gain` (`ExperienceTracker::gainExpForLevel`).
 pub(crate) fn gain_exp_for_level(
     sim: &mut dyn SimApi,

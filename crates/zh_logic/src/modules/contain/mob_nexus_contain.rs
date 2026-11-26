@@ -151,7 +151,7 @@ impl ContainBehavior for MobNexusContain {
         self.core.schedule.bind(ctx);
         let sidecar = self
             .core
-            .sidecar(self.data.slot_capacity, TRUE);
+            .sidecar(self.data.slot_capacity, TRUE, FALSE);
         sim.set_module_sidecar(ctx.mod_slot, sidecar);
 
         let payload = self.data.initial_payload.clone();

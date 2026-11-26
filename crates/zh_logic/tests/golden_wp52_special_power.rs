@@ -17,7 +17,7 @@ use zh_logic::arena::{
 use zh_logic::modules::module::{BehaviorModule, SpecialPowerFacet};
 use zh_logic::modules::special_power::{
     register_demoralize_special_power, OCLSpecialPowerModuleData, OclCreateLocType,
-    SpecialPowerModule, SpecialPowerModuleData,
+    SpecialPowerModule, SpecialPowerModuleData, SpyVisionSpecialPower,
 };
 use zh_logic::object::weapon::WeaponTemplate;
 use zh_logic::rules::disabled_types::DisabledType;
@@ -543,7 +543,18 @@ Object PubStruct
     UpdateModuleStartsAttack = No
   End
 End
+Object ViewObj
+  Body = ActiveBody ModuleTag_Body
+    MaxHealth = 100
+    InitialHealth = 100
+  End
+  Behavior = DeletionUpdate ModuleTag_Del
+    MinLifetime = 10
+    MaxLifetime = 10
+  End
+End
 ";
+    sim.rules.global_data.special_power_view_object_name = "ViewObj".to_owned();
     sim.rules
         .load_thing_templates_from_ini(&mut IniReader::new(
             "t.ini",
@@ -573,9 +584,17 @@ End
         sp_f.do_special_power_at_location(sim_a, ctx, &Coord3D::new(40.0, 50.0, 0.0), 0.0, 0);
     });
     assert_eq!(sim.world.special_ability_events.len(), 1);
-    assert_eq!(sim.world.shroud_reveals.len(), 1);
-    assert_eq!(sim.world.shroud_reveals[0].2, 175.0);
-    assert_eq!(sim.world.shroud_reveals[0].3, 4);
+    let view_slot = sim
+        .world
+        .objects
+        .world_iter()
+        .find(|&s| s != obj)
+        .expect("view object spawned");
+    let view_obj = sim.object(view_slot).unwrap();
+    assert_eq!(*view_obj.thing.get_position(), Coord3D::new(40.0, 50.0, 0.0));
+    assert_eq!(sim.object_shroud_clearing_range(view_slot), 175.0);
+    let del_slot = view_obj.behaviors.last().unwrap().0;
+    assert_eq!(sim.get_wake_frame(del_slot).0, 4);
     let _ = sim.dispatch_module(sp_ms, |m, sim_a, ctx| {
         m.load_post_process(sim_a, ctx);
     });
@@ -722,6 +741,7 @@ End
             enclosing: TRUE,
             stealth_units: 0,
             garrisoned: FALSE,
+            garrisonable: FALSE,
             rider_id: ObjectId::INVALID,
         },
     );
@@ -824,18 +844,19 @@ End
             enclosing: TRUE,
             stealth_units: 0,
             garrisoned: FALSE,
+            garrisonable: FALSE,
             rider_id: ObjectId::INVALID,
         },
     );
     let sv_ms = find_sp_module(&sim, sv);
     let _ = sim.dispatch_module(sv_ms, |m, sim_a, ctx| {
+        let sv_mod = m
+            .as_any()
+            .and_then(|a| a.downcast_ref::<SpyVisionSpecialPower>())
+            .expect("SpyVisionSpecialPower");
+        assert_eq!(sv_mod.compute_duration(sim_a, ctx.owner_slot), 330);
         m.as_special_power_mut().unwrap().do_special_power(sim_a, ctx, 0);
     });
-    assert!(sim
-        .world
-        .shroud_reveals
-        .iter()
-        .any(|&(_, _, range, dur)| range == 0.0 && dur == 330));
 
     // Verify BaikonurLaunchPower, CleanupAreaPower, FireWeaponPower, and OCLSpecialPower targetless/above events.
     let ocl_above = sim.spawn_object(id_of("Obj_OCL_Above", &sim), team_a, Coord3D::default(), 0.0);

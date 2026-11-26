@@ -222,7 +222,7 @@ impl ContainBehavior for HelixBase {
 
     fn object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.state.core.schedule.bind(ctx);
-        let sidecar = self.state.core.sidecar(self.contain_max_value(), TRUE);
+        let sidecar = self.state.core.sidecar(self.contain_max_value(), TRUE, FALSE);
         sim.set_module_sidecar(ctx.mod_slot, sidecar);
         self.create_payload(sim, ctx);
     }
@@ -477,6 +477,14 @@ impl BehaviorModule for HelixContain {
     }
     fn on_delete(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.0.on_delete(sim, ctx);
+    }
+    fn delete_child_objects(&self) -> Vec<ObjectId> {
+        let mut ids = Vec::with_capacity(1 + self.0.state.core.contain_list.len());
+        if self.0.portable_structure_id != ObjectId::INVALID {
+            ids.push(self.0.portable_structure_id);
+        }
+        ids.extend_from_slice(&self.0.state.core.contain_list);
+        ids
     }
     fn on_capture(
         &mut self,

@@ -1070,10 +1070,13 @@ fn test_sim_context_reentrancy_sidecar_and_cascading_destroy() {
     );
 
     sim.destroy_object_now(parent);
-    assert_eq!(destroy_count.load(Ordering::Relaxed), 1);
+    // Parent on_delete runs inside Object::onDestroy (`destroy_object_now`), triggering child destroy.
+    assert_eq!(destroy_count.load(Ordering::Relaxed), 2);
+    assert_eq!(delete_count.load(Ordering::Relaxed), 2);
+    assert!(sim.world.modules.is_alive(parent_mod));
+    assert!(sim.world.modules.is_alive(child_mod));
     sim.process_destroy_list();
 
-    // Parent on_delete triggered child destroy, so both executed on_destroy + on_delete.
     assert_eq!(destroy_count.load(Ordering::Relaxed), 2);
     assert_eq!(delete_count.load(Ordering::Relaxed), 2);
     assert!(!sim.world.modules.is_alive(parent_mod));

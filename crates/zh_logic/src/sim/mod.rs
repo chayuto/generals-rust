@@ -13,13 +13,15 @@ use crate::arena::{
     ModuleSidecar, ModuleSlot, ObjectArena, ObjectSlot, TakeError, ThingTemplateId,
 };
 use crate::combat::armor::{Armor, ArmorStore};
-use crate::combat::damage::DamageInfo;
+use crate::combat::damage::{DamageInfo, PlayerMaskType, PLAYERMASK_ALL};
 use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
+use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
+use crate::modules::update::deletion_update::DeletionUpdate;
 use crate::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
@@ -58,6 +60,7 @@ use crate::spatial::crate_system::CrateSystem;
 use crate::spatial::partition_collide::{process_contacts, CollisionHost};
 use crate::spatial::partition_grid::{PartitionGrid, PartitionObject};
 use crate::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
+use crate::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::GeometryInfo;
@@ -639,7 +642,14 @@ pub struct ObjectRecord {
     pub command_set_override: String,
     pub weapon_set_flags: WeaponSetFlags,
     pub cur_locomotor_set: LocomotorSetType,
-    pub shroud_clearing_range_override: Real,
+    pub partition_last_look: SightingInfo,
+    pub partition_reveal_all_last_look: SightingInfo,
+    pub partition_last_shroud: SightingInfo,
+    pub vision_spied_by: [Int; MAX_PLAYER_COUNT],
+    pub vision_spied_mask: PlayerMaskType,
+    pub vision_range: Real,
+    pub shroud_clearing_range: Real,
+    pub shroud_range: Real,
     pub passengers_allowed_to_fire: Bool,
     pub sub_objects_shown: BTreeSet<String>,
     pub sub_objects_hidden: BTreeSet<String>,
@@ -742,7 +752,14 @@ impl ObjectRecord {
             command_set_override: String::new(),
             weapon_set_flags: WeaponSetFlags::new(),
             cur_locomotor_set: LocomotorSetType::Normal,
-            shroud_clearing_range_override: -1.0,
+            partition_last_look: SightingInfo::default(),
+            partition_reveal_all_last_look: SightingInfo::default(),
+            partition_last_shroud: SightingInfo::default(),
+            vision_spied_by: [0; MAX_PLAYER_COUNT],
+            vision_spied_mask: 0,
+            vision_range: 0.0,
+            shroud_clearing_range: 0.0,
+            shroud_range: 0.0,
             passengers_allowed_to_fire: FALSE,
             sub_objects_shown: BTreeSet::new(),
             sub_objects_hidden: BTreeSet::new(),
@@ -811,6 +828,39 @@ impl ObjectRecord {
         } else {
             FALSE
         }
+    }
+
+    /// Serializes the vision, shroud, and sighting fields of `Object::xfer`
+    /// (`Object.cpp:4228-4257`) in exact wire order.
+    pub fn xfer_vision_and_shroud(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        xfer.xfer_snapshot(&mut self.partition_last_look)?;
+        xfer.xfer_snapshot(&mut self.partition_reveal_all_last_look)?;
+        xfer.xfer_snapshot(&mut self.partition_last_shroud)?;
+
+        let mut spied_bytes = [0u8; 4 * MAX_PLAYER_COUNT];
+        for (val, chunk) in self
+            .vision_spied_by
+            .iter()
+            .zip(spied_bytes.chunks_exact_mut(4))
+        {
+            chunk.copy_from_slice(&val.to_le_bytes());
+        }
+        xfer.xfer_user(&mut spied_bytes)?;
+        for (val, chunk) in self
+            .vision_spied_by
+            .iter_mut()
+            .zip(spied_bytes.chunks_exact(4))
+        {
+            *val = Int::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        }
+
+        let mut mask_bytes = self.vision_spied_mask.to_le_bytes();
+        xfer.xfer_user(&mut mask_bytes)?;
+        self.vision_spied_mask = PlayerMaskType::from_le_bytes(mask_bytes);
+
+        xfer.xfer_real(&mut self.vision_range)?;
+        xfer.xfer_real(&mut self.shroud_clearing_range)?;
+        xfer.xfer_real(&mut self.shroud_range)
     }
 
     #[inline]
@@ -1107,6 +1157,10 @@ pub trait SimView {
         pos: &Coord3D,
         only_healthy_bridges: Bool,
     ) -> PathfindLayerEnum;
+    fn object_vision_range(&self, owner: ObjectSlot) -> Real;
+    fn object_shroud_clearing_range(&self, owner: ObjectSlot) -> Real;
+    fn object_shroud_range(&self, owner: ObjectSlot) -> Real;
+    fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool;
 }
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
@@ -1272,7 +1326,17 @@ pub trait SimApi: SimView {
     fn add_experience_scalar(&mut self, owner: ObjectSlot, delta: Real);
     fn set_command_set(&mut self, owner: ObjectSlot, command_set: &str);
     fn set_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType);
+    fn set_vision_range(&mut self, owner: ObjectSlot, range: Real);
     fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real);
+    fn set_shroud_range(&mut self, owner: ObjectSlot, range: Real);
+    fn set_vision_spied(&mut self, owner: ObjectSlot, setting: Bool, by_whom: Int);
+    fn handle_partition_cell_maintenance(&mut self, owner: ObjectSlot);
+    fn set_deletion_lifetime(
+        &mut self,
+        owner: ObjectSlot,
+        min_frames: UnsignedInt,
+        max_frames: UnsignedInt,
+    );
     fn grant_stealth(&mut self, owner: ObjectSlot);
     fn set_passengers_allowed_to_fire(&mut self, owner: ObjectSlot, allowed: Bool);
     fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool);
@@ -1322,8 +1386,6 @@ pub trait SimApi: SimView {
         ready_frame: UnsignedInt,
         add: Bool,
     );
-    fn reveal_shroud(&mut self, team_id: TeamId, pos: &Coord3D, range: Real, duration: UnsignedInt);
-    fn remove_shroud(&mut self, team_id: TeamId);
     fn reveal_map_for_player(&mut self, team_id: TeamId);
     fn fire_weapon_template(
         &mut self,
@@ -1565,6 +1627,7 @@ pub struct SimWorld {
     pub next_object_id: Int,
     pub ai_enable_repulsors: Bool,
     pub team_players: BTreeMap<TeamId, Int>,
+    pub team_members: BTreeMap<TeamId, Vec<ObjectSlot>>,
     pub player_relationships: BTreeMap<(Int, Int), Relationship>,
     pub player_sciences: BTreeMap<TeamId, BTreeSet<ScienceType>>,
     pub player_upgrades: BTreeMap<TeamId, UpgradeMaskType>,
@@ -1603,9 +1666,6 @@ pub struct SimWorld {
     pub special_power_triggered_events: Vec<(TeamId, String, ObjectId)>,
     pub special_power_completed_events: Vec<(ObjectId, SpecialPowerType)>,
     pub public_timer_events: Vec<(ObjectId, UnsignedInt, UnsignedInt, Bool)>,
-    pub shroud_reveals: Vec<(TeamId, Coord3D, Real, UnsignedInt)>,
-    pub shroud_removals: Vec<TeamId>,
-    pub map_reveals: Vec<TeamId>,
     pub weapon_fires: Vec<(ObjectId, String, Option<ObjectId>, Coord3D)>,
     pub crate_spawns: Vec<(String, ObjectId, Option<ObjectId>)>,
     pub special_ability_events: Vec<(ObjectId, Option<ObjectId>, Option<Coord3D>)>,
@@ -1667,6 +1727,7 @@ impl SimWorld {
             next_object_id: 1,
             ai_enable_repulsors: TRUE,
             team_players: BTreeMap::new(),
+            team_members: BTreeMap::new(),
             player_relationships: BTreeMap::new(),
             player_sciences: BTreeMap::new(),
             player_upgrades: BTreeMap::new(),
@@ -1702,9 +1763,6 @@ impl SimWorld {
             special_power_triggered_events: Vec::new(),
             special_power_completed_events: Vec::new(),
             public_timer_events: Vec::new(),
-            shroud_reveals: Vec::new(),
-            shroud_removals: Vec::new(),
-            map_reveals: Vec::new(),
             weapon_fires: Vec::new(),
             crate_spawns: Vec::new(),
             special_ability_events: Vec::new(),
@@ -1858,6 +1916,20 @@ impl SimWorld {
             }
         }
     }
+
+    /// Prepends `slot` to `team`'s member list (`Team::prependTo_TeamMemberList`).
+    pub fn team_member_prepend(&mut self, team: TeamId, slot: ObjectSlot) {
+        let list = self.team_members.entry(team).or_default();
+        list.retain(|&s| s != slot);
+        list.insert(0, slot);
+    }
+
+    /// Removes `slot` from `team`'s member list (`Team::removeFrom_TeamMemberList`).
+    pub fn team_member_remove(&mut self, team: TeamId, slot: ObjectSlot) {
+        if let Some(list) = self.team_members.get_mut(&team) {
+            list.retain(|&s| s != slot);
+        }
+    }
 }
 
 /// Top-level three-layer simulation context (`RulesRegistry` + `SimWorld` + `ClientSink`).
@@ -1894,20 +1966,44 @@ impl SimContext {
             .unwrap_or(team_id.0)
     }
 
-    /// Sets the map extent, rebuilds the partition grid with `cell_size` over it and
-    /// registers every object in world list order (`TerrainLogic::setActiveBoundary`:
-    /// `friend_prepareForMapBoundaryAdjust` and `friend_notifyOfNewMapBoundary`). That
-    /// includes objects a container had taken out of the grid.
+    /// Sets the map extent, rebuilds the partition grid with `cell_size` over it,
+    /// preserves fogged and permanently revealed cells (`TerrainLogic::setActiveBoundary`),
+    /// and re-registers every object in world list order (`friend_prepareForMapBoundaryAdjust`
+    /// and `friend_notifyOfNewMapBoundary`).
     pub fn init_partition(&mut self, cell_size: Real, extent: Region3D) {
+        let mut store = ShroudStatusStoreRestore::default();
+        let players = self.partition_player_count();
+        self.world
+            .partition
+            .process_all_pending_undo_shroud_reveals(players);
+        self.world.partition.store_fogged_cells(&mut store, TRUE);
+
+        let slots: Vec<ObjectSlot> = self.world.objects.world_iter().collect();
+        for &slot in &slots {
+            if let Some(id) = self.world.objects.id_of(slot) {
+                self.world.partition.unregister(id);
+            }
+            if let Some(obj) = self.world.objects.get_mut(slot) {
+                obj.partition_last_look.reset();
+                obj.partition_reveal_all_last_look.reset();
+                obj.partition_last_shroud.reset();
+            }
+        }
+
+        self.world.partition.store_fogged_cells(&mut store, FALSE);
         self.world.map_extent_hi = extent.hi;
         self.world.partition = PartitionGrid::new(cell_size, extent);
-        let slots: Vec<ObjectSlot> = self.world.objects.world_iter().collect();
-        for slot in slots {
+        self.world.partition.restore_fogged_cells(&store, FALSE);
+
+        for &slot in &slots {
             if let Some(id) = self.world.objects.id_of(slot) {
                 self.world.partition.register(id);
             }
+            self.handle_partition_cell_maintenance(slot);
             self.update_off_map(slot);
         }
+
+        self.world.partition.restore_fogged_cells(&store, TRUE);
     }
 
     /// Sets or clears `OFF_MAP` from the object's position: on the edge counts as off.
@@ -1928,19 +2024,422 @@ impl SimContext {
         }
     }
 
-    /// `PartitionManager::update`: re-files the dirty objects, then runs the
-    /// collisions found. Call it after [`Self::step_sleepy_updates`] and before
-    /// [`Self::process_destroy_list`].
-    ///
-    /// `Object::onPartitionCellChange` only maintains the shroud, threat and value
-    /// maps, which are not ported, so the changed ids are dropped.
+    /// `PartitionManager::update`: re-files the dirty objects, refreshes shroud for any
+    /// whose center cell changed (`Object::onPartitionCellChange`), runs the contacts, and
+    /// drains due delayed unlooks (`processPendingUndoShroudRevealQueue`). Call it after
+    /// [`Self::step_sleepy_updates`] and before [`Self::process_destroy_list`].
     pub fn update_partition(&mut self) {
-        let SimContext { rules, world, .. } = self;
-        let SimWorld {
-            partition, objects, ..
-        } = world;
-        let _ = partition.update(&|id| partition_object(objects, &rules.thing_factory, id));
+        let changed = {
+            let SimContext { rules, world, .. } = self;
+            let SimWorld {
+                partition, objects, ..
+            } = world;
+            partition.update(&|id| partition_object(objects, &rules.thing_factory, id))
+        };
+        for id in changed {
+            if let Some(slot) = self.world.objects.slot_by_id(id) {
+                self.handle_partition_cell_maintenance(slot);
+            }
+        }
         process_contacts(self);
+        let frame = self.world.frame;
+        let players = self.partition_player_count();
+        self.world
+            .partition
+            .process_pending_undo_shroud_reveals(frame, players);
+    }
+
+    /// Number of active player slots derived from `player_default_teams` (`max_index + 1`).
+    pub fn partition_player_count(&self) -> usize {
+        self.world
+            .player_default_teams
+            .keys()
+            .copied()
+            .filter(|&p| (0..MAX_PLAYER_COUNT as Int).contains(&p))
+            .max()
+            .map_or(0, |m| (m + 1) as usize)
+    }
+
+    fn controlling_player_index(&self, team_id: TeamId) -> Option<usize> {
+        let idx = self.player_index_for_team(team_id);
+        if (0..MAX_PLAYER_COUNT as Int).contains(&idx)
+            && self.world.player_default_teams.contains_key(&idx)
+        {
+            Some(idx as usize)
+        } else {
+            None
+        }
+    }
+
+    /// `PlayerList::getPlayersWithRelationship` derived from `player_default_teams`.
+    fn players_with_relationship(
+        &self,
+        team_id: TeamId,
+        allow_same: bool,
+        allow_allies: bool,
+        allow_enemies: bool,
+        allow_neutral: bool,
+    ) -> PlayerMaskType {
+        if !allow_same && !allow_allies && !allow_enemies && !allow_neutral {
+            return 0;
+        }
+        let Some(src_idx) = self.controlling_player_index(team_id) else {
+            return 0;
+        };
+        let mut mask: PlayerMaskType = 0;
+        if allow_same {
+            mask |= 1u16 << (src_idx as u32);
+        }
+        for (&idx, &def_team) in &self.world.player_default_teams {
+            if !(0..MAX_PLAYER_COUNT as Int).contains(&idx) || idx as usize == src_idx {
+                continue;
+            }
+            let target_player = self.player_index_for_team(def_team);
+            let include = match self.team_relationship_to_player(team_id, target_player) {
+                Relationship::Enemies => allow_enemies,
+                Relationship::Allies => allow_allies,
+                Relationship::Neutral => allow_neutral,
+            };
+            if include {
+                mask |= 1u16 << (idx as u32);
+            }
+        }
+        mask
+    }
+
+    /// `Object::look`.
+    fn object_look(&mut self, owner: ObjectSlot) {
+        let Some((
+            team_id,
+            last_invalid,
+            destroyed,
+            eff_dead,
+            contained_by,
+            pos,
+            vision_spied_mask,
+            under_construction,
+            stealthed_and_not_detected,
+            reveal_all_range,
+        )) = self.world.objects.get(owner).map(|o| {
+            let reveal_all_range = o
+                .thing
+                .template_override()
+                .get_final(&self.rules.thing_factory)
+                .map_or(0.0, |t| t.get_shroud_reveal_to_all_range());
+            let stealthed = o.status.test(ObjectStatusType::Stealthed.as_i32()) != FALSE;
+            let detected = o.status.test(ObjectStatusType::Detected.as_i32()) != FALSE;
+            let disguised = o.status.test(ObjectStatusType::Disguised.as_i32()) != FALSE;
+            (
+                o.team_id,
+                o.partition_last_look.is_invalid(),
+                o.is_destroyed(),
+                o.is_effectively_dead() != FALSE,
+                o.contained_by,
+                *o.thing.get_position(),
+                o.vision_spied_mask,
+                o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE,
+                stealthed && !detected && !disguised,
+                reveal_all_range,
+            )
+        })
+        else {
+            return;
+        };
+
+        if !last_invalid {
+            return;
+        }
+        if self.controlling_player_index(team_id).is_none() {
+            return;
+        }
+        if destroyed || eff_dead {
+            return;
+        }
+        if let Some(container) = contained_by {
+            let has_contain = self
+                .world
+                .objects
+                .get(container)
+                .is_some_and(|c| c.contain_slot.is_some());
+            if has_contain && self.contain_is_garrisonable(container) == FALSE {
+                return;
+            }
+        }
+
+        let player_count = self.partition_player_count();
+        let shroud_clearing_range = self.object_shroud_clearing_range(owner);
+        if shroud_clearing_range > 0.0 {
+            let looking_mask = if self.object_is_kind_of(owner, KindOfType::RevealToAll) != FALSE {
+                PLAYERMASK_ALL
+            } else {
+                let mut mask: PlayerMaskType = 0;
+                for (&idx, &def_team) in self.world.player_default_teams.iter().rev() {
+                    if !(0..MAX_PLAYER_COUNT as Int).contains(&idx) {
+                        continue;
+                    }
+                    let target_player = self.player_index_for_team(def_team);
+                    if self.team_relationship_to_player(team_id, target_player)
+                        == Relationship::Allies
+                    {
+                        mask |= 1u16 << (idx as u32);
+                    }
+                }
+                mask | vision_spied_mask
+            };
+            self.world.partition.do_shroud_reveal(
+                pos.x,
+                pos.y,
+                shroud_clearing_range,
+                looking_mask,
+                player_count,
+            );
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.partition_last_look.center = pos;
+                obj.partition_last_look.for_whom = looking_mask;
+                obj.partition_last_look.how_far = shroud_clearing_range;
+            }
+        }
+
+        if reveal_all_range > 0.0 && !under_construction && !stealthed_and_not_detected {
+            let the_players_mask =
+                self.players_with_relationship(team_id, false, false, true, true);
+            self.world.partition.do_shroud_reveal(
+                pos.x,
+                pos.y,
+                reveal_all_range,
+                the_players_mask,
+                player_count,
+            );
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.partition_reveal_all_last_look.center = pos;
+                obj.partition_reveal_all_last_look.for_whom = the_players_mask;
+                obj.partition_reveal_all_last_look.how_far = reveal_all_range;
+            }
+        }
+    }
+
+    /// `Object::unlook`.
+    fn object_unlook(&mut self, owner: ObjectSlot) {
+        let Some((last_look, reveal_all)) = self.world.objects.get(owner).map(|o| {
+            (
+                o.partition_last_look.clone(),
+                o.partition_reveal_all_last_look.clone(),
+            )
+        }) else {
+            return;
+        };
+        if last_look.is_invalid() {
+            return;
+        }
+        let frame = self.world.frame;
+        let persist = self.rules.global_data.unlook_persist_duration;
+        self.world.partition.queue_undo_shroud_reveal(
+            last_look.center.x,
+            last_look.center.y,
+            last_look.how_far,
+            last_look.for_whom,
+            frame,
+            persist,
+        );
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.partition_last_look.reset();
+        }
+        if !reveal_all.is_invalid() {
+            self.world.partition.queue_undo_shroud_reveal(
+                reveal_all.center.x,
+                reveal_all.center.y,
+                reveal_all.how_far,
+                reveal_all.for_whom,
+                frame,
+                persist,
+            );
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.partition_reveal_all_last_look.reset();
+            }
+        }
+    }
+
+    /// `Object::shroud`.
+    fn object_shroud(&mut self, owner: ObjectSlot) {
+        let Some((team_id, last_invalid, under_construction, eff_dead, shroud_range, pos)) =
+            self.world.objects.get(owner).map(|o| {
+                (
+                    o.team_id,
+                    o.partition_last_shroud.is_invalid(),
+                    o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE,
+                    o.is_effectively_dead() != FALSE,
+                    o.shroud_range,
+                    *o.thing.get_position(),
+                )
+            })
+        else {
+            return;
+        };
+        if !last_invalid {
+            return;
+        }
+        if self.controlling_player_index(team_id).is_none() {
+            return;
+        }
+        if !under_construction && !eff_dead && shroud_range > 0.0 {
+            let mut shrouding_mask: PlayerMaskType = 0;
+            for (&idx, &def_team) in self.world.player_default_teams.iter().rev() {
+                if !(0..MAX_PLAYER_COUNT as Int).contains(&idx) {
+                    continue;
+                }
+                let target_player = self.player_index_for_team(def_team);
+                if self.team_relationship_to_player(team_id, target_player) != Relationship::Allies
+                {
+                    shrouding_mask |= 1u16 << (idx as u32);
+                }
+            }
+            let player_count = self.partition_player_count();
+            self.world.partition.do_shroud_cover(
+                pos.x,
+                pos.y,
+                shroud_range,
+                shrouding_mask,
+                player_count,
+            );
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.partition_last_shroud.center = pos;
+                obj.partition_last_shroud.for_whom = shrouding_mask;
+                obj.partition_last_shroud.how_far = shroud_range;
+            }
+        }
+    }
+
+    /// `Object::unshroud`.
+    fn object_unshroud(&mut self, owner: ObjectSlot) {
+        let Some(last) = self
+            .world
+            .objects
+            .get(owner)
+            .map(|o| o.partition_last_shroud.clone())
+        else {
+            return;
+        };
+        if last.is_invalid() {
+            return;
+        }
+        let player_count = self.partition_player_count();
+        self.world.partition.undo_shroud_cover(
+            last.center.x,
+            last.center.y,
+            last.how_far,
+            last.for_whom,
+            player_count,
+        );
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.partition_last_shroud.reset();
+        }
+    }
+
+    /// `Object::handleShroud`.
+    fn handle_shroud(&mut self, owner: ObjectSlot) {
+        self.object_unlook(owner);
+        self.object_unshroud(owner);
+        self.object_shroud(owner);
+        self.object_look(owner);
+    }
+
+    /// `PartitionManager::revealMapForPlayerPermanently`.
+    pub fn reveal_map_for_player_permanently(&mut self, team_id: TeamId) {
+        let idx = self.player_index_for_team(team_id);
+        if (0..MAX_PLAYER_COUNT as Int).contains(&idx) {
+            self.world
+                .partition
+                .reveal_map_for_player_permanently(idx as usize);
+        }
+    }
+
+    /// `PartitionManager::undoRevealMapForPlayerPermanently`.
+    pub fn undo_reveal_map_for_player_permanently(&mut self, team_id: TeamId) {
+        let idx = self.player_index_for_team(team_id);
+        if (0..MAX_PLAYER_COUNT as Int).contains(&idx) {
+            let players = self.partition_player_count();
+            self.world
+                .partition
+                .undo_reveal_map_for_player_permanently(idx as usize, players);
+        }
+    }
+
+    /// `PartitionManager::shroudMapForPlayer`.
+    pub fn shroud_map_for_player(&mut self, team_id: TeamId) {
+        let idx = self.player_index_for_team(team_id);
+        if (0..MAX_PLAYER_COUNT as Int).contains(&idx) {
+            let players = self.partition_player_count();
+            self.world
+                .partition
+                .shroud_map_for_player(idx as usize, players);
+        }
+    }
+
+    /// `Team::setControllingPlayer`: updates the team's controlling player and
+    /// refreshes shroud (or runs `onCapture` in non-retail builds) for all members.
+    pub fn set_team_controlling_player(&mut self, team_id: TeamId, new_player: Int) {
+        let old_player = self.player_index_for_team(team_id);
+        self.world.team_players.insert(team_id, new_player);
+        let slots: Vec<ObjectSlot> = self
+            .world
+            .team_members
+            .get(&team_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&slot| {
+                self.world
+                    .objects
+                    .get(slot)
+                    .is_some_and(|o| o.team_id == team_id)
+            })
+            .collect();
+        #[cfg(feature = "retail-crc")]
+        let _ = old_player;
+        #[cfg(not(feature = "retail-crc"))]
+        let (old_owner_team, new_owner_team) = (
+            self.world
+                .player_default_teams
+                .get(&old_player)
+                .copied()
+                .unwrap_or(team_id),
+            self.world
+                .player_default_teams
+                .get(&new_player)
+                .copied()
+                .unwrap_or(team_id),
+        );
+        for slot in slots {
+            #[cfg(feature = "retail-crc")]
+            self.handle_partition_cell_maintenance(slot);
+            #[cfg(not(feature = "retail-crc"))]
+            {
+                let beh_slots: Vec<ModuleSlot> = self
+                    .world
+                    .objects
+                    .get(slot)
+                    .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
+                if old_player != new_player
+                    && self.world.player_relationships.get(&(old_player, new_player))
+                        != Some(&Relationship::Allies)
+                {
+                    self.ai_idle(slot, CommandSourceType::FromAi);
+                }
+                *self
+                    .world
+                    .player_captured_objects
+                    .entry(new_owner_team)
+                    .or_insert(0) += 1;
+                for ms in beh_slots {
+                    if self.world.modules.is_alive(ms) {
+                        let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                            m.on_capture(sim, ctx, old_owner_team, new_owner_team);
+                        });
+                    }
+                }
+                self.handle_partition_cell_maintenance(slot);
+            }
+        }
     }
 
     fn search_partition(
@@ -1990,7 +2489,25 @@ impl SimContext {
         let was_set = obj.status.test(status.as_i32()) != FALSE;
         obj.status.set(status.as_i32(), value);
         let id = obj.id;
-        if status == ObjectStatusType::UnderConstruction && was_set != (value != 0) {
+        let changed = was_set != (value != 0);
+        if changed
+            && matches!(
+                status,
+                ObjectStatusType::Stealthed
+                    | ObjectStatusType::Detected
+                    | ObjectStatusType::Disguised
+            )
+        {
+            let reveal_all = obj
+                .thing
+                .template_override()
+                .get_final(&self.rules.thing_factory)
+                .map_or(0.0, |t| t.get_shroud_reveal_to_all_range());
+            if reveal_all > 0.0 {
+                self.handle_partition_cell_maintenance(owner);
+            }
+        }
+        if status == ObjectStatusType::UnderConstruction && changed {
             self.world.partition.make_dirty(id);
         }
     }
@@ -2034,7 +2551,10 @@ impl SimContext {
                 break;
             }
             for op in ops {
-                payload.apply_deferred_op(op, self, ctx);
+                match op {
+                    DeferredSelfOp::Delete => payload.on_delete(self, ctx),
+                    other => payload.apply_deferred_op(other, self, ctx),
+                }
             }
         }
 
@@ -2122,15 +2642,47 @@ impl SimContext {
         }
 
         self.world.enqueue_destroy(slot);
-        // `Object::onDestroy`: say goodbye to whoever contains us.
+        // `Object::onDestroy`: say goodbye to whoever contains us, notify modules (`on_delete`), then unlook/unshroud.
         if let Some(container) = self.world.objects.get(slot).and_then(|o| o.contained_by) {
             self.contain_remove(container, slot, FALSE);
         }
+        let beh_slots: Vec<ModuleSlot> = self
+            .world
+            .objects
+            .get(slot)
+            .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
+        for &ms in &beh_slots {
+            if !self.world.modules.is_alive(ms) {
+                continue;
+            }
+            if self.world.modules.is_executing(ms) {
+                self.world
+                    .modules
+                    .push_deferred_op(ms, DeferredSelfOp::Delete);
+            } else {
+                let child_ids = self
+                    .world
+                    .modules
+                    .payload(ms)
+                    .map_or_else(Vec::new, |m| m.delete_child_objects());
+                for id in child_ids {
+                    if let Some(child_slot) = self.world.objects.slot_by_id(id) {
+                        self.destroy_object_now(child_slot);
+                    }
+                }
+                if self.world.modules.is_alive(ms) {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        m.on_delete(sim, ctx);
+                    });
+                }
+            }
+        }
+        self.handle_partition_cell_maintenance(slot);
         self.client.on_object_destroyed(obj_id);
     }
 
-    /// Destroys all queued objects (`GameLogic::processDestroyList`), handling child objects
-    /// enqueued dynamically inside `on_delete()`, two-pass heap removal, and arena despawn.
+    /// Destroys all queued objects (`GameLogic::processDestroyList`), running two-pass heap removal
+    /// and arena despawn (`on_delete` already ran inside `destroy_object_now` / `Object::onDestroy`).
     pub fn process_destroy_list(&mut self) {
         let mut i = 0;
         while i < self.world.objects_to_destroy.len() {
@@ -2146,14 +2698,6 @@ impl SimContext {
                 .get(slot)
                 .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
 
-            for &ms in &beh_slots {
-                if self.world.modules.is_alive(ms) {
-                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                        m.on_delete(sim, ctx);
-                    });
-                }
-            }
-
             let modules = &mut self.world.modules;
             self.world
                 .sleepy_updates
@@ -2165,6 +2709,9 @@ impl SimContext {
             // `Object::~Object`.
             if let Some(id) = self.world.objects.id_of(slot) {
                 self.world.partition.unregister(id);
+            }
+            if let Some(team) = self.world.objects.get(slot).map(|o| o.team_id) {
+                self.world.team_member_remove(team, slot);
             }
             let _ = self.world.objects.despawn(slot);
         }
@@ -2406,22 +2953,33 @@ impl SimContext {
             .thing_factory
             .find_by_template_id_final(tmpl.0 as u16)
             .map(|t| {
+                let vision_range = t.friend_calc_vision_range();
+                let mut shroud_clearing_range = t.friend_calc_shroud_clearing_range();
+                if shroud_clearing_range == -1.0 {
+                    shroud_clearing_range = vision_range;
+                }
                 (
                     t.get_template_geometry_info().clone(),
                     t.is_trainable(),
                     t.get_behavior_module_info().nuggets().to_vec(),
                     t.find_weapon_template_set(&crate::rules::combat_types::WeaponSetFlags::new())
                         .cloned(),
+                    vision_range,
+                    shroud_clearing_range,
                 )
             });
-        let (geom, trainable, nuggets, wts) = match tmpl_data {
-            Some((g, tr, n, w)) => (g, tr, n, w),
-            None => (GeometryInfo::default(), FALSE, Vec::new(), None),
+        let (geom, trainable, nuggets, wts, vision_range, shroud_clearing_range) = match tmpl_data
+        {
+            Some((g, tr, n, w, vr, scr)) => (g, tr, n, w, vr, scr),
+            None => (GeometryInfo::default(), FALSE, Vec::new(), None, 0.0, 0.0),
         };
 
         let mut record = ObjectRecord::new(id, tmpl, team, geom);
         record.status = initial_status;
         record.experience_tracker.set_trainable(trainable);
+        record.vision_range = vision_range;
+        record.shroud_clearing_range = shroud_clearing_range;
+        record.shroud_range = 0.0;
         let mut dummy_reactor = crate::object::thing::NoopTransformReactor;
         let has_template = self
             .rules
@@ -2447,6 +3005,7 @@ impl SimContext {
         }
         if !has_template {
             let slot = self.world.objects.spawn(id, record, true);
+            self.world.team_member_prepend(team, slot);
             self.world.partition.register(id);
             self.client.on_object_created(id, tmpl);
             return slot;
@@ -2455,6 +3014,7 @@ impl SimContext {
         // Attach helpers + INI behavior modules while unlinked so constructor initial
         // sleep frames are preserved when pushing UPDATE facets into SleepyUpdateHeap.
         let slot = self.world.objects.spawn(id, record, false);
+        self.world.team_member_prepend(team, slot);
         crate::modules::helper::attach_object_helpers(self, slot);
 
         for nug in &nuggets {
@@ -3731,6 +4291,44 @@ impl SimView for SimContext {
         self.terrain
             .get_highest_layer_for_destination(pos, only_healthy_bridges)
     }
+
+    fn object_vision_range(&self, owner: ObjectSlot) -> Real {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(0.0, |o| o.vision_range)
+    }
+
+    fn object_shroud_clearing_range(&self, owner: ObjectSlot) -> Real {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return 0.0;
+        };
+        if obj.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE {
+            obj.geometry.get_bounding_circle_radius()
+        } else {
+            obj.shroud_clearing_range
+        }
+    }
+
+    fn object_shroud_range(&self, owner: ObjectSlot) -> Real {
+        self.world
+            .objects
+            .get(owner)
+            .map_or(0.0, |o| o.shroud_range)
+    }
+
+    fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return FALSE;
+        };
+        if let Some(c) = self.world.modules.payload(cs).and_then(|p| p.as_contain()) {
+            return c.is_garrisonable();
+        }
+        match self.world.modules.sidecar(cs) {
+            ModuleSidecar::Contain { garrisonable, .. } => garrisonable,
+            _ => FALSE,
+        }
+    }
 }
 
 impl SimContext {
@@ -4088,6 +4686,7 @@ impl SimApi for SimContext {
                 }
             });
         }
+        self.handle_partition_cell_maintenance(owner);
     }
 
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot) {
@@ -4513,35 +5112,54 @@ impl SimApi for SimContext {
         detection_frames: UnsignedInt,
         with_fx: Bool,
     ) {
-        let Some(obj) = self.world.objects.get_mut(owner) else {
+        let Some((old_team, contained, under_const, sold, ai_slot, contain_slot)) =
+            self.world.objects.get(owner).map(|obj| {
+                (
+                    obj.team_id,
+                    obj.contained_by.is_some(),
+                    obj.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE,
+                    obj.status.test(ObjectStatusType::Sold.as_i32()) != FALSE,
+                    obj.ai_slot,
+                    obj.contain_slot,
+                )
+            })
+        else {
             return;
         };
-        if obj.contained_by.is_some()
-            || obj.team_id == new_team
-            || obj.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE
-            || obj.status.test(ObjectStatusType::Sold.as_i32()) != FALSE
+        if contained || under_const || sold {
+            return;
+        }
+        if !self.world.player_default_teams.is_empty()
+            && self.controlling_player_index(old_team).is_none()
         {
             return;
         }
-        let old_team = obj.team_id;
-        obj.set_undetected_defector(Bool::from(detection_frames > 0));
-        obj.team_id = new_team;
-        let ai_slot = obj.ai_slot;
-        let beh_slots: Vec<ModuleSlot> = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
-        self.trigger_defection(owner, detection_frames, with_fx);
-        for ms in beh_slots {
-            if self.world.modules.is_alive(ms) {
-                let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                    m.on_capture(sim, ctx, old_team, new_team);
-                });
-            }
+        let my_team = self.player_default_team(old_team);
+        if my_team == new_team {
+            return;
         }
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.set_undetected_defector(Bool::from(detection_frames > 0));
+        }
+        self.trigger_defection(owner, detection_frames, with_fx);
+        self.set_object_team(owner, new_team);
+        self.handle_partition_cell_maintenance(owner);
         if let Some(ai_ms) = ai_slot {
             let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
                 if let Some(ai) = m.as_ai_mut() {
                     ai.set_locomotor_goal_none(sim, ctx);
                 }
             });
+        }
+        let kick_out = contain_slot.is_some_and(|cs| {
+            self.world
+                .modules
+                .payload(cs)
+                .and_then(|p| p.as_contain())
+                .is_some_and(|c| c.is_kick_out_on_capture() != FALSE)
+        });
+        if kick_out {
+            self.contain_remove_all(owner, TRUE);
         }
     }
 
@@ -4936,9 +5554,98 @@ impl SimApi for SimContext {
         }
     }
 
-    fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real) {
+    fn set_vision_range(&mut self, owner: ObjectSlot, range: Real) {
         if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.shroud_clearing_range_override = range;
+            obj.vision_range = range;
+        }
+    }
+
+    fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real) {
+        let Some(pos) = self.world.objects.get_mut(owner).and_then(|obj| {
+            if range == obj.shroud_clearing_range {
+                None
+            } else {
+                obj.shroud_clearing_range = range;
+                Some(*obj.thing.get_position())
+            }
+        }) else {
+            return;
+        };
+        if pos.x != 0.0 || pos.y != 0.0 || pos.z != 0.0 {
+            self.handle_partition_cell_maintenance(owner);
+        }
+    }
+
+    fn set_shroud_range(&mut self, owner: ObjectSlot, range: Real) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.shroud_range = range;
+        }
+    }
+
+    fn set_vision_spied(&mut self, owner: ObjectSlot, setting: Bool, by_whom: Int) {
+        if !(0..MAX_PLAYER_COUNT as Int).contains(&by_whom) {
+            return;
+        }
+        let idx = by_whom as usize;
+        let need_refresh = {
+            let Some(obj) = self.world.objects.get_mut(owner) else {
+                return;
+            };
+            let refresh = if setting != FALSE {
+                obj.vision_spied_by[idx] = obj.vision_spied_by[idx].wrapping_add(1);
+                obj.vision_spied_by[idx] == 1
+            } else {
+                obj.vision_spied_by[idx] = obj.vision_spied_by[idx].wrapping_sub(1);
+                obj.vision_spied_by[idx] == 0
+            };
+            if refresh {
+                let mut working_mask: PlayerMaskType = 0;
+                for (i, &count) in obj.vision_spied_by.iter().enumerate() {
+                    if count > 0 {
+                        working_mask |= 1u16 << (i as u32);
+                    }
+                }
+                obj.vision_spied_mask = working_mask;
+            }
+            refresh
+        };
+        if need_refresh {
+            self.handle_partition_cell_maintenance(owner);
+        }
+    }
+
+    fn handle_partition_cell_maintenance(&mut self, owner: ObjectSlot) {
+        self.handle_shroud(owner);
+    }
+
+    fn set_deletion_lifetime(
+        &mut self,
+        owner: ObjectSlot,
+        min_frames: UnsignedInt,
+        max_frames: UnsignedInt,
+    ) {
+        let Some(del_key) = self.rules.name_keys.lookup_key("DeletionUpdate") else {
+            return;
+        };
+        let slot = self.world.objects.get(owner).and_then(|obj| {
+            obj.behaviors.iter().find_map(|&(ms, _)| {
+                let name_key = self
+                    .world
+                    .modules
+                    .payload(ms)
+                    .map(|m| m.module_name_key());
+                (name_key == Some(del_key)).then_some(ms)
+            })
+        });
+        if let Some(ms) = slot {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(del) = m
+                    .as_any_mut()
+                    .and_then(|a| a.downcast_mut::<DeletionUpdate>())
+                {
+                    del.set_lifetime_range(sim, ctx, min_frames, max_frames);
+                }
+            });
         }
     }
 
@@ -5231,18 +5938,11 @@ impl SimApi for SimContext {
         }
     }
 
-    fn reveal_shroud(&mut self, team_id: TeamId, pos: &Coord3D, range: Real, duration: UnsignedInt) {
-        self.world
-            .shroud_reveals
-            .push((team_id, *pos, range, duration));
-    }
-
-    fn remove_shroud(&mut self, team_id: TeamId) {
-        self.world.shroud_removals.push(team_id);
-    }
-
     fn reveal_map_for_player(&mut self, team_id: TeamId) {
-        self.world.map_reveals.push(team_id);
+        let idx = self.player_index_for_team(team_id);
+        if (0..MAX_PLAYER_COUNT as Int).contains(&idx) {
+            self.world.partition.reveal_map_for_player(idx as usize);
+        }
     }
 
     fn fire_weapon_template(
@@ -5436,6 +6136,8 @@ impl SimApi for SimContext {
         }) else {
             return;
         };
+        self.world.team_member_remove(old_team, owner);
+        self.world.team_member_prepend(new_team, owner);
         self.idle_on_capture(owner, old_team, new_team);
         *self.world.player_captured_objects.entry(new_team).or_insert(0) += 1;
         for ms in beh_slots {
@@ -5445,6 +6147,7 @@ impl SimApi for SimContext {
                 });
             }
         }
+        self.handle_partition_cell_maintenance(owner);
     }
 
     fn set_crushed(&mut self, owner: ObjectSlot, front: Option<Bool>, back: Option<Bool>) {
@@ -7374,6 +8077,22 @@ impl SimView for MockSimApi {
         self.ctx
             .get_highest_layer_for_destination(pos, only_healthy_bridges)
     }
+
+    fn object_vision_range(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_vision_range(owner)
+    }
+
+    fn object_shroud_clearing_range(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_shroud_clearing_range(owner)
+    }
+
+    fn object_shroud_range(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_shroud_range(owner)
+    }
+
+    fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.contain_is_garrisonable(owner)
+    }
 }
 
 impl SimApi for MockSimApi {
@@ -7745,8 +8464,34 @@ impl SimApi for MockSimApi {
         self.ctx.set_locomotor_set(owner, set_type);
     }
 
+    fn set_vision_range(&mut self, owner: ObjectSlot, range: Real) {
+        self.ctx.set_vision_range(owner, range);
+    }
+
     fn set_shroud_clearing_range(&mut self, owner: ObjectSlot, range: Real) {
         self.ctx.set_shroud_clearing_range(owner, range);
+    }
+
+    fn set_shroud_range(&mut self, owner: ObjectSlot, range: Real) {
+        self.ctx.set_shroud_range(owner, range);
+    }
+
+    fn set_vision_spied(&mut self, owner: ObjectSlot, setting: Bool, by_whom: Int) {
+        self.ctx.set_vision_spied(owner, setting, by_whom);
+    }
+
+    fn handle_partition_cell_maintenance(&mut self, owner: ObjectSlot) {
+        self.ctx.handle_partition_cell_maintenance(owner);
+    }
+
+    fn set_deletion_lifetime(
+        &mut self,
+        owner: ObjectSlot,
+        min_frames: UnsignedInt,
+        max_frames: UnsignedInt,
+    ) {
+        self.ctx
+            .set_deletion_lifetime(owner, min_frames, max_frames);
     }
 
     fn grant_stealth(&mut self, owner: ObjectSlot) {
@@ -7860,14 +8605,6 @@ impl SimApi for MockSimApi {
     ) {
         self.ctx
             .update_public_timer(owner, template_id, ready_frame, add);
-    }
-
-    fn reveal_shroud(&mut self, team_id: TeamId, pos: &Coord3D, range: Real, duration: UnsignedInt) {
-        self.ctx.reveal_shroud(team_id, pos, range, duration);
-    }
-
-    fn remove_shroud(&mut self, team_id: TeamId) {
-        self.ctx.remove_shroud(team_id);
     }
 
     fn reveal_map_for_player(&mut self, team_id: TeamId) {
