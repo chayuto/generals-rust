@@ -517,6 +517,15 @@ pub trait ContainBehavior: Any + Send {
     }
     /// `recalcApparentControllingPlayer`, empty in `OpenContain`.
     fn recalc_apparent_controller_hook(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    /// `getApparentControllingPlayer`; `OpenContain` has none.
+    fn apparent_controller_for_hook(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _observer: Int,
+    ) -> Option<Int> {
+        None
+    }
     fn is_garrisonable_container(&self) -> Bool {
         FALSE
     }
@@ -1641,6 +1650,15 @@ macro_rules! impl_contain_module {
                 fn is_tunnel_contain(&self) -> Bool {
                     self.is_tunnel()
                 }
+                fn apparent_controlling_player_index(
+                    &self,
+                    sim: &dyn $crate::sim::SimView,
+                    ctx: $crate::arena::ModuleContext,
+                    observer: zh_common::types::Int,
+                ) -> Option<zh_common::types::Int> {
+                    self.apparent_controller_for_hook(sim, ctx, observer)
+                }
+
                 fn recalc_apparent_controlling_player(
                     &mut self,
                     sim: &mut dyn SimApi,

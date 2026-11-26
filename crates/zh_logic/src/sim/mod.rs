@@ -31,6 +31,10 @@ use crate::modules::{
     ParkingPlaceInfo, StealthParams,
 };
 use crate::modules::module::SupplyTruckAiFacet;
+use crate::modules::module::AiUpdateFacet;
+use crate::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
+use crate::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
+use crate::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
 use crate::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use crate::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
 use crate::object::thing_factory::ThingFactory;
@@ -414,6 +418,8 @@ pub trait ClientSink: Send {
         _end: Coord3D,
     ) {
     }
+    /// Sounds, EVA lines, radar events and drawable effects of a special ability.
+    fn on_special_ability_feedback(&mut self, _source: ObjectId, _feedback: &AbilityFeedback<'_>) {}
     fn on_object_created(&mut self, _id: ObjectId, _template_id: ThingTemplateId) {}
     fn on_object_destroyed(&mut self, _id: ObjectId) {}
     fn on_damage(&mut self, _target: ObjectId, _amount: Real) {}
@@ -491,6 +497,10 @@ pub struct RulesRegistry {
     pub damage_fx_names: BTreeSet<String>,
     pub ocl_names: BTreeSet<String>,
     pub particle_system_names: BTreeSet<String>,
+    /// `AIData::m_attackPriorityDistanceModifier` (`AI` is unported).
+    pub attack_priority_distance_modifier: Real,
+    /// `TheControlBar`'s buttons and sets.
+    pub command_store: CommandStore,
 }
 
 impl Default for RulesRegistry {
@@ -545,6 +555,8 @@ impl RulesRegistry {
             damage_fx_names: BTreeSet::new(),
             ocl_names: BTreeSet::new(),
             particle_system_names: BTreeSet::new(),
+            command_store: CommandStore::default(),
+            attack_priority_distance_modifier: 0.0,
         }
     }
 
@@ -1025,6 +1037,35 @@ pub trait SimView {
     fn object_is_able_to_attack(&self, owner: ObjectSlot) -> Bool;
     /// `Drawable::findClientUpdateModule` on the object's drawable.
     fn object_has_client_update(&self, owner: ObjectSlot, name: &str) -> Bool;
+    /// `ContainModuleInterface::getApparentControllingPlayer`, as a player index.
+    fn contain_apparent_controlling_player(&self, container: ObjectSlot, observer: Int) -> Option<Int>;
+    /// `AIUpdateInterface::isMoving`.
+    fn ai_is_moving(&self, owner: ObjectSlot) -> Bool;
+    /// The owner's `getAttackInfo()->getPriority(victim)`; `None` without attack info.
+    fn ai_attack_priority(&self, owner: ObjectSlot, victim: ObjectSlot) -> Option<Int>;
+    /// `Object::findSpecialAbilityUpdate`. Reads module data, so it also finds a running module.
+    fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot>;
+    /// `SpecialPowerUpdateInterface::isActive`.
+    fn special_ability_is_active(&self, module: ModuleSlot) -> Bool;
+    /// `(isReady(), getReadyFrame())` of the owner's special power module.
+    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)>;
+    /// An `ActionManager::can...` answer. The action manager is unported; the world holds them.
+    fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool;
+    /// `PartitionFilterLineOfSight`: terrain only, the pathfinder's view blocking is unported.
+    fn is_clear_line_of_sight(&self, owner: ObjectSlot, other: ObjectSlot) -> Bool;
+    /// Whether `iterateObjectsInRange(owner, radius, FROM_BOUNDINGSPHERE_2D)` yields `target`.
+    fn is_in_range_bounding_2d(&self, owner: ObjectSlot, target: ObjectSlot, radius: Real) -> Bool;
+    /// `iterateObjectsInRange(center, radius, FROM_CENTER_2D, ITER_SORTED_NEAR_TO_FAR)`.
+    fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    /// `getClosestObject(center, FROM_CENTER_2D)` among the objects of `kind` that the player
+    /// controlling `team_id` owns.
+    fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot>;
+    /// Whether the owner's template lists a behavior or client update module called `name`.
+    fn object_has_template_module(&self, owner: ObjectSlot, name: &str) -> Bool;
+    /// `CommandSet::getCommandButton`, including the script overrides.
+    fn command_set_button(&self, set_name: &str, index: usize) -> Option<CommandButtonId>;
+    /// `Object::getCommandSetString`.
+    fn object_command_set_string(&self, owner: ObjectSlot) -> String;
     fn frame(&self) -> UnsignedInt;
     fn rules(&self) -> &RulesRegistry;
     fn module_data(&self, id: ModuleDataId) -> Option<&dyn ModuleData>;
@@ -1291,6 +1332,37 @@ pub trait SimApi: SimView {
         requesting: ObjectSlot,
         victim: ObjectSlot,
     ) -> Bool;
+    fn ai_busy(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_move_to_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_face_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_face_position(&mut self, owner: ObjectSlot, pos: &Coord3D, cmd_source: CommandSourceType);
+    fn ai_enter(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType);
+    fn ai_ignore_obstacle(&mut self, owner: ObjectSlot, obstacle: ObjectId);
+    /// The module loop of `SpecialPowerModule::initiateIntentToDoSpecialPower`.
+    /// `SpecialAbilityUpdate::onExit` of another module.
+    fn exit_special_ability(&mut self, module: ModuleSlot, cleanup: Bool);
+    /// `ExperienceTracker::addExperiencePoints`, following the experience sink.
+    fn add_experience_points(&mut self, owner: ObjectSlot, gain: Int);
+    /// `Player::addSkillPoints`. Player ranks are unported; the world totals them.
+    fn add_skill_points(&mut self, team_id: TeamId, points: Int);
+    /// `AcademyStats::recordBuildingCapture`.
+    fn record_building_capture(&mut self, team_id: TeamId);
+    /// `StickyBombUpdate::initStickyBomb` of the charge.
+    fn sticky_bomb_init(&mut self, charge: ObjectSlot, target: ObjectSlot, bomber: ObjectSlot);
+    /// `StickyBombUpdate::detonate`; `FALSE` without the module.
+    fn sticky_bomb_detonate(&mut self, charge: ObjectSlot) -> Bool;
+    /// `Object::checkAndDetonateBoobyTrap`.
+    fn check_and_detonate_booby_trap(&mut self, owner: ObjectSlot, victim: ObjectSlot) -> Bool;
+    /// `Object::doSpecialPowerAtObject`.
+    fn do_special_power_at_object(&mut self, owner: ObjectSlot, template_id: UnsignedInt, target: ObjectSlot, command_options: UnsignedInt, forced: Bool);
+    /// `startPowerRecharge` of the owner's special power module.
+    fn special_power_start_recharge(&mut self, owner: ObjectSlot, template_id: UnsignedInt);
+    /// `markSpecialPowerTriggered(nullptr)` of the owner's special power module.
+    fn special_power_mark_triggered(&mut self, owner: ObjectSlot, template_id: UnsignedInt);
+    /// `GeometryInfo::makeRandomOffsetWithinFootprint` on the logic stream.
+    fn random_offset_within_footprint(&mut self, geometry: &GeometryInfo, offset: &mut Coord3D);
+    /// `CommandButtonHuntUpdate::setCommandButton`, as the hunt scripts call it.
+    fn set_command_button_hunt(&mut self, owner: ObjectSlot, button_name: &str);
     /// Applies a shared reload time to every weapon in the owner's weapon set.
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus);
     fn rng_logic_int(&mut self, lo: Int, hi: Int) -> Int;
@@ -1333,8 +1405,6 @@ pub trait SimApi: SimView {
     ) -> Option<Box<dyn BehaviorModule>>;
     /// `BodyModuleInterface::internalChangeHealth` on the owner's body.
     fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real);
-    /// `GeometryInfo::makeRandomOffsetWithinFootprint`, drawing from the logic stream.
-    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D);
     /// `setScootParms` on the first `LandMineInterface` module of the owner.
     fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D);
     /// `AutoHealBehavior::stopHealing` on the owner's first `AutoHealBehavior`.
@@ -1908,6 +1978,32 @@ fn partition_object(
     })
 }
 
+/// What `canUseSpecialPower` asks of an object.
+struct PowerUser<'a> {
+    sim: &'a SimContext,
+    team_id: TeamId,
+    has_module: bool,
+}
+
+impl SpecialPowerObjectAccess for PowerUser<'_> {
+    fn has_special_power_module(&self, _template: &SpecialPowerTemplate) -> bool {
+        self.has_module
+    }
+    fn controlling_player_has_science(&self, science: ScienceType) -> bool {
+        self.sim.player_has_science(self.team_id, science) != FALSE
+    }
+}
+
+/// A question the unported `ActionManager` answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ActionQuery {
+    /// `canDoSpecialPowerAtObject` with the template of this id.
+    SpecialPowerAtObject(UnsignedInt),
+    HijackVehicle,
+    SabotageBuilding,
+    ConvertToCarBomb,
+}
+
 /// Mutable per-match simulation state (`GameLogic`).
 pub struct SimWorld {
     pub frame: UnsignedInt,
@@ -2018,6 +2114,14 @@ pub struct SimWorld {
     pub player_default_teams: BTreeMap<Int, TeamId>,
     /// Teams controlled by a skirmish AI player (`Player::isSkirmishAIPlayer`).
     pub skirmish_ai_teams: BTreeSet<TeamId>,
+    /// What the unported `ActionManager` would allow: (actor, target, question).
+    pub action_permissions: BTreeSet<(ObjectId, ObjectId, ActionQuery)>,
+    /// `GameLogic::m_controlBarOverrides`: (command set, slot) to button.
+    pub control_bar_overrides: BTreeMap<ControlBarOverrideKey, Option<CommandButtonId>>,
+    /// Skill points awarded by modules, by player index.
+    pub skill_points_awarded: BTreeMap<Int, Int>,
+    /// `AcademyStats::recordBuildingCapture` calls, by player index.
+    pub buildings_captured: BTreeMap<Int, UnsignedInt>,
 }
 
 impl Default for SimWorld {
@@ -2124,6 +2228,10 @@ impl SimWorld {
             local_player_index: 0,
             player_default_teams: BTreeMap::new(),
             skirmish_ai_teams: BTreeSet::new(),
+            action_permissions: BTreeSet::new(),
+            control_bar_overrides: BTreeMap::new(),
+            skill_points_awarded: BTreeMap::new(),
+            buildings_captured: BTreeMap::new(),
         }
     }
 
@@ -3094,6 +3202,160 @@ impl SimContext {
 
     /// Marks `slot` destroyed (`GameLogic::destroyObject`), running `DestroyFacet::on_destroy`
     /// and queueing `slot` for end-of-frame deletion in [`Self::process_destroy_list`].
+    /// Records an AI order and hands it to the owner's AI module.
+    fn order_ai(
+        &mut self,
+        owner: ObjectSlot,
+        order: &str,
+        f: impl FnOnce(&mut dyn AiUpdateFacet, &mut dyn SimApi, ModuleContext),
+    ) {
+        let Some((obj_id, ai_ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return;
+        };
+        self.world.ai_commands.push((obj_id, order.to_owned()));
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
+                if let Some(ai) = m.as_ai_mut() {
+                    f(ai, sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn add_experience_to(&mut self, owner: ObjectSlot, gain: Int) {
+        let Some((sink, scalar, tmpl_ov, obj_id, body_slot)) =
+            self.world.objects.get(owner).map(|o| {
+                (
+                    o.experience_tracker.experience_sink,
+                    o.experience_tracker.experience_scalar,
+                    o.thing.template_override(),
+                    o.id,
+                    o.body_slot,
+                )
+            })
+        else {
+            return;
+        };
+        if sink != ObjectId::INVALID {
+            if let Some(sink_slot) = self.world.objects.slot_by_id(sink) {
+                let scaled = zh_common::math::cpp_mul_i32_f32(gain, scalar);
+                self.add_experience_to(sink_slot, scaled);
+                return;
+            }
+        }
+        let tmpl = tmpl_ov
+            .get_final(&self.rules.thing_factory)
+            .cloned()
+            .unwrap_or_default();
+        let mut parent = ObjectExpParent {
+            tmpl: &tmpl,
+            killer_rel: Relationship::Neutral,
+            level_change: None,
+        };
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.experience_tracker
+                .add_experience_points(&mut parent, gain, TRUE);
+        }
+        if let Some((old_lvl, new_lvl, fb)) = parent.level_change {
+            if let Some(bs) = body_slot {
+                let _ = self.dispatch_module(bs, |m, sim, ctx| {
+                    if let Some(b) = m.as_body_mut() {
+                        b.on_veterancy_level_changed(sim, ctx, old_lvl, new_lvl, fb);
+                    }
+                });
+            }
+            self.client
+                .on_veterancy_changed(obj_id, old_lvl.as_i32(), new_lvl.as_i32());
+        }
+    }
+
+    fn detonate_booby_trap(&mut self, owner: ObjectSlot, victim: ObjectSlot) -> Bool {
+        const BOOBY_TRAP_SCAN_RANGE: Real = 25.0;
+        let Some((id, pos, radius, off_map, trapped)) = self.world.objects.get(owner).map(|o| {
+            (
+                o.id,
+                *o.thing.get_position(),
+                o.geometry.get_bounding_circle_radius(),
+                o.private_status & PRIVATE_STATUS_OFF_MAP,
+                o.status.test(ObjectStatusType::BoobyTrapped.as_i32()),
+            )
+        }) else {
+            return FALSE;
+        };
+        if trapped == FALSE {
+            return FALSE;
+        }
+        let trap = self
+            .find_objects_near_to_far(&pos, BOOBY_TRAP_SCAN_RANGE + radius)
+            .into_iter()
+            .find(|&s| {
+                self.object_is_kind_of(s, KindOfType::BoobyTrap) != FALSE
+                    && self.world.objects.get(s).is_some_and(|o| {
+                        o.private_status & PRIVATE_STATUS_OFF_MAP == off_map && o.producer_id == id
+                    })
+            });
+        let Some(trap) = trap else {
+            return FALSE;
+        };
+        if self.object_has_template_module(trap, "StickyBombUpdate") == FALSE {
+            return FALSE;
+        }
+        let teams = self
+            .world
+            .objects
+            .get(trap)
+            .zip(self.world.objects.get(victim))
+            .map(|(t, v)| (t.team_id, v.team_id));
+        if let Some((trap_team, victim_team)) = teams {
+            let victim_player = self.player_index_for_team(victim_team);
+            if self.team_relationship_to_player(trap_team, victim_player) == Relationship::Allies {
+                return FALSE;
+            }
+        }
+        self.sticky_bomb_detonate(trap)
+    }
+
+    fn special_power_at_object(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+        target: ObjectSlot,
+        command_options: UnsignedInt,
+        forced: Bool,
+    ) {
+        let Some(obj) = self.world.objects.get(owner) else {
+            return;
+        };
+        if obj.is_disabled() != FALSE {
+            return;
+        }
+        let module = self.find_special_power_module(owner, template_id);
+        if forced == FALSE {
+            let store = &self.rules.special_power_store;
+            let user = PowerUser {
+                sim: self,
+                team_id: obj.team_id,
+                has_module: module.is_some(),
+            };
+            let template = store.find_special_power_template_by_id(template_id);
+            if store.can_use_special_power(Some(&user), template) == FALSE {
+                return;
+            }
+        }
+        if let Some(ms) = module {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(sp) = m.as_special_power_mut() {
+                    sp.do_special_power_at_object(sim, ctx, target, command_options);
+                }
+            });
+        }
+    }
+
     pub fn destroy_object_now(&mut self, slot: ObjectSlot) {
         let Some(obj) = self.world.objects.get(slot) else {
             return;
@@ -3192,6 +3454,14 @@ impl SimContext {
             self.world
                 .sleepy_updates
                 .erase_for_owner(modules, |m, ms| m.meta(ms).owner_slot == slot);
+
+            for &ms in &beh_slots {
+                if self.world.modules.is_alive(ms) {
+                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                        m.on_destruct(sim, ctx);
+                    });
+                }
+            }
 
             for ms in beh_slots {
                 let _ = self.world.modules.free(ms);
@@ -3788,6 +4058,179 @@ impl<'a> ExperienceParentAccess for ObjectExpParent<'a> {
 }
 
 impl SimView for SimContext {
+    fn contain_apparent_controlling_player(&self, container: ObjectSlot, observer: Int) -> Option<Int> {
+        let ms = self.world.objects.get(container)?.contain_slot?;
+        let contain = self.world.modules.payload(ms)?.as_contain()?;
+        let ctx = self.world.modules.meta(ms).context(ms);
+        contain.apparent_controlling_player_index(self, ctx, observer)
+    }
+
+    fn ai_is_idle(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .map_or(TRUE, |ai| ai.is_idle())
+    }
+
+    fn ai_is_moving(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .map_or(FALSE, |ai| ai.is_moving())
+    }
+
+    fn ai_attack_priority(&self, owner: ObjectSlot, victim: ObjectSlot) -> Option<Int> {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .and_then(|ai| ai.attack_priority(self, victim))
+    }
+
+    fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot> {
+        let obj = self.world.objects.get(owner)?;
+        obj.behaviors
+            .iter()
+            .filter(|&&(_, mask)| mask.contains(FacetMask::SPECIAL_POWER_UPDATE))
+            .map(|&(ms, _)| ms)
+            .find(|&ms| {
+                let data_id = self.world.modules.meta(ms).context(ms).template_data_id;
+                self.module_data(data_id)
+                    .and_then(|d| d.as_any().downcast_ref::<SpecialAbilityUpdateModuleData>())
+                    .is_some_and(|d| d.power_type(self.rules()) == power_type)
+            })
+    }
+
+    fn special_ability_is_active(&self, module: ModuleSlot) -> Bool {
+        self.world
+            .modules
+            .payload(module)
+            .and_then(|m| m.as_special_power_update())
+            .map_or(FALSE, |f| f.is_active())
+    }
+
+    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
+        let ms = self.find_special_power_module(owner, template_id)?;
+        let sp = self.world.modules.payload(ms)?.as_special_power()?;
+        let ctx = self.world.modules.meta(ms).context(ms);
+        Some((sp.is_ready(self, ctx), sp.get_ready_frame(self, ctx)))
+    }
+
+    fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
+        let ids = self.world.objects.id_of(actor).zip(self.world.objects.id_of(target));
+        Bool::from(ids.is_some_and(|(a, t)| self.world.action_permissions.contains(&(a, t, query))))
+    }
+
+    fn is_clear_line_of_sight(&self, owner: ObjectSlot, other: ObjectSlot) -> Bool {
+        let top = |slot| {
+            self.world.objects.get(slot).map(|o| {
+                let mut pos = *o.thing.get_position();
+                pos.z += o.geometry.get_max_height_above_position();
+                pos
+            })
+        };
+        match (top(owner), top(other)) {
+            (Some(a), Some(b)) => self.terrain.is_clear_line_of_sight(&a, &b),
+            _ => FALSE,
+        }
+    }
+
+    fn is_in_range_bounding_2d(&self, owner: ObjectSlot, target: ObjectSlot, radius: Real) -> Bool {
+        Bool::from(
+            self.search_partition_from_object(owner, radius, DistanceCalculationType::FromBoundingSphere2d)
+                .contains(&target),
+        )
+    }
+
+    fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        self.world
+            .partition
+            .iterate_objects_in_range(
+                QueryCenter::Position(*center),
+                radius,
+                DistanceCalculationType::FromCenter2d,
+                IterOrderType::SortedNearToFar,
+                &|id| partition_object(objects, factory, id),
+                &mut |_| true,
+            )
+            .into_iter()
+            .filter_map(|(id, _)| objects.slot_by_id(id))
+            .collect()
+    }
+
+    fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let player = self.player_index_for_team(team_id);
+        let closest = self.world.partition.get_closest_object(
+            QueryCenter::Position(*center),
+            radius,
+            DistanceCalculationType::FromCenter2d,
+            &|id| partition_object(objects, factory, id),
+            &mut |id| {
+                objects.slot_by_id(id).is_some_and(|s| {
+                    self.object_is_kind_of(s, kind) != FALSE
+                        && objects
+                            .get(s)
+                            .is_some_and(|o| self.player_index_for_team(o.team_id) == player)
+                })
+            },
+        );
+        closest.id.and_then(|id| objects.slot_by_id(id))
+    }
+
+    fn object_has_template_module(&self, owner: ObjectSlot, name: &str) -> Bool {
+        Bool::from(self.world.objects.get(owner).is_some_and(|o| {
+            o.thing
+                .template_override()
+                .get_final(&self.rules.thing_factory)
+                .is_some_and(|t| {
+                    t.get_behavior_module_info()
+                        .nuggets()
+                        .iter()
+                        .chain(t.get_client_update_module_info().nuggets())
+                        .any(|n| n.name == name)
+                })
+        }))
+    }
+
+    fn command_set_button(&self, set_name: &str, index: usize) -> Option<CommandButtonId> {
+        if let Some(over) = self
+            .world
+            .control_bar_overrides
+            .get(&(set_name.to_owned(), index as Int))
+        {
+            return *over;
+        }
+        self.rules
+            .command_store
+            .find_command_set(set_name)
+            .and_then(|set| set.buttons.get(index).copied().flatten())
+    }
+
+    fn object_command_set_string(&self, owner: ObjectSlot) -> String {
+        let Some(o) = self.world.objects.get(owner) else {
+            return String::new();
+        };
+        if !o.command_set_override.is_empty() {
+            return o.command_set_override.clone();
+        }
+        o.thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+            .map_or_else(String::new, |t| t.friend_get_command_set_string().to_owned())
+    }
+
     fn frame(&self) -> UnsignedInt {
         self.world.frame
     }
@@ -4319,15 +4762,6 @@ impl SimView for SimContext {
             .filter(|&&(_, mask)| mask.contains(FacetMask::HORDE_UPDATE))
             .find_map(|&(ms, _)| self.world.modules.payload(ms)?.as_horde())
             .map(|horde| horde.is_true_horde_member())
-    }
-
-    fn ai_is_idle(&self, owner: ObjectSlot) -> Bool {
-        self.world
-            .objects
-            .get(owner)
-            .and_then(|o| o.ai_slot)
-            .and_then(|ms| self.world.modules.payload(ms)?.as_ai())
-            .map_or(TRUE, |ai| ai.is_idle())
     }
 
     fn ai_cur_locomotor_preferred_height(&self, owner: ObjectSlot) -> Option<Real> {
@@ -5337,6 +5771,145 @@ impl CollisionHost for SimContext {
 }
 
 impl SimApi for SimContext {
+    fn ai_busy(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        self.order_ai(owner, "aiBusy", |ai, sim, ctx| ai.ai_busy(sim, ctx, cmd_source));
+    }
+
+    fn ai_move_to_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        self.order_ai(owner, "aiMoveToObject", |ai, sim, ctx| {
+            ai.ai_move_to_object(sim, ctx, target, cmd_source)
+        });
+    }
+
+    fn ai_attack_object(&mut self, owner: ObjectSlot, target: ObjectSlot, max_shots: Int, cmd_source: CommandSourceType) {
+        self.order_ai(owner, "aiAttackObject", |ai, sim, ctx| {
+            ai.ai_attack_object(sim, ctx, target, max_shots, cmd_source)
+        });
+    }
+
+    fn ai_face_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        self.order_ai(owner, "aiFaceObject", |ai, sim, ctx| {
+            ai.ai_face_object(sim, ctx, target, cmd_source)
+        });
+    }
+
+    fn ai_face_position(&mut self, owner: ObjectSlot, pos: &Coord3D, cmd_source: CommandSourceType) {
+        self.order_ai(owner, "aiFacePosition", |ai, sim, ctx| {
+            ai.ai_face_position(sim, ctx, pos, cmd_source)
+        });
+    }
+
+    fn ai_enter(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        self.order_ai(owner, "aiEnter", |ai, sim, ctx| ai.ai_enter(sim, ctx, target, cmd_source));
+    }
+
+    fn ai_ignore_obstacle(&mut self, owner: ObjectSlot, obstacle: ObjectId) {
+        let Some(ai_ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(ai_ms, |m, _, _| {
+            if let Some(ai) = m.as_ai_mut() {
+                ai.ignore_obstacle(obstacle);
+            }
+        });
+    }
+
+    fn exit_special_ability(&mut self, module: ModuleSlot, cleanup: Bool) {
+        let _ = self.dispatch_module(module, |m, sim, ctx| {
+            if let Some(f) = m.as_special_power_update_mut() {
+                f.on_exit(sim, ctx, cleanup);
+            }
+        });
+    }
+
+    fn add_experience_points(&mut self, owner: ObjectSlot, gain: Int) {
+        self.add_experience_to(owner, gain);
+    }
+
+    fn add_skill_points(&mut self, team_id: TeamId, points: Int) {
+        let player = self.player_index_for_team(team_id);
+        let total = self.world.skill_points_awarded.entry(player).or_insert(0);
+        *total = total.wrapping_add(points);
+    }
+
+    fn record_building_capture(&mut self, team_id: TeamId) {
+        let player = self.player_index_for_team(team_id);
+        let count = self.world.buildings_captured.entry(player).or_insert(0);
+        *count = count.wrapping_add(1);
+    }
+
+    fn sticky_bomb_init(&mut self, charge: ObjectSlot, target: ObjectSlot, bomber: ObjectSlot) {
+        for ms in self.behavior_slots(charge) {
+            let found = self.dispatch_module(ms, |m, sim, ctx| {
+                m.as_sticky_bomb_mut()
+                    .map(|f| f.init_sticky_bomb(sim, ctx, target, bomber))
+                    .is_some()
+            });
+            if found == Ok(true) {
+                break;
+            }
+        }
+    }
+
+    fn sticky_bomb_detonate(&mut self, charge: ObjectSlot) -> Bool {
+        for ms in self.behavior_slots(charge) {
+            let found = self.dispatch_module(ms, |m, sim, ctx| {
+                m.as_sticky_bomb_mut()
+                    .map(|f| f.detonate(sim, ctx))
+                    .is_some()
+            });
+            if found == Ok(true) {
+                return TRUE;
+            }
+        }
+        FALSE
+    }
+
+    fn check_and_detonate_booby_trap(&mut self, owner: ObjectSlot, victim: ObjectSlot) -> Bool {
+        self.detonate_booby_trap(owner, victim)
+    }
+
+    fn do_special_power_at_object(&mut self, owner: ObjectSlot, template_id: UnsignedInt, target: ObjectSlot, command_options: UnsignedInt, forced: Bool) {
+        self.special_power_at_object(owner, template_id, target, command_options, forced);
+    }
+
+    fn special_power_start_recharge(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        if let Some(ms) = self.find_special_power_module(owner, template_id) {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(sp) = m.as_special_power_mut() {
+                    sp.start_power_recharge(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn special_power_mark_triggered(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        if let Some(ms) = self.find_special_power_module(owner, template_id) {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(sp) = m.as_special_power_mut() {
+                    sp.mark_special_power_triggered(sim, ctx, None);
+                }
+            });
+        }
+    }
+
+    fn random_offset_within_footprint(&mut self, geometry: &GeometryInfo, offset: &mut Coord3D) {
+        geometry.make_random_offset_within_footprint(offset, &mut self.world.rng);
+    }
+
+    fn set_command_button_hunt(&mut self, owner: ObjectSlot, button_name: &str) {
+        for ms in self.behavior_slots(owner) {
+            let found = self.dispatch_module(ms, |m, sim, ctx| {
+                m.as_command_button_hunt_mut()
+                    .map(|f| f.set_command_button(sim, ctx, button_name))
+                    .is_some()
+            });
+            if found == Ok(true) {
+                break;
+            }
+        }
+    }
+
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
         if let Some(obj) = self.world.objects.get_mut(owner) {
             for w in obj.weapon_set.weapons.iter_mut().flatten() {
@@ -5522,10 +6095,6 @@ impl SimApi for SimContext {
                 body.internal_change_health(sim, ctx, delta);
             }
         });
-    }
-
-    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D) {
-        geom.make_random_offset_within_footprint(pt, &mut self.world.rng);
     }
 
     fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D) {
@@ -8648,6 +9217,9 @@ impl SimApi for SimContext {
     ) -> Option<Bool> {
         self.dispatch_module(update, |m, sim, ctx| {
             m.as_special_power_update_mut().map(|spu| {
+                if spu.does_pass_science_test(sim, ctx) == FALSE {
+                    return FALSE;
+                }
                 spu.initiate_intent_to_do_special_power(
                     sim,
                     ctx,
@@ -8693,31 +9265,6 @@ impl SimApi for SimContext {
         let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
             if let Some(ai) = m.as_ai_mut() {
                 ai.ai_get_healed(sim, ctx, heal_unit, cmd_source);
-            }
-        });
-    }
-
-    fn ai_attack_object(
-        &mut self,
-        owner: ObjectSlot,
-        victim: ObjectSlot,
-        max_shots_to_fire: Int,
-        cmd_source: CommandSourceType,
-    ) {
-        let Some((obj_id, ai_ms)) = self
-            .world
-            .objects
-            .get(owner)
-            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
-        else {
-            return;
-        };
-        self.world
-            .ai_commands
-            .push((obj_id, "aiAttackObject".to_owned()));
-        let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {
-            if let Some(ai) = m.as_ai_mut() {
-                ai.ai_attack_object(sim, ctx, victim, max_shots_to_fire, cmd_source);
             }
         });
     }
@@ -8906,6 +9453,10 @@ impl SimView for MockSimApi {
         self.ctx.horde_member_state(owner)
     }
 
+    fn contain_apparent_controlling_player(&self, container: ObjectSlot, observer: Int) -> Option<Int> {
+        self.ctx.contain_apparent_controlling_player(container, observer)
+    }
+
     fn ai_is_idle(&self, owner: ObjectSlot) -> Bool {
         self.ctx.ai_is_idle(owner)
     }
@@ -8924,6 +9475,58 @@ impl SimView for MockSimApi {
 
     fn object_has_client_update(&self, owner: ObjectSlot, name: &str) -> Bool {
         self.ctx.object_has_client_update(owner, name)
+    }
+
+    fn ai_is_moving(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.ai_is_moving(owner)
+    }
+
+    fn ai_attack_priority(&self, owner: ObjectSlot, victim: ObjectSlot) -> Option<Int> {
+        self.ctx.ai_attack_priority(owner, victim)
+    }
+
+    fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot> {
+        self.ctx.find_special_ability_update(owner, power_type)
+    }
+
+    fn special_ability_is_active(&self, module: ModuleSlot) -> Bool {
+        self.ctx.special_ability_is_active(module)
+    }
+
+    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
+        self.ctx.special_power_module_ready(owner, template_id)
+    }
+
+    fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
+        self.ctx.action_manager_allows(actor, target, query)
+    }
+
+    fn is_clear_line_of_sight(&self, owner: ObjectSlot, other: ObjectSlot) -> Bool {
+        self.ctx.is_clear_line_of_sight(owner, other)
+    }
+
+    fn is_in_range_bounding_2d(&self, owner: ObjectSlot, target: ObjectSlot, radius: Real) -> Bool {
+        self.ctx.is_in_range_bounding_2d(owner, target, radius)
+    }
+
+    fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        self.ctx.find_objects_near_to_far(center, radius)
+    }
+
+    fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {
+        self.ctx.find_closest_team_object_of_kind(center, radius, kind, team_id)
+    }
+
+    fn object_has_template_module(&self, owner: ObjectSlot, name: &str) -> Bool {
+        self.ctx.object_has_template_module(owner, name)
+    }
+
+    fn command_set_button(&self, set_name: &str, index: usize) -> Option<CommandButtonId> {
+        self.ctx.command_set_button(set_name, index)
+    }
+
+    fn object_command_set_string(&self, owner: ObjectSlot) -> String {
+        self.ctx.object_command_set_string(owner)
     }
 
     fn frame(&self) -> UnsignedInt {
@@ -9570,6 +10173,78 @@ impl SimApi for MockSimApi {
         self.ctx.request_assist_from(assistant, requesting, victim)
     }
 
+    fn ai_busy(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_busy(owner, cmd_source);
+    }
+
+    fn ai_move_to_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_move_to_object(owner, target, cmd_source);
+    }
+
+    fn ai_face_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_face_object(owner, target, cmd_source);
+    }
+
+    fn ai_face_position(&mut self, owner: ObjectSlot, pos: &Coord3D, cmd_source: CommandSourceType) {
+        self.ctx.ai_face_position(owner, pos, cmd_source);
+    }
+
+    fn ai_enter(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        self.ctx.ai_enter(owner, target, cmd_source);
+    }
+
+    fn ai_ignore_obstacle(&mut self, owner: ObjectSlot, obstacle: ObjectId) {
+        self.ctx.ai_ignore_obstacle(owner, obstacle);
+    }
+
+    fn exit_special_ability(&mut self, module: ModuleSlot, cleanup: Bool) {
+        self.ctx.exit_special_ability(module, cleanup);
+    }
+
+    fn add_experience_points(&mut self, owner: ObjectSlot, gain: Int) {
+        self.ctx.add_experience_points(owner, gain);
+    }
+
+    fn add_skill_points(&mut self, team_id: TeamId, points: Int) {
+        self.ctx.add_skill_points(team_id, points);
+    }
+
+    fn record_building_capture(&mut self, team_id: TeamId) {
+        self.ctx.record_building_capture(team_id);
+    }
+
+    fn sticky_bomb_init(&mut self, charge: ObjectSlot, target: ObjectSlot, bomber: ObjectSlot) {
+        self.ctx.sticky_bomb_init(charge, target, bomber);
+    }
+
+    fn sticky_bomb_detonate(&mut self, charge: ObjectSlot) -> Bool {
+        self.ctx.sticky_bomb_detonate(charge)
+    }
+
+    fn check_and_detonate_booby_trap(&mut self, owner: ObjectSlot, victim: ObjectSlot) -> Bool {
+        self.ctx.check_and_detonate_booby_trap(owner, victim)
+    }
+
+    fn do_special_power_at_object(&mut self, owner: ObjectSlot, template_id: UnsignedInt, target: ObjectSlot, command_options: UnsignedInt, forced: Bool) {
+        self.ctx.do_special_power_at_object(owner, template_id, target, command_options, forced);
+    }
+
+    fn special_power_start_recharge(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        self.ctx.special_power_start_recharge(owner, template_id);
+    }
+
+    fn special_power_mark_triggered(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        self.ctx.special_power_mark_triggered(owner, template_id);
+    }
+
+    fn random_offset_within_footprint(&mut self, geometry: &GeometryInfo, offset: &mut Coord3D) {
+        self.ctx.random_offset_within_footprint(geometry, offset);
+    }
+
+    fn set_command_button_hunt(&mut self, owner: ObjectSlot, button_name: &str) {
+        self.ctx.set_command_button_hunt(owner, button_name);
+    }
+
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
         self.ctx.share_weapon_reload(owner, when, status);
     }
@@ -9662,10 +10337,6 @@ impl SimApi for MockSimApi {
 
     fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real) {
         self.ctx.body_internal_change_health(owner, delta);
-    }
-
-    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D) {
-        self.ctx.random_offset_within_footprint(geom, pt);
     }
 
     fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D) {

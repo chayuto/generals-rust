@@ -44,6 +44,7 @@ pub const ACADEMY_CLASSIFICATION_TYPE_NAMES: [&str; 3] =
     ["ACT_NONE", "ACT_UPGRADE_RADAR", "ACT_SUPERPOWER"];
 
 pub mod combat_types;
+pub mod command_button;
 pub mod disabled_types;
 pub mod kind_of;
 pub mod model_state;

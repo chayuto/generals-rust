@@ -4,6 +4,8 @@ pub mod auto_deposit_update;
 pub mod base_renerate_update;
 pub mod assisted_targeting_update;
 pub mod auto_find_healing_update;
+pub mod command_button_hunt_update;
+pub mod special_ability_update;
 pub mod spectre_gunship_deployment_update;
 pub mod horde_update;
 pub mod default_production_exit_update;
@@ -46,6 +48,26 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "SpecialAbilityUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::SPECIAL_POWER_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        special_ability_update::parse_special_ability_update_data,
+        special_ability_update::create_special_ability_update,
+    );
+    reg.register_module(
+        nk,
+        "CommandButtonHuntUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        command_button_hunt_update::parse_command_button_hunt_update_data,
+        command_button_hunt_update::create_command_button_hunt_update,
+    );
     reg.register_module(
         nk,
         "ToppleUpdate",

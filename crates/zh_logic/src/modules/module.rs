@@ -6,6 +6,7 @@
 //! Reference C++ packets: `packets/phase5/PKT-163_Module.md`
 //! Golden Vector test: `crates/zh_logic/tests/golden_pkt164_module_factory.rs`
 
+use crate::rules::command_button::CommandButton;
 use std::any::Any;
 
 use crate::arena::{
@@ -460,6 +461,9 @@ pub trait BehaviorModule: Send {
     fn on_construct(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_object_created(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn on_delete(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    /// The C++ destructor's work on the world, run by `process_destroy_list`
+    /// (`Object::~Object`) after `on_delete`.
+    fn on_destruct(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     /// Child objects destroyed by `on_delete` (`OpenContain::onDelete`, `HelixContain::onDelete`).
     /// Snapshotted by `SimContext::destroy_object_now` before taking the module payload so each
     /// rider's `Object::onDestroy` can synchronously re-enter `contain_remove` in C++ order.
@@ -637,9 +641,6 @@ pub trait BehaviorModule: Send {
     fn as_horde(&self) -> Option<&dyn HordeFacet> {
         None
     }
-    fn as_special_power_update_mut(&mut self) -> Option<&mut dyn SpecialPowerUpdateFacet> {
-        None
-    }
     fn as_assisted_targeting_mut(&mut self) -> Option<&mut dyn AssistedTargetingFacet> {
         None
     }
@@ -710,6 +711,18 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_any(&self) -> Option<&dyn Any> {
+        None
+    }
+    fn as_special_power_update(&self) -> Option<&dyn SpecialPowerUpdateFacet> {
+        None
+    }
+    fn as_special_power_update_mut(&mut self) -> Option<&mut dyn SpecialPowerUpdateFacet> {
+        None
+    }
+    fn as_command_button_hunt_mut(&mut self) -> Option<&mut dyn CommandButtonHuntFacet> {
+        None
+    }
+    fn as_sticky_bomb_mut(&mut self) -> Option<&mut dyn StickyBombFacet> {
         None
     }
     fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
@@ -1079,6 +1092,15 @@ pub trait ContainFacet {
     }
     /// `recalcApparentControllingPlayer`; only `GarrisonContain` does anything here.
     fn recalc_apparent_controlling_player(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
+    /// `getApparentControllingPlayer(observer)` as a player index; `None` for no player.
+    fn apparent_controlling_player_index(
+        &self,
+        _sim: &dyn SimView,
+        _ctx: ModuleContext,
+        _observer: Int,
+    ) -> Option<Int> {
+        None
+    }
     fn is_bustable(&self) -> Bool {
         FALSE
     }
@@ -1848,6 +1870,58 @@ pub trait AiUpdateFacet {
     fn has_cur_locomotor(&self) -> Bool {
         FALSE
     }
+    /// Orders of `AICommandInterface` only a port of the AI can carry out. Like
+    /// every command, an implementation records `cmd_source` as the owner's
+    /// `m_lastCommandSource`.
+    fn ai_busy(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _cmd_source: CommandSourceType) {
+    }
+    fn ai_move_to_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_attack_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: ObjectSlot,
+        _max_shots: Int,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_face_object(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_face_position(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _pos: &Coord3D,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    fn ai_enter(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _target: ObjectSlot,
+        _cmd_source: CommandSourceType,
+    ) {
+    }
+    /// `ignoreObstacle`; not a command.
+    fn ignore_obstacle(&mut self, _obstacle: ObjectId) {}
+    /// `getAttackInfo()->getPriority(victim template)`; `None` without attack info.
+    fn attack_priority(&self, _sim: &dyn SimView, _victim: ObjectSlot) -> Option<Int> {
+        None
+    }
     fn set_locomotor_max_lift(&mut self, _max_lift: Real) {}
     fn set_locomotor_max_turn_rate(&mut self, _max_turn_rate: Real) {}
     fn set_locomotor_ultra_accurate(&mut self, _ultra: Bool) {}
@@ -1859,16 +1933,6 @@ pub trait AiUpdateFacet {
         _sim: &mut dyn SimApi,
         _ctx: ModuleContext,
         _heal_unit: ObjectSlot,
-        _cmd_source: CommandSourceType,
-    ) {
-    }
-    /// `AICommandInterface::aiAttackObject`.
-    fn ai_attack_object(
-        &mut self,
-        _sim: &mut dyn SimApi,
-        _ctx: ModuleContext,
-        _victim: ObjectSlot,
-        _max_shots_to_fire: Int,
         _cmd_source: CommandSourceType,
     ) {
     }
@@ -2048,6 +2112,27 @@ pub trait StealthFacet {
     }
 }
 
+
+/// `CommandButtonHuntUpdate`, which scripts hand a command button.
+pub trait CommandButtonHuntFacet {
+    /// `setCommandButton`.
+    fn set_command_button(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, button_name: &str);
+}
+
+/// `StickyBombUpdate` (unported): the two calls its owners make.
+pub trait StickyBombFacet {
+    /// `initStickyBomb(target, bomber)`.
+    fn init_sticky_bomb(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        target: ObjectSlot,
+        bomber: ObjectSlot,
+    );
+    /// `detonate`.
+    fn detonate(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
+}
+
 /// `StealthDetectorUpdate`, which `BattlePlanUpdate` switches on and off.
 pub trait StealthDetectorFacet {
     fn is_sd_enabled(&self) -> Bool;
@@ -2115,6 +2200,36 @@ pub trait SpecialPowerUpdateFacet {
         target_pos: Option<&Coord3D>,
         command_options: UnsignedInt,
     ) -> Bool;
+    /// `doesSpecialPowerUpdatePassScienceTest`.
+    fn does_pass_science_test(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+        TRUE
+    }
+    /// `isActive`.
+    fn is_active(&self) -> Bool {
+        FALSE
+    }
+    /// `isPowerCurrentlyInUse`.
+    fn is_power_currently_in_use(
+        &self,
+        _sim: &dyn SimView,
+        _command: Option<&CommandButton>,
+    ) -> Bool {
+        FALSE
+    }
+    /// `onExit`.
+    fn on_exit(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _cleanup: Bool) {}
+    /// `getSpecialObjectCount`.
+    fn special_object_count(&self) -> UnsignedInt {
+        0
+    }
+    /// `findSpecialObjectWithProducerID`.
+    fn find_special_object_with_producer_id(
+        &self,
+        _sim: &dyn SimView,
+        _producer: ObjectId,
+    ) -> Option<ObjectSlot> {
+        None
+    }
 }
 
 /// `AssistedTargetingUpdate`'s two entry points.

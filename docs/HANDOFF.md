@@ -7,7 +7,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
-- Packets: 245 of 463 implemented, 218 unported (Phase 2: 102, Phase 4: 4, Phase 5: 66, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 247 of 463 implemented, 216 unported (Phase 2: 102, Phase 4: 4, Phase 5: 64, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -28,6 +28,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | after `83d6689` | `PKT-383 ToppleUpdate`, `PKT-377 StructureToppleUpdate`, `PKT-305 AutoDepositUpdate`; per-player score keepers |
 | after `9d795fc` | `PKT-336 HordeUpdate`, `PKT-370 SpectreGunshipDeploymentUpdate`, `PKT-306 AutoFindHealingUpdate`, `PKT-304 AssistedTargetingUpdate` |
 | after `9d53470` | `PKT-272 GenerateMinefieldBehavior`, `PKT-279 MinefieldBehavior`; cliff cells, overlap query, module self-lending |
+| after `d7fc62e` | `PKT-368 SpecialAbilityUpdate`, `PKT-314 CommandButtonHuntUpdate`; one `SpecialPowerUpdateFacet` for both porting branches |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 

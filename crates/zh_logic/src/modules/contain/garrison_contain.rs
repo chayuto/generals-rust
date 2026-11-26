@@ -762,6 +762,16 @@ impl ContainBehavior for GarrisonContain {
     fn is_enclosing(&self) -> Bool {
         self.data.is_enclosing_container
     }
+    fn apparent_controller_for_hook(
+        &self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+        observer: Int,
+    ) -> Option<Int> {
+        let player = self.apparent_controlling_player(sim, ctx, observer);
+        (player >= 0).then_some(player)
+    }
+
     fn recalc_apparent_controller_hook(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.recalc_apparent_controlling_player(sim, ctx);
     }

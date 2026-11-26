@@ -28,6 +28,10 @@ use zh_logic::modules::{
     ParkingPlaceInfo, StealthParams,
 };
 use zh_logic::modules::module::SupplyTruckAiFacet;
+use zh_logic::modules::module::AiUpdateFacet;
+use zh_logic::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
+use zh_logic::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
+use zh_logic::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
 use zh_logic::object::experience_tracker::{ExperienceParentAccess, ExperienceTrackerState};
 use zh_logic::object::thing::{make_align_to_normal_matrix, Thing, ThingTerrainAccess};
 use zh_logic::object::thing_factory::ThingFactory;
@@ -101,6 +105,48 @@ impl SimView for EngineSim<'_> {
     }
     fn object_has_client_update(&self, owner: ObjectSlot, name: &str) -> Bool {
         not_wired("object_has_client_update")
+    }
+    fn contain_apparent_controlling_player(&self, container: ObjectSlot, observer: Int) -> Option<Int> {
+        not_wired("contain_apparent_controlling_player")
+    }
+    fn ai_is_moving(&self, owner: ObjectSlot) -> Bool {
+        not_wired("ai_is_moving")
+    }
+    fn ai_attack_priority(&self, owner: ObjectSlot, victim: ObjectSlot) -> Option<Int> {
+        not_wired("ai_attack_priority")
+    }
+    fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot> {
+        not_wired("find_special_ability_update")
+    }
+    fn special_ability_is_active(&self, module: ModuleSlot) -> Bool {
+        not_wired("special_ability_is_active")
+    }
+    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
+        not_wired("special_power_module_ready")
+    }
+    fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
+        not_wired("action_manager_allows")
+    }
+    fn is_clear_line_of_sight(&self, owner: ObjectSlot, other: ObjectSlot) -> Bool {
+        not_wired("is_clear_line_of_sight")
+    }
+    fn is_in_range_bounding_2d(&self, owner: ObjectSlot, target: ObjectSlot, radius: Real) -> Bool {
+        not_wired("is_in_range_bounding_2d")
+    }
+    fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
+        not_wired("find_objects_near_to_far")
+    }
+    fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {
+        not_wired("find_closest_team_object_of_kind")
+    }
+    fn object_has_template_module(&self, owner: ObjectSlot, name: &str) -> Bool {
+        not_wired("object_has_template_module")
+    }
+    fn command_set_button(&self, set_name: &str, index: usize) -> Option<CommandButtonId> {
+        not_wired("command_set_button")
+    }
+    fn object_command_set_string(&self, owner: ObjectSlot) -> String {
+        not_wired("object_command_set_string")
     }
     fn frame(&self) -> UnsignedInt {
         self.engine_frame()
@@ -519,6 +565,60 @@ impl SimApi for EngineSim<'_> {
     fn request_assist_from( &mut self, assistant: ObjectSlot, requesting: ObjectSlot, victim: ObjectSlot, ) -> Bool {
         not_wired("request_assist_from")
     }
+    fn ai_busy(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        not_wired("ai_busy")
+    }
+    fn ai_move_to_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        not_wired("ai_move_to_object")
+    }
+    fn ai_face_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        not_wired("ai_face_object")
+    }
+    fn ai_face_position(&mut self, owner: ObjectSlot, pos: &Coord3D, cmd_source: CommandSourceType) {
+        not_wired("ai_face_position")
+    }
+    fn ai_enter(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        not_wired("ai_enter")
+    }
+    fn ai_ignore_obstacle(&mut self, owner: ObjectSlot, obstacle: ObjectId) {
+        not_wired("ai_ignore_obstacle")
+    }
+    fn exit_special_ability(&mut self, module: ModuleSlot, cleanup: Bool) {
+        not_wired("exit_special_ability")
+    }
+    fn add_experience_points(&mut self, owner: ObjectSlot, gain: Int) {
+        not_wired("add_experience_points")
+    }
+    fn add_skill_points(&mut self, team_id: TeamId, points: Int) {
+        not_wired("add_skill_points")
+    }
+    fn record_building_capture(&mut self, team_id: TeamId) {
+        not_wired("record_building_capture")
+    }
+    fn sticky_bomb_init(&mut self, charge: ObjectSlot, target: ObjectSlot, bomber: ObjectSlot) {
+        not_wired("sticky_bomb_init")
+    }
+    fn sticky_bomb_detonate(&mut self, charge: ObjectSlot) -> Bool {
+        not_wired("sticky_bomb_detonate")
+    }
+    fn check_and_detonate_booby_trap(&mut self, owner: ObjectSlot, victim: ObjectSlot) -> Bool {
+        not_wired("check_and_detonate_booby_trap")
+    }
+    fn do_special_power_at_object(&mut self, owner: ObjectSlot, template_id: UnsignedInt, target: ObjectSlot, command_options: UnsignedInt, forced: Bool) {
+        not_wired("do_special_power_at_object")
+    }
+    fn special_power_start_recharge(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        not_wired("special_power_start_recharge")
+    }
+    fn special_power_mark_triggered(&mut self, owner: ObjectSlot, template_id: UnsignedInt) {
+        not_wired("special_power_mark_triggered")
+    }
+    fn random_offset_within_footprint(&mut self, geometry: &GeometryInfo, offset: &mut Coord3D) {
+        not_wired("random_offset_within_footprint")
+    }
+    fn set_command_button_hunt(&mut self, owner: ObjectSlot, button_name: &str) {
+        not_wired("set_command_button_hunt")
+    }
     fn share_weapon_reload(&mut self, owner: ObjectSlot, when: UnsignedInt, status: WeaponStatus) {
         not_wired("share_weapon_reload")
     }
@@ -566,9 +666,6 @@ impl SimApi for EngineSim<'_> {
     }
     fn body_internal_change_health(&mut self, owner: ObjectSlot, delta: Real) {
         not_wired("body_internal_change_health")
-    }
-    fn random_offset_within_footprint(&mut self, geom: &GeometryInfo, pt: &mut Coord3D) {
-        not_wired("random_offset_within_footprint")
     }
     fn set_land_mine_scoot_parms(&mut self, owner: ObjectSlot, start: &Coord3D, end: &Coord3D) {
         not_wired("set_land_mine_scoot_parms")

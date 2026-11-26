@@ -151,7 +151,7 @@ fn measure(
 
 /// Takes `total` off a distance given squared. Returns the new squared distance
 /// and the factor for the vector.
-fn shrink(dist_sqr: Real, total: Real) -> (Real, Real) {
+pub(crate) fn shrink(dist_sqr: Real, total: Real) -> (Real, Real) {
     if total > 0.0 {
         let dist = gm_sqrtf(dist_sqr);
         let shrunk = dist - total;

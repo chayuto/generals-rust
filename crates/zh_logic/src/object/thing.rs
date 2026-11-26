@@ -32,6 +32,10 @@ pub trait ThingTerrainAccess {
     fn is_cliff_cell(&self, _x: Real, _y: Real) -> Bool {
         FALSE
     }
+    /// `TerrainLogic::isClearLineOfSight`. Without a height map every line is clear.
+    fn is_clear_line_of_sight(&self, _pos: &Coord3D, _other: &Coord3D) -> Bool {
+        TRUE
+    }
     fn is_underwater(
         &self,
         x: Real,

@@ -275,3 +275,39 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 - `UpgradedTriggeredBy` is parsed and never read; `update()` always waits for `Upgrade_ChinaEMPMines`.
 - A footprint with no room between mines (a box with a zero radius) never finishes placing them.
 - **Guard:** `golden_pkt272_279_minefield`.
+### A position target is never within ability range
+
+- **Where:** `SpecialAbilityUpdate::isWithinStartAbilityRange` with `ApproachRequiresLOS` (the default).
+- **What happens:** the line of sight search looks for the target object, which is null for a position, so the unit never arrives.
+- **Guard:** `golden_pkt368_314_ability`, ability orders at a location.
+
+### The Black Lotus cash hack ignores `EffectValue`
+
+- **Where:** `SpecialAbilityUpdate::triggerAbilityEffect`; `PRESERVE_HARDCODED_BLACK_LOTUS_CASH_HACK` is 1 in `GameDefines.h`.
+- **What happens:** it steals at most 1000 in every build configuration.
+- **Guard:** `golden_pkt368_314_ability`, vectors with another `EffectValue`.
+
+### The disable effect draws from the logic stream
+
+- **Where:** `SPECIAL_HACKER_DISABLE_BUILDING` / `SPECIAL_BLACKLOTUS_DISABLE_VEHICLE_HACK` in `triggerAbilityEffect`.
+- **What happens:** the particle offset is `makeRandomOffsetWithinFootprint` (logic PRNG), drawn only when the particle system is created. Under `RETAIL_COMPATIBLE_CRC` the headless `ParticleSystemManagerDummy` creates none, so a headless retail-compatible run draws less than a rendered one.
+- **Guard:** `golden_pkt368_314_ability` compares the seed CRC after every frame.
+
+### The hunt never checks for mines on a target
+
+- **Where:** `CommandButtonHuntUpdate::scanClosestTarget`.
+- **What happens:** the timed charge and TNT tests sit inside `if (isCaptureBuilding)`, so they are never true and a hunt does not skip mined targets.
+- **Guard:** none needed; the branch is unreachable and the port omits it.
+
+### `SpecialAbilityUpdate` saves less than its base classes
+
+- **Where:** `SpecialAbilityUpdate::xfer` and `crc`.
+- **What happens:** `xfer` calls `UpdateModule::xfer`, skipping the version byte of `SpecialPowerUpdateModule`; `crc` adds nothing, so its state is not in the logic CRC.
+- **Guard:** `golden_pkt368_314_ability` compares the save bytes after every step.
+
+### Headless traps met by `gen_pkt368_314_ability.cpp`
+
+- A change of the local player's shroud calls `TheDisplay` (null): set `ShroudClearingRange = 0` or make nobody local.
+- Crate collide modules run on contact in `ThePartitionManager->update()` and destroy their object.
+- `TheParticleSystemManager->reset()` does not empty the list of the dummy manager; count from its size.
+- `InGameUI::addFloatingText` needs fonts; override it (it is virtual).
