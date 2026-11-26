@@ -6,6 +6,7 @@
 //!
 //! Not modelled: the seismic simulation (`DO_SEISMIC_SIMULATIONS` is off in the reference build).
 
+use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext};
 use crate::combat::damage::DamageInfo;
 use crate::modules::behavior::behavior_module::{
@@ -135,19 +136,13 @@ impl BunkerBusterBehavior {
         if let Some(fx) = &self.data.detonation_fx {
             sim.trigger_fx_list(fx, &pos);
         }
-        let has_shockwave = sim
-            .rules()
-            .weapon_store
-            .find_weapon_template(&self.data.shockwave_weapon_template)
-            .is_some();
-        if has_shockwave {
-            sim.fire_weapon_template(
-                object_for_fx,
-                &self.data.shockwave_weapon_template,
-                None,
-                &pos,
-            );
-        }
+        // An empty or unknown name resolves to no weapon.
+        weapon_fire::create_and_fire_temp_weapon(
+            sim,
+            object_for_fx,
+            &self.data.shockwave_weapon_template,
+            &pos,
+        );
     }
 }
 

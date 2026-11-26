@@ -146,7 +146,7 @@ pub struct WeaponTemplate {
 impl Default for WeaponTemplate {
     fn default() -> Self {
         Self {
-            name: String::new(),
+            name: "NoNameWeapon".to_string(),
             primary_damage: 0.0, primary_damage_radius: 0.0,
             secondary_damage: 0.0, secondary_damage_radius: 0.0,
             shock_wave_amount: 0.0, shock_wave_radius: 0.0, shock_wave_taper_off: 0.0,
@@ -154,16 +154,17 @@ impl Default for WeaponTemplate {
             aim_delta: 0.0, scatter_radius: 0.0, scatter_target_scalar: 0.0,
             scatter_radius_vs_infantry: 0.0, scatter_targets: Vec::new(),
             damage_type: DamageType::Explosion, death_type: DeathType::Normal,
-            weapon_speed: 0.0, min_weapon_speed: 0.0, scale_weapon_speed: FALSE,
+            weapon_speed: 999_999.0, min_weapon_speed: 999_999.0, scale_weapon_speed: FALSE,
             weapon_recoil: 0.0, min_target_pitch: -std::f32::consts::PI,
-            max_target_pitch: std::f32::consts::PI, radius_damage_angle: 0.0,
+            max_target_pitch: std::f32::consts::PI, radius_damage_angle: std::f32::consts::PI,
             clip_size: 0, clip_reload_time: 0, min_delay_between_shots: 0,
-            max_delay_between_shots: 0, continuous_fire_one_shots_needed: 0,
-            continuous_fire_two_shots_needed: 0, continuous_fire_coast_frames: 0,
-            auto_reload_when_idle_frames: 0, shots_per_barrel: 0,
-            damage_dealt_at_self_position: FALSE, reload_type: WeaponReloadType::NoReload,
-            prefire_type: WeaponPrefireType::PerAttack, pre_attack_delay: 0,
-            continue_attack_range: 0.0, affects_mask: 0, collide_mask: 0, anti_mask: 0,
+            max_delay_between_shots: 0, continuous_fire_one_shots_needed: Int::MAX,
+            continuous_fire_two_shots_needed: Int::MAX, continuous_fire_coast_frames: 0,
+            auto_reload_when_idle_frames: 0, shots_per_barrel: 1,
+            damage_dealt_at_self_position: FALSE, reload_type: WeaponReloadType::AutoReload,
+            prefire_type: WeaponPrefireType::PerShot, pre_attack_delay: 0,
+            continue_attack_range: 0.0, affects_mask: WEAPON_AFFECTS_ALLIES | WEAPON_AFFECTS_ENEMIES | WEAPON_AFFECTS_NEUTRALS,
+            collide_mask: WEAPON_COLLIDE_STRUCTURES, anti_mask: WEAPON_ANTI_GROUND,
             leech_range_weapon: FALSE, capable_of_following_waypoint: FALSE,
             is_shows_ammo_pips: FALSE, allow_attack_garrisoned_buildings: FALSE,
             play_fx_when_stealthed: FALSE, missile_calls_on_die: FALSE,
@@ -376,9 +377,10 @@ impl Weapon {
             wslot,
             status: WeaponStatus::OutOfAmmo,
             ammo_in_clip: 0,
-            when_we_can_fire_again: current_frame,
-            when_pre_attack_finished: current_frame,
-            when_last_reload_started: current_frame,
+            // Weapons start empty with all timers at zero; they must be loaded before use.
+            when_we_can_fire_again: 0,
+            when_pre_attack_finished: 0,
+            when_last_reload_started: 0,
             last_fire_frame: 0,
             suspend_fx_frame: suspend,
             projectile_stream_id: ObjectId::INVALID,
@@ -390,8 +392,20 @@ impl Weapon {
             leech_weapon_range_active: FALSE,
         };
         w.template_name = w.template.name.clone();
-        w.rebuild_scatter_targets();
         w
+    }
+
+    /// The `loadAmmoNow` of `WeaponSet::updateWeaponSet`. A new set's weapons start full; an
+    /// instant load ignores bonuses, and no reload is shared before the set is installed.
+    pub(crate) fn load_at_creation(&mut self, now: UnsignedInt) {
+        self.ammo_in_clip = self.template.clip_size as UnsignedInt;
+        if self.ammo_in_clip == 0 {
+            self.ammo_in_clip = NO_MAX_SHOTS_LIMIT as UnsignedInt;
+        }
+        self.status = WeaponStatus::ReloadingClip;
+        self.when_last_reload_started = now;
+        self.when_we_can_fire_again = (now as Real) as UnsignedInt;
+        self.rebuild_scatter_targets();
     }
 
     pub fn get_template(&self) -> &WeaponTemplate { &self.template }
@@ -428,11 +442,12 @@ impl Weapon {
     }
     pub fn set_clip_percent_full(&mut self, percent: Real, allow_reduction: Bool, current_frame: UnsignedInt) {
         if self.template.clip_size == 0 { return; }
-        let ammo = real_to_int_floor((self.template.clip_size as Real) * percent);
-        let ammo = if ammo < 0 { 0 } else { ammo as UnsignedInt };
+        // C++ compares the signed result with the unsigned count, so a negative value wraps.
+        let ammo = real_to_int_floor((self.template.clip_size as Real) * percent) as UnsignedInt;
         if (ammo > self.ammo_in_clip) || (allow_reduction == TRUE && ammo < self.ammo_in_clip) {
             self.ammo_in_clip = ammo;
-            self.status = if self.ammo_in_clip != 0 { WeaponStatus::ReadyToFire } else { WeaponStatus::OutOfAmmo };
+            // Inverted on purpose: this is what C++ stores until the next `get_status`.
+            self.status = if self.ammo_in_clip != 0 { WeaponStatus::OutOfAmmo } else { WeaponStatus::ReadyToFire };
             self.when_last_reload_started = current_frame;
             self.when_we_can_fire_again = current_frame;
             self.rebuild_scatter_targets();
@@ -451,10 +466,10 @@ impl Weapon {
     pub fn set_pre_attack_finished_frame(&mut self, frame: UnsignedInt) { self.when_pre_attack_finished = frame; }
     pub fn set_last_reload_started_frame(&mut self, frame: UnsignedInt) { self.when_last_reload_started = frame; }
     pub fn transfer_next_shot_stats_from(&mut self, other: &Weapon) {
+        // C++ copies `weapon.getStatus()`, which refreshes against the current frame; callers
+        // must refresh `other` first.
         self.status = other.status;
-        self.ammo_in_clip = other.ammo_in_clip;
         self.when_we_can_fire_again = other.when_we_can_fire_again;
-        self.when_pre_attack_finished = other.when_pre_attack_finished;
         self.when_last_reload_started = other.when_last_reload_started;
     }
 }

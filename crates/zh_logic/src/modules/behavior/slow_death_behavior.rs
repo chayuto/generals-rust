@@ -1,6 +1,7 @@
 //! `PKT-295`: `SlowDeathBehaviorModuleData`, `SlowDeathCore`, and `SlowDeathBehavior`
 //! (`SlowDeathBehavior.h`, `SlowDeathBehavior.cpp`).
 
+use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::combat::damage::DamageInfo;
 use crate::modules::behavior::behavior_module::{
@@ -379,7 +380,7 @@ impl SlowDeathCore {
         if !wpn_vec.is_empty() {
             let idx = sim.rng_logic_int(0, (wpn_vec.len() as Int) - 1) as usize;
             if let Some(ref wpn_name) = wpn_vec[idx] {
-                sim.fire_weapon_template(owner, wpn_name, None, &pos);
+                weapon_fire::create_and_fire_temp_weapon(sim, owner, wpn_name, &pos);
             }
         }
     }

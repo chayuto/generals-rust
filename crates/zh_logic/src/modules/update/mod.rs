@@ -3,6 +3,7 @@
 pub mod base_renerate_update;
 pub mod deletion_update;
 pub mod float_update;
+pub mod fire_weapon_update;
 pub mod lifetime_update;
 pub mod prone_update;
 pub mod smart_bomb_target_homing_update;
@@ -34,6 +35,16 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         false,
         deletion_update::parse_deletion_update_data,
         deletion_update::create_deletion_update,
+    );
+    reg.register_module(
+        nk,
+        "FireWeaponUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        fire_weapon_update::parse_fire_weapon_update_data,
+        fire_weapon_update::create_fire_weapon_update,
     );
     reg.register_module(
         nk,

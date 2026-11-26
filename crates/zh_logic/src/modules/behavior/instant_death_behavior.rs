@@ -1,6 +1,7 @@
 //! `PKT-276`: `InstantDeathBehaviorModuleData` and `InstantDeathBehavior`
 //! (`InstantDeathBehavior.h`, `InstantDeathBehavior.cpp`).
 
+use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext};
 use crate::combat::damage::DamageInfo;
 use crate::modules::behavior::behavior_module::{
@@ -158,7 +159,7 @@ impl DieFacet for InstantDeathBehavior {
         if fire_weapons && !self.data.weapons.is_empty() {
             let idx = sim.rng_logic_int(0, (self.data.weapons.len() as Int) - 1) as usize;
             if let Some(ref wpn_name) = self.data.weapons[idx] {
-                sim.fire_weapon_template(owner, wpn_name, None, &pos);
+                weapon_fire::create_and_fire_temp_weapon(sim, owner, wpn_name, &pos);
             }
         }
 

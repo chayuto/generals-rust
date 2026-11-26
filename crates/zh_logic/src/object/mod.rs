@@ -7,4 +7,5 @@ pub mod thing;
 pub mod thing_factory;
 pub mod thing_template;
 pub mod weapon;
+pub mod weapon_fire;
 pub mod weapon_set;

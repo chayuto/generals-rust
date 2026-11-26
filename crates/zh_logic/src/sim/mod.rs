@@ -2282,9 +2282,6 @@ impl SimContext {
         let mut record = ObjectRecord::new(id, tmpl, team, geom);
         record.status = initial_status;
         record.experience_tracker.set_trainable(trainable);
-        if let Some(ref set) = wts {
-            record.weapon_set.init_from_template_set(set, self.world.frame);
-        }
         let mut dummy_reactor = crate::object::thing::NoopTransformReactor;
         let mut mtx = zh_common::math::Matrix3D::identity();
         self.terrain.align_on_terrain(angle, &pos, FALSE, &mut mtx);
@@ -2374,6 +2371,15 @@ impl SimContext {
                         c.on_create(sim, ctx);
                     }
                 });
+            }
+        }
+
+        // C++ builds the weapon set last (`updateWeaponSet` closes `initObject`), so module
+        // constructors neither see its weapons nor share a reload with them.
+        if let Some(ref set) = wts {
+            let frame = self.world.frame;
+            if let Some(o) = self.world.objects.get_mut(slot) {
+                o.weapon_set.init_from_template_set(set, frame);
             }
         }
 

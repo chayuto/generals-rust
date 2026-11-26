@@ -10,7 +10,8 @@ use crate::modules::module::{
 };
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::upgrade::upgrade_module::{UpgradeMux, UpgradeMuxData};
-use crate::object::weapon::{Weapon, WeaponReloadType, WeaponTemplate};
+use crate::object::weapon::{Weapon, WeaponTemplate};
+use crate::object::weapon_fire;
 use crate::object::weapon_set::WeaponSlotType;
 use crate::rules::combat_types::{
     get_damage_type_flag, parse_damage_type_flags, DamageTypeFlags, WeaponStatus,
@@ -19,7 +20,7 @@ use crate::rules::upgrade::UpgradeMaskType;
 use crate::sim::{SimApi, SimView};
 use std::any::Any;
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
-use zh_common::types::{Bool, NameKeyType, Real, UnsignedInt, UpdateSleepTime, FALSE};
+use zh_common::types::{Bool, NameKeyType, Real, UpdateSleepTime, FALSE};
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
 /// INI template data matching `FireWeaponWhenDamagedBehaviorModuleData`.
@@ -117,85 +118,30 @@ impl FireWeaponWhenDamagedBehavior {
         self.upgrade.is_already_upgraded()
     }
 
-    fn init_and_reload_weapon(tmpl: &Option<WeaponTemplate>, now: UnsignedInt) -> Option<Weapon> {
-        let t = tmpl.as_ref()?;
-        let mut w = Weapon::new(t.clone(), WeaponSlotType::Primary, now);
-        w.template_name = t.name.clone();
-        // C++ `Weapon::Weapon` initializes fire timers to `0` (`when_pre_attack_finished = 0`).
-        w.when_we_can_fire_again = 0;
-        w.when_pre_attack_finished = 0;
-        w.when_last_reload_started = 0;
-        if w.template.shots_per_barrel == 0 {
-            w.template.shots_per_barrel = 1;
-            w.num_shots_for_cur_barrel = 1;
-        }
-        Self::reload_weapon(&mut w, now);
+    /// The constructor's `allocateNewWeapon` + `reloadAmmo`.
+    fn init_and_reload_weapon(
+        tmpl: &Option<WeaponTemplate>,
+        sim: &mut dyn SimApi,
+        owner: ObjectSlot,
+    ) -> Option<Weapon> {
+        let mut w = Weapon::new(tmpl.as_ref()?.clone(), WeaponSlotType::Primary, sim.frame());
+        weapon_fire::reload_ammo(&mut w, sim, owner);
         Some(w)
     }
 
-    fn reload_weapon(w: &mut Weapon, now: UnsignedInt) {
-        let clip = w.template.clip_size;
-        if clip > 0 && w.ammo_in_clip == clip as UnsignedInt {
-            return;
-        }
-        w.ammo_in_clip = if clip <= 0 {
-            0x7fff_ffff
-        } else {
-            clip as UnsignedInt
-        };
-        w.status = WeaponStatus::ReloadingClip;
-        let reload_time = w.template.clip_reload_time.max(0) as UnsignedInt;
-        w.when_last_reload_started = now;
-        w.when_we_can_fire_again = now.wrapping_add(reload_time);
-    }
-
-    fn force_fire_weapon_slot(
-        wpn: &mut Option<Weapon>,
-        sim: &mut dyn SimApi,
-        owner: ObjectSlot,
-    ) {
+    /// Force-fires the weapon at the owner's position if it is ready.
+    fn force_fire_weapon_slot(wpn: &mut Option<Weapon>, sim: &mut dyn SimApi, owner: ObjectSlot) {
         let Some(w) = wpn.as_mut() else {
             return;
         };
-        let now = sim.frame();
-        if w.get_status(now) != WeaponStatus::ReadyToFire || w.ammo_in_clip == 0 {
+        if w.get_status(sim.frame()) != WeaponStatus::ReadyToFire {
             return;
-        }
-        // Headless/no-draw `Drawable::getBarrelCount` returns `0`, wrapping `cur_barrel >= 0` before firing.
-        let barrel_count = 0;
-        if w.cur_barrel >= barrel_count {
-            w.cur_barrel = 0;
-            w.num_shots_for_cur_barrel = w.template.shots_per_barrel;
         }
         let pos = sim
             .object(owner)
             .map(|o| *o.thing.get_position())
             .unwrap_or_default();
-        let wpn_name = w.template.name.clone();
-        sim.fire_weapon_template(owner, &wpn_name, None, &pos);
-
-        w.last_fire_frame = now;
-        w.ammo_in_clip = w.ammo_in_clip.saturating_sub(1);
-        w.max_shot_count = w.max_shot_count.saturating_sub(1);
-        w.num_shots_for_cur_barrel = w.num_shots_for_cur_barrel.saturating_sub(1);
-        if w.num_shots_for_cur_barrel <= 0 {
-            w.cur_barrel += 1;
-            w.num_shots_for_cur_barrel = w.template.shots_per_barrel;
-        }
-
-        if w.ammo_in_clip == 0 {
-            if w.template.reload_type == WeaponReloadType::AutoReload {
-                Self::reload_weapon(w, now);
-            } else {
-                w.status = WeaponStatus::OutOfAmmo;
-                w.when_we_can_fire_again = 0x7fff_ffff;
-            }
-        } else {
-            w.status = WeaponStatus::BetweenFiringShots;
-            let delay = w.template.min_delay_between_shots.max(0) as UnsignedInt;
-            w.when_last_reload_started = now;
-            w.when_we_can_fire_again = now.wrapping_add(delay);
-        }
+        weapon_fire::force_fire_weapon(w, sim, owner, &pos);
     }
 
     fn xfer_opt_weapon(
@@ -248,25 +194,25 @@ impl BehaviorModule for FireWeaponWhenDamagedBehavior {
 
     fn on_object_created(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.schedule.bind(ctx);
-        let now = sim.frame();
+        let owner = ctx.owner_slot;
 
         self.reaction_weapon_pristine =
-            Self::init_and_reload_weapon(&self.data.reaction_weapon_pristine, now);
+            Self::init_and_reload_weapon(&self.data.reaction_weapon_pristine, sim, owner);
         self.reaction_weapon_damaged =
-            Self::init_and_reload_weapon(&self.data.reaction_weapon_damaged, now);
+            Self::init_and_reload_weapon(&self.data.reaction_weapon_damaged, sim, owner);
         self.reaction_weapon_really_damaged =
-            Self::init_and_reload_weapon(&self.data.reaction_weapon_really_damaged, now);
+            Self::init_and_reload_weapon(&self.data.reaction_weapon_really_damaged, sim, owner);
         self.reaction_weapon_rubble =
-            Self::init_and_reload_weapon(&self.data.reaction_weapon_rubble, now);
+            Self::init_and_reload_weapon(&self.data.reaction_weapon_rubble, sim, owner);
 
         self.continuous_weapon_pristine =
-            Self::init_and_reload_weapon(&self.data.continuous_weapon_pristine, now);
+            Self::init_and_reload_weapon(&self.data.continuous_weapon_pristine, sim, owner);
         self.continuous_weapon_damaged =
-            Self::init_and_reload_weapon(&self.data.continuous_weapon_damaged, now);
+            Self::init_and_reload_weapon(&self.data.continuous_weapon_damaged, sim, owner);
         self.continuous_weapon_really_damaged =
-            Self::init_and_reload_weapon(&self.data.continuous_weapon_really_damaged, now);
+            Self::init_and_reload_weapon(&self.data.continuous_weapon_really_damaged, sim, owner);
         self.continuous_weapon_rubble =
-            Self::init_and_reload_weapon(&self.data.continuous_weapon_rubble, now);
+            Self::init_and_reload_weapon(&self.data.continuous_weapon_rubble, sim, owner);
 
         if self.data.initially_active != FALSE {
             self.upgrade

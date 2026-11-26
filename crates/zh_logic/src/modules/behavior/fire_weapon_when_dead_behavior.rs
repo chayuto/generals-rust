@@ -1,6 +1,7 @@
 //! `PKT-269`: `FireWeaponWhenDeadBehaviorModuleData` and `FireWeaponWhenDeadBehavior`
 //! (`FireWeaponWhenDeadBehavior.h`, `FireWeaponWhenDeadBehavior.cpp`).
 
+use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext};
 use crate::combat::damage::DamageInfo;
 use crate::modules::behavior::behavior_module::{xfer_behavior_module_header, xfer_module_version};
@@ -245,7 +246,7 @@ impl DieFacet for FireWeaponWhenDeadBehavior {
         }
 
         if let Some(ref wpn_name) = self.data.death_weapon {
-            sim.fire_weapon_template(owner, wpn_name, None, &pos);
+            weapon_fire::create_and_fire_temp_weapon(sim, owner, wpn_name, &pos);
         }
     }
 }

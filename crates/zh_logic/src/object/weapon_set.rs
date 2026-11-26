@@ -321,7 +321,11 @@ impl WeaponSet {
         self.cur_weapon_template_set = Some(tmpl_set.clone());
         for (i, wt_opt) in tmpl_set.templates.iter().enumerate() {
             let slot = WeaponSlotType::from_i32(i as Int).unwrap_or(WeaponSlotType::Primary);
-            self.weapons[i] = wt_opt.as_ref().map(|wt| Weapon::new(wt.clone(), slot, now));
+            self.weapons[i] = wt_opt.as_ref().map(|wt| {
+                let mut weapon = Weapon::new(wt.clone(), slot, now);
+                weapon.load_at_creation(now);
+                weapon
+            });
         }
         self.cur_weapon = WeaponSlotType::Primary;
         self.cur_weapon_locked_status = WeaponLockType::NotLocked;
