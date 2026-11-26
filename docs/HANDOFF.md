@@ -7,7 +7,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
-- Packets: 249 of 463 implemented, 214 unported (Phase 2: 102, Phase 4: 4, Phase 5: 62, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 253 of 463 implemented, 210 unported (Phase 2: 102, Phase 4: 4, Phase 5: 58, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
 
@@ -30,6 +30,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | after `9d53470` | `PKT-272 GenerateMinefieldBehavior`, `PKT-279 MinefieldBehavior`; cliff cells, overlap query, module self-lending |
 | after `d7fc62e` | `PKT-368 SpecialAbilityUpdate`, `PKT-314 CommandButtonHuntUpdate`; one `SpecialPowerUpdateFacet` for both porting branches |
 | after `52478cd` | `PKT-296 SpawnBehavior`, `PKT-365 SlavedUpdate` |
+| after `c0b420d` | `PKT-334 HelicopterSlowDeathBehavior`, `PKT-267 DumbProjectileBehavior`, `PKT-382 TensileFormationUpdate`, `PKT-346 OCLUpdate`; weapon speeds now converted to per frame |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 

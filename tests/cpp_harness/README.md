@@ -177,9 +177,24 @@ A small object normally spans at most two cells per axis, and its cell array has
 
 - **What happens:** the field is parsed and never used. The crushing damage line also swaps sine and cosine for its sideways offset, so it is not perpendicular to the fall.
 
+### A missing blade bone sends the helicopter's own position through its transform
+
+- **Where:** `HelicopterSlowDeathBehavior::update`, the blade fly-off.
+- **What happens:** `bladePos` starts as the world position and is transformed by the drawable even when `getPristineBonePositions` found nothing, so the effects are made far from the helicopter.
+- **Guard:** `golden_pkt334_267_382_346_misc` runs with and without the bone.
+
+### `DumbProjectileBehavior` and `TensileFormationUpdate` dereference null
+
+- **Where:** `projectileHandleCollision` with no detonation weapon (unless the other object is the intended victim); `TensileFormationUpdate::update` when `getClosestObject` finds nothing within the major radius.
+- **What happens:** both crash. The port accepts the collision and skips the topple.
+- **Guard:** `gen_pkt334_267_382_346_misc.cpp` avoids both inputs; keep formation members on the map.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
-These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault.
+These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault or a silent wrong answer.
+
+- **Layer heights.** The base `TerrainLogic::getLayerHeight` returns 0, and `Object::getHeightAboveTerrain` uses it. A harness with non-flat ground must override it as well as `getGroundHeight`.
+- **Effects need filed objects.** `FXList` drops an effect whose object or position is shrouded, which includes an object not yet filed by `ThePartitionManager->update()` and any position off the map.
 
 - **Neutral player without a default team.** `Player::init` leaves `m_defaultTeam` null, and `GarrisonContain::onObjectCreated` spawns its `InitialRoster` into `getControllingPlayer()->getDefaultTeam()`. `init_with_neutral_player()` now creates `TeamNeutral` and aborts if the player still has no default team.
 - **UI messages.** Damaging a structure reaches `Radar::tryUnderAttackEvent`, then `InGameUI::message`, which needs `TheGlobalLanguageData`. `NullInGameUI` overrides the message calls as no-ops.

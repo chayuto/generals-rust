@@ -23,6 +23,7 @@ use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::update::deletion_update::DeletionUpdate;
+use crate::modules::update::ocl_update::OclUpdate;
 use crate::modules::update::physics_update::{self, PhysicsState};
 use crate::modules::update::spy_vision_update::SpyVisionUpdate;
 use crate::modules::{
@@ -721,6 +722,7 @@ pub struct ObjectRecord {
     pub ai_has_locomotor: Bool,
     pub loco_max_lift: Real,
     pub loco_max_turn_rate: Real,
+    pub loco_max_braking: Real,
     pub loco_ultra_accurate: Bool,
     pub loco_close_enough_dist: Real,
     pub loco_close_enough_dist_3d: Bool,
@@ -824,6 +826,7 @@ impl ObjectRecord {
             ai_has_locomotor: FALSE,
             loco_max_lift: 1e10,
             loco_max_turn_rate: 1e10,
+            loco_max_braking: 1e10,
             loco_ultra_accurate: FALSE,
             loco_close_enough_dist: 1.0,
             loco_close_enough_dist_3d: FALSE,
@@ -1280,6 +1283,19 @@ pub trait SimView {
     fn object_shroud_clearing_range(&self, owner: ObjectSlot) -> Real;
     fn object_shroud_range(&self, owner: ObjectSlot) -> Real;
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool;
+    /// `PartitionManager::estimateTerrainExtremesAlongLine`, the high extreme only. `None`
+    /// when no cell of the line is on the map.
+    fn estimate_highest_terrain_along_line(&self, start: &Coord3D, end: &Coord3D) -> Option<Real>;
+    /// `PartitionManager::getClosestObject(pos, radius, FROM_CENTER_2D)` without filters.
+    fn find_closest_object_to_position(&self, pos: &Coord3D, radius: Real) -> Option<ObjectSlot>;
+    /// `isImmuneToClearBuildingAttacks` of the object's contain module.
+    fn contain_is_immune_to_clear(&self, owner: ObjectSlot) -> Bool;
+    /// `ParkingPlaceBehaviorInterface::hasReservedSpace` on any module of `airfield`.
+    fn object_has_reserved_space(&self, airfield: ObjectSlot, id: ObjectId) -> Bool;
+    /// `Player::getPlayerColor` of the team's player.
+    fn player_color(&self, team_id: TeamId) -> Int;
+    /// `PlayerTemplate::getSide` of the team's player.
+    fn player_side(&self, team_id: TeamId) -> String;
     /// `getStealth()` and its accessors. `None` without a `StealthUpdate`, or while it runs.
     fn stealth_params(&self, owner: ObjectSlot) -> Option<StealthParams>;
     /// `*getBodyModule()->getLastDamageTimestamp()`.
@@ -1900,6 +1916,18 @@ pub trait SimApi: SimView {
     fn physics_apply_random_rotation(&mut self, owner: ObjectSlot);
     fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real);
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real);
+    /// `Locomotor::setMaxBraking` on the current locomotor.
+    fn set_locomotor_max_braking(&mut self, owner: ObjectSlot, max_braking: Real);
+    /// `PhysicsBehavior::setYawRate`.
+    fn physics_set_yaw_rate(&mut self, owner: ObjectSlot, rate: Real);
+    /// `Pathfinder::createAWallFromMyFootprint`. Only the membership is recorded.
+    fn pathfinder_create_wall(&mut self, owner: ObjectSlot);
+    /// `Pathfinder::removeWallFromMyFootprint`.
+    fn pathfinder_remove_wall(&mut self, owner: ObjectSlot);
+    /// `fireWeaponTemplate` with `isProjectileDetonation`, which is unported: recorded.
+    fn fire_projectile_detonation(&mut self, owner: ObjectSlot, weapon_name: &str, pos: &Coord3D, bonus_flags: UnsignedInt);
+    /// `AcademyStats::recordClearedGarrisonedBuilding` on the controlling player.
+    fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot);
     fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool);
     fn ai_idle(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
     fn ai_hunt(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
@@ -2175,6 +2203,17 @@ pub struct SimWorld {
     pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
     /// `AcademyStats::m_vehiclesDisguised` by player index (academy stats are not in the world).
     pub vehicles_disguised: BTreeMap<Int, UnsignedInt>,
+    /// Footprints registered by `createAWallFromMyFootprint`.
+    pub pathfind_walls: BTreeSet<ObjectId>,
+    /// Unported detonation damage: source, weapon, position, extra bonus flags.
+    pub projectile_detonations: Vec<(ObjectId, String, Coord3D, UnsignedInt)>,
+    /// `AcademyStats::m_clearedGarrisonedBuildings` by player index.
+    pub cleared_garrisons: BTreeMap<Int, UnsignedInt>,
+    /// `Player::m_color` by team.
+    pub team_colors: BTreeMap<TeamId, Int>,
+    /// `PlayerTemplate::getSide` by team.
+    pub team_sides: BTreeMap<TeamId, String>,
+    pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
     pub ai_commands: Vec<(ObjectId, String)>,
     /// `GameLogic::m_drawIconUI`.
@@ -2291,6 +2330,12 @@ impl SimWorld {
             deselected_objects: Vec::new(),
             stealth_detected_events: Vec::new(),
             vehicles_disguised: BTreeMap::new(),
+            pathfind_walls: BTreeSet::new(),
+            projectile_detonations: Vec::new(),
+            cleared_garrisons: BTreeMap::new(),
+            team_colors: BTreeMap::new(),
+            team_sides: BTreeMap::new(),
+            slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
             ai_commands: Vec::new(),
             draw_icon_ui: TRUE,
@@ -5699,6 +5744,63 @@ impl SimView for SimContext {
             .collect()
     }
 
+    fn estimate_highest_terrain_along_line(
+        &self,
+        start: &Coord3D,
+        end: &Coord3D,
+    ) -> Option<Real> {
+        crate::spatial::terrain::estimate_highest_terrain_along_line(
+            &self.world.partition,
+            self.terrain.as_ref(),
+            start,
+            end,
+        )
+    }
+
+    fn find_closest_object_to_position(&self, pos: &Coord3D, radius: Real) -> Option<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let found = self.world.partition.get_closest_object(
+            QueryCenter::Position(*pos),
+            radius,
+            DistanceCalculationType::FromCenter2d,
+            &|id| partition_object(objects, factory, id),
+            &mut |_| true,
+        );
+        found.id.and_then(|id| objects.slot_by_id(id))
+    }
+
+    fn contain_is_immune_to_clear(&self, owner: ObjectSlot) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.contain_slot)
+            .and_then(|cs| self.world.modules.payload(cs))
+            .and_then(|p| p.as_contain())
+            .map_or(FALSE, |c| c.is_immune_to_clear_building_attacks())
+    }
+
+    fn object_has_reserved_space(&self, airfield: ObjectSlot, id: ObjectId) -> Bool {
+        let found = self.world.objects.get(airfield).is_some_and(|o| {
+            o.behaviors.iter().any(|&(ms, _)| {
+                self.world
+                    .modules
+                    .payload(ms)
+                    .and_then(|p| p.as_parking_place())
+                    .is_some_and(|p| p.has_reserved_space(id) != FALSE)
+            })
+        });
+        Bool::from(found)
+    }
+
+    fn player_color(&self, team_id: TeamId) -> Int {
+        self.world.team_colors.get(&team_id).copied().unwrap_or(0)
+    }
+
+    fn player_side(&self, team_id: TeamId) -> String {
+        self.world.team_sides.get(&team_id).cloned().unwrap_or_default()
+    }
+
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
         let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
             return FALSE;
@@ -8163,6 +8265,14 @@ impl SimApi for SimContext {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.supply_dropzone_resets.push(id);
         }
+        // `findUpdateModule("OCLUpdate")->resetTimer()`.
+        if let Some(ms) = self.module_by_name(owner, "OCLUpdate") {
+            let _ = self.dispatch_module(ms, |m, sim, _| {
+                if let Some(ocl) = m.as_any_mut().and_then(|a| a.downcast_mut::<OclUpdate>()) {
+                    ocl.reset_timer(sim);
+                }
+            });
+        }
     }
 
     fn eject_pilot_dying(&mut self, owner: ObjectSlot) {
@@ -9240,6 +9350,66 @@ impl SimApi for SimContext {
         if let Some(p) = physics_update::physics_mut(self, owner) {
             p.set_roll_rate(rate);
         }
+    }
+
+    fn set_locomotor_max_braking(&mut self, owner: ObjectSlot, max_braking: Real) {
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        obj.loco_max_braking = max_braking;
+        let Some(ai_ms) = obj.ai_slot else {
+            return;
+        };
+        if !self.world.modules.is_executing(ai_ms) {
+            let _ = self.dispatch_module(ai_ms, |m, _, _| {
+                if let Some(ai) = m.as_ai_mut() {
+                    ai.set_locomotor_max_braking(max_braking);
+                }
+            });
+        }
+    }
+
+    fn physics_set_yaw_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        if let Some(p) = physics_update::physics_mut(self, owner) {
+            p.set_yaw_rate(rate);
+        }
+    }
+
+    fn pathfinder_create_wall(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.pathfind_walls.insert(id);
+        }
+    }
+
+    fn pathfinder_remove_wall(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.pathfind_walls.remove(&id);
+        }
+    }
+
+    fn fire_projectile_detonation(
+        &mut self,
+        owner: ObjectSlot,
+        weapon_name: &str,
+        pos: &Coord3D,
+        bonus_flags: UnsignedInt,
+    ) {
+        let owner_id = self.world.objects.id_of(owner).unwrap_or(ObjectId::INVALID);
+        self.world.projectile_detonations.push((
+            owner_id,
+            weapon_name.to_owned(),
+            *pos,
+            bonus_flags,
+        ));
+    }
+
+    fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        let player = self.player_index_for_team(team);
+        let count = self.world.cleared_garrisons.entry(player).or_default();
+        *count = count.wrapping_add(1);
     }
 
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
@@ -10558,6 +10728,30 @@ impl SimView for MockSimApi {
         self.ctx.enemy_player_objects(team_id)
     }
 
+    fn estimate_highest_terrain_along_line(&self, start: &Coord3D, end: &Coord3D) -> Option<Real> {
+        self.ctx.estimate_highest_terrain_along_line(start, end)
+    }
+
+    fn find_closest_object_to_position(&self, pos: &Coord3D, radius: Real) -> Option<ObjectSlot> {
+        self.ctx.find_closest_object_to_position(pos, radius)
+    }
+
+    fn contain_is_immune_to_clear(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.contain_is_immune_to_clear(owner)
+    }
+
+    fn object_has_reserved_space(&self, airfield: ObjectSlot, id: ObjectId) -> Bool {
+        self.ctx.object_has_reserved_space(airfield, id)
+    }
+
+    fn player_color(&self, team_id: TeamId) -> Int {
+        self.ctx.player_color(team_id)
+    }
+
+    fn player_side(&self, team_id: TeamId) -> String {
+        self.ctx.player_side(team_id)
+    }
+
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
         self.ctx.contain_is_garrisonable(owner)
     }
@@ -11779,6 +11973,30 @@ impl SimApi for MockSimApi {
 
     fn physics_set_roll_rate(&mut self, owner: ObjectSlot, rate: Real) {
         self.ctx.physics_set_roll_rate(owner, rate);
+    }
+
+    fn set_locomotor_max_braking(&mut self, owner: ObjectSlot, max_braking: Real) {
+        self.ctx.set_locomotor_max_braking(owner, max_braking);
+    }
+
+    fn physics_set_yaw_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        self.ctx.physics_set_yaw_rate(owner, rate);
+    }
+
+    fn pathfinder_create_wall(&mut self, owner: ObjectSlot) {
+        self.ctx.pathfinder_create_wall(owner);
+    }
+
+    fn pathfinder_remove_wall(&mut self, owner: ObjectSlot) {
+        self.ctx.pathfinder_remove_wall(owner);
+    }
+
+    fn fire_projectile_detonation(&mut self, owner: ObjectSlot, weapon_name: &str, pos: &Coord3D, bonus_flags: UnsignedInt) {
+        self.ctx.fire_projectile_detonation(owner, weapon_name, pos, bonus_flags);
+    }
+
+    fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {
+        self.ctx.record_cleared_garrisoned_building(owner);
     }
 
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {

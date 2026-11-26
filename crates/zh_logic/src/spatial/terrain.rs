@@ -165,3 +165,73 @@ impl CliffMap {
         self.get_cliff_state(cell(x, self.width), cell(y, self.height))
     }
 }
+
+/// `PartitionManager::estimateTerrainExtremesAlongLine`, the high extreme only: the cells
+/// of the Bresenham line between the two points, each sampled as `calcHeights` caches it.
+/// `None` when none of them is on the map. The cache is not kept, so terrain changed after
+/// the map loaded is seen here but not by the original.
+pub fn estimate_highest_terrain_along_line(
+    grid: &crate::spatial::partition_grid::PartitionGrid,
+    terrain: &dyn crate::object::thing::ThingTerrainAccess,
+    pos: &zh_common::math::Coord3D,
+    pos_other: &zh_common::math::Coord3D,
+) -> Option<zh_common::types::Real> {
+    use zh_common::types::{Int, Real};
+    const HUGE_DIST: Real = 1_000_000.0;
+    const MAP_XY_FACTOR: Real = 10.0;
+
+    let (mut x, mut y) = grid.world_to_cell(pos.x, pos.y);
+    let (end_x, end_y) = grid.world_to_cell(pos_other.x, pos_other.y);
+    let delta_x = end_x.wrapping_sub(x).wrapping_abs();
+    let delta_y = end_y.wrapping_sub(y).wrapping_abs();
+    let step_x: Int = if end_x >= x { 1 } else { -1 };
+    let step_y: Int = if end_y >= y { 1 } else { -1 };
+    let (mut xinc1, mut xinc2, mut yinc1, mut yinc2) = (step_x, step_x, step_y, step_y);
+    let (den, mut num, numadd, numpixels) = if delta_x >= delta_y {
+        xinc1 = 0;
+        yinc2 = 0;
+        (delta_x, delta_x / 2, delta_y, delta_x)
+    } else {
+        xinc2 = 0;
+        yinc1 = 0;
+        (delta_y, delta_y / 2, delta_x, delta_y)
+    };
+
+    let cell_size = grid.cell_size();
+    let lo = grid.world_extents().lo;
+    let step = cell_size / zh_common::math::gm_ceilf(cell_size / MAP_XY_FACTOR);
+    let mut highest = -HUGE_DIST;
+    let mut valid = false;
+    for _ in 0..=numpixels {
+        if grid.cell_index(x, y).is_some() {
+            valid = true;
+            let x_base = lo.x + (x as Real) * cell_size;
+            let y_base = lo.y + (y as Real) * cell_size;
+            let mut cell_high = -HUGE_DIST;
+            let mut yy: Real = 0.0;
+            while yy <= cell_size {
+                let mut xx: Real = 0.0;
+                while xx <= cell_size {
+                    let h = terrain.get_ground_height(x_base + xx, y_base + yy, None);
+                    if h > cell_high {
+                        cell_high = h;
+                    }
+                    xx += step;
+                }
+                yy += step;
+            }
+            if cell_high > highest {
+                highest = cell_high;
+            }
+        }
+        num += numadd;
+        if num >= den {
+            num -= den;
+            x += xinc1;
+            y += yinc1;
+        }
+        x += xinc2;
+        y += yinc2;
+    }
+    valid.then_some(highest)
+}

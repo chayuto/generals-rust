@@ -5,6 +5,8 @@ pub mod base_renerate_update;
 pub mod assisted_targeting_update;
 pub mod auto_find_healing_update;
 pub mod command_button_hunt_update;
+pub mod helicopter_slow_death_update;
+pub mod ocl_update;
 pub mod slaved_update;
 pub mod special_ability_update;
 pub mod spectre_gunship_deployment_update;
@@ -38,6 +40,7 @@ pub mod stealth_detector_update;
 pub mod stealth_update;
 pub mod supply_center_production_exit_update;
 pub mod structure_topple_update;
+pub mod tensile_formation_update;
 pub mod topple_update;
 pub mod weapon_bonus_update;
 
@@ -49,6 +52,36 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "HelicopterSlowDeathBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x003 | FacetMask::SLOW_DEATH.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        helicopter_slow_death_update::parse_helicopter_slow_death_behavior_data,
+        helicopter_slow_death_update::create_helicopter_slow_death_behavior,
+    );
+    reg.register_module(
+        nk,
+        "OCLUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        ocl_update::parse_ocl_update_data,
+        ocl_update::create_ocl_update,
+    );
+    reg.register_module(
+        nk,
+        "TensileFormationUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        tensile_formation_update::parse_tensile_formation_update_data,
+        tensile_formation_update::create_tensile_formation_update,
+    );
     reg.register_module(
         nk,
         "SlavedUpdate",

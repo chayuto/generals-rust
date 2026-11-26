@@ -20,6 +20,7 @@ use zh_logic::economy::MAX_PLAYER_COUNT;
 use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use zh_logic::modules::module_factory::ModuleParseContext;
 use zh_logic::modules::update::deletion_update::DeletionUpdate;
+use zh_logic::modules::update::ocl_update::OclUpdate;
 use zh_logic::modules::update::physics_update::{self, PhysicsState};
 use zh_logic::modules::update::spy_vision_update::SpyVisionUpdate;
 use zh_logic::modules::{
@@ -504,6 +505,24 @@ impl SimView for EngineSim<'_> {
     }
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
         not_wired("contain_is_garrisonable")
+    }
+    fn estimate_highest_terrain_along_line(&self, start: &Coord3D, end: &Coord3D) -> Option<Real> {
+        not_wired("estimate_highest_terrain_along_line")
+    }
+    fn find_closest_object_to_position(&self, pos: &Coord3D, radius: Real) -> Option<ObjectSlot> {
+        not_wired("find_closest_object_to_position")
+    }
+    fn contain_is_immune_to_clear(&self, owner: ObjectSlot) -> Bool {
+        not_wired("contain_is_immune_to_clear")
+    }
+    fn object_has_reserved_space(&self, airfield: ObjectSlot, id: ObjectId) -> Bool {
+        not_wired("object_has_reserved_space")
+    }
+    fn player_color(&self, team_id: TeamId) -> Int {
+        not_wired("player_color")
+    }
+    fn player_side(&self, team_id: TeamId) -> String {
+        not_wired("player_side")
     }
     fn stealth_params(&self, owner: ObjectSlot) -> Option<StealthParams> {
         not_wired("stealth_params")
@@ -1248,6 +1267,24 @@ impl SimApi for EngineSim<'_> {
     }
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
         not_wired("physics_set_pitch_rate")
+    }
+    fn set_locomotor_max_braking(&mut self, owner: ObjectSlot, max_braking: Real) {
+        not_wired("set_locomotor_max_braking")
+    }
+    fn physics_set_yaw_rate(&mut self, owner: ObjectSlot, rate: Real) {
+        not_wired("physics_set_yaw_rate")
+    }
+    fn pathfinder_create_wall(&mut self, owner: ObjectSlot) {
+        not_wired("pathfinder_create_wall")
+    }
+    fn pathfinder_remove_wall(&mut self, owner: ObjectSlot) {
+        not_wired("pathfinder_remove_wall")
+    }
+    fn fire_projectile_detonation(&mut self, owner: ObjectSlot, weapon_name: &str, pos: &Coord3D, bonus_flags: UnsignedInt) {
+        not_wired("fire_projectile_detonation")
+    }
+    fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {
+        not_wired("record_cleared_garrisoned_building")
     }
     fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool) {
         not_wired("physics_set_is_in_free_fall")

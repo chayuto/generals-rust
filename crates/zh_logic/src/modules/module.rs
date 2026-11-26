@@ -1952,6 +1952,7 @@ pub trait AiUpdateFacet {
     }
     fn set_locomotor_max_lift(&mut self, _max_lift: Real) {}
     fn set_locomotor_max_turn_rate(&mut self, _max_turn_rate: Real) {}
+    fn set_locomotor_max_braking(&mut self, _max_braking: Real) {}
     fn set_locomotor_ultra_accurate(&mut self, _ultra: Bool) {}
     fn set_locomotor_close_enough_dist(&mut self, _dist: Real) {}
     fn set_locomotor_close_enough_dist_3d(&mut self, _is_3d: Bool) {}

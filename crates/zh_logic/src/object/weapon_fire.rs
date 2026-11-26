@@ -10,14 +10,22 @@
 //!
 //! Golden test: `crates/zh_logic/tests/golden_wp55_fire.rs`.
 
-use zh_common::math::{real_to_int_floor, Coord3D};
-use zh_common::types::{Bool, Int, Real, UnsignedInt, FALSE, TRUE};
+use zh_common::math::{real_to_int_floor, Coord3D, Matrix3D};
+use zh_common::types::{Bool, Int, ObjectId, Real, Relationship, UnsignedInt, FALSE, TRUE};
 
-use super::weapon::{Weapon, WeaponReloadType, NO_MAX_SHOTS_LIMIT};
+use super::weapon::{
+    Weapon, WeaponReloadType, NO_MAX_SHOTS_LIMIT, WEAPON_COLLIDE_ALLIES,
+    WEAPON_COLLIDE_BALLISTIC_MISSILES, WEAPON_COLLIDE_CONTROLLED_STRUCTURES,
+    WEAPON_COLLIDE_ENEMIES, WEAPON_COLLIDE_PROJECTILES, WEAPON_COLLIDE_SHRUBBERY,
+    WEAPON_COLLIDE_SMALL_MISSILES, WEAPON_COLLIDE_STRUCTURES, WEAPON_COLLIDE_WALLS,
+};
 use super::weapon_set::WeaponSlotType;
 use crate::arena::ObjectSlot;
 use crate::gamelogic::global_data::{WeaponBonus, WeaponBonusField};
+use crate::modules::update::physics_update;
 use crate::rules::combat_types::{DamageType, WeaponStatus};
+use crate::rules::kind_of::KindOfType;
+use crate::rules::object_status_types::ObjectStatusType;
 use crate::sim::{SimApi, SimView};
 
 /// `Weapon::computeBonus`. `weapon_bonus_condition_flags` already merges the container's flags.
@@ -107,6 +115,7 @@ fn private_fire_weapon(
     owner: ObjectSlot,
     victim: Option<ObjectSlot>,
     victim_pos: Option<Coord3D>,
+    detonation: Option<UnsignedInt>,
 ) -> Bool {
     if weapon.template.leech_range_weapon != FALSE {
         weapon.set_leech_range_active(TRUE);
@@ -124,7 +133,7 @@ fn private_fire_weapon(
         return FALSE;
     }
 
-    let bonus = compute_bonus(weapon, sim, owner, 0);
+    let bonus = compute_bonus(weapon, sim, owner, detonation.unwrap_or(0));
     let now = sim.frame();
     if weapon.get_status(now) != WeaponStatus::ReadyToFire || weapon.ammo_in_clip == 0 {
         return FALSE;
@@ -161,7 +170,10 @@ fn private_fire_weapon(
         pos.z = sim.terrain().get_ground_height(pos.x, pos.y, None);
         weapon.scatter_targets_unused.swap_remove(pick);
     }
-    sim.fire_weapon_template(owner, &weapon.template.name, target, &pos);
+    match detonation {
+        Some(flags) => sim.fire_projectile_detonation(owner, &weapon.template.name, &pos, flags),
+        None => sim.fire_weapon_template(owner, &weapon.template.name, target, &pos),
+    }
 
     weapon.last_fire_frame = now;
     weapon.ammo_in_clip = weapon.ammo_in_clip.wrapping_sub(1);
@@ -202,7 +214,7 @@ pub fn fire_weapon_at_object(
     owner: ObjectSlot,
     victim: ObjectSlot,
 ) -> Bool {
-    private_fire_weapon(weapon, sim, owner, Some(victim), None)
+    private_fire_weapon(weapon, sim, owner, Some(victim), None, None)
 }
 
 /// `Weapon::fireWeapon(source, pos)`.
@@ -212,7 +224,7 @@ pub fn fire_weapon_at_position(
     owner: ObjectSlot,
     pos: &Coord3D,
 ) -> Bool {
-    private_fire_weapon(weapon, sim, owner, None, Some(*pos))
+    private_fire_weapon(weapon, sim, owner, None, Some(*pos), None)
 }
 
 /// `Weapon::forceFireWeapon`. The projectile it returns in C++ comes from the unported
@@ -223,7 +235,7 @@ pub fn force_fire_weapon(
     owner: ObjectSlot,
     pos: &Coord3D,
 ) {
-    private_fire_weapon(weapon, sim, owner, None, Some(*pos));
+    private_fire_weapon(weapon, sim, owner, None, Some(*pos), None);
 }
 
 fn allocate_temp_weapon(sim: &dyn SimView, name: &str) -> Option<Weapon> {
@@ -257,4 +269,142 @@ pub fn create_and_fire_temp_weapon_at_object(
     };
     load_ammo_now(&mut weapon, sim, owner);
     fire_weapon_at_object(&mut weapon, sim, owner, victim);
+}
+
+/// `WeaponStore::handleProjectileDetonation`: a temporary weapon fired at `pos` with the
+/// launcher's bonus flags.
+pub fn handle_projectile_detonation(
+    sim: &mut dyn SimApi,
+    owner: ObjectSlot,
+    name: &str,
+    pos: &Coord3D,
+    extra_bonus_flags: UnsignedInt,
+) {
+    let Some(mut weapon) = allocate_temp_weapon(sim, name) else {
+        return;
+    };
+    load_ammo_now(&mut weapon, sim, owner);
+    private_fire_weapon(
+        &mut weapon,
+        sim,
+        owner,
+        None,
+        Some(*pos),
+        Some(extra_bonus_flags),
+    );
+}
+
+/// `Weapon::positionProjectileForLaunch`. Launch bones and turrets come from the unported
+/// draw and AI modules, so the projectile starts at the launcher's own transform, which is
+/// what C++ does for a launcher with neither.
+pub fn position_projectile_for_launch(
+    sim: &mut dyn SimApi,
+    projectile: ObjectSlot,
+    launcher: Option<ObjectSlot>,
+    _wslot: WeaponSlotType,
+    _specific_barrel_to_use: Int,
+) {
+    let Some((launcher, launcher_id, container, launcher_mtx)) = launcher.and_then(|l| {
+        sim.object(l)
+            .map(|o| (l, o.id, o.contained_by, *o.thing.get_transform_matrix()))
+    }) else {
+        sim.destroy_object(projectile);
+        return;
+    };
+
+    let enclosed = container
+        .is_some_and(|c| sim.contain_is_enclosing_container_for(c, launcher) != FALSE);
+    let world = if enclosed {
+        launcher_mtx
+    } else {
+        Matrix3D::mul(&launcher_mtx, &Matrix3D::identity())
+    };
+    let world_pos = Coord3D::new(world.rows[0][3], world.rows[1][3], world.rows[2][3]);
+    sim.set_object_transform_matrix(projectile, &world);
+    sim.set_object_position(projectile, &world_pos);
+    if let Some(p) = sim.object_mut(projectile) {
+        p.experience_tracker.experience_sink = launcher_id;
+    }
+
+    if sim.has_physics(launcher) != FALSE && sim.has_physics(projectile) != FALSE {
+        physics_update::transfer_velocity_to(sim, launcher, projectile);
+        if let Some(p) = physics_update::physics_mut(sim, projectile) {
+            p.ignore_collisions_with = launcher_id;
+        }
+    }
+}
+
+/// `WeaponTemplate::shouldProjectileCollideWith`. The sneaky-targeting immunity of
+/// `JetAIUpdate` is not modelled (that AI is unported).
+pub fn should_projectile_collide_with(
+    sim: &dyn SimView,
+    weapon_name: Option<&str>,
+    launcher: Option<ObjectSlot>,
+    projectile: ObjectSlot,
+    other: ObjectSlot,
+    intended_victim_id: ObjectId,
+) -> bool {
+    let (Some(shell), Some(thing)) = (sim.object(projectile), sim.object(other)) else {
+        return false;
+    };
+    if intended_victim_id == thing.id {
+        return true;
+    }
+    if let Some(l) = launcher {
+        if l == other || sim.object(l).and_then(|o| o.contained_by) == Some(other) {
+            return false;
+        }
+    }
+    // C++ would dereference a null template from here on; the collision is accepted.
+    let Some(template) = weapon_name.and_then(|n| sim.rules().weapon_store.find_weapon_template(n))
+    else {
+        return true;
+    };
+    if matches!(
+        template.damage_type,
+        DamageType::Flame | DamageType::ParticleBeam
+    ) && thing.status.test(ObjectStatusType::Burned.as_i32()) != FALSE
+    {
+        return false;
+    }
+    let is = |kind| sim.object_is_kind_of(other, kind) != FALSE;
+    if is(KindOfType::FsAirfield)
+        && sim.object_has_reserved_space(other, intended_victim_id) != FALSE
+    {
+        return false;
+    }
+
+    let mut required = match sim.player_relationship(projectile, other) {
+        Relationship::Allies => WEAPON_COLLIDE_ALLIES,
+        Relationship::Enemies => WEAPON_COLLIDE_ENEMIES,
+        _ => 0,
+    };
+    if is(KindOfType::Structure) {
+        if sim.player_index(thing.team_id) == sim.player_index(shell.team_id) {
+            required |= WEAPON_COLLIDE_CONTROLLED_STRUCTURES;
+        } else {
+            required |= WEAPON_COLLIDE_STRUCTURES;
+        }
+    }
+    if is(KindOfType::Shrubbery) {
+        required |= WEAPON_COLLIDE_SHRUBBERY;
+    }
+    if is(KindOfType::Projectile) {
+        required |= WEAPON_COLLIDE_PROJECTILES;
+    }
+    let fenced = thing
+        .thing
+        .template_override()
+        .get_final(&sim.rules().thing_factory)
+        .is_some_and(|t| t.get_fence_width() > 0.0);
+    if fenced {
+        required |= WEAPON_COLLIDE_WALLS;
+    }
+    if is(KindOfType::SmallMissile) {
+        required |= WEAPON_COLLIDE_SMALL_MISSILES;
+    }
+    if is(KindOfType::BallisticMissile) {
+        required |= WEAPON_COLLIDE_BALLISTIC_MISSILES;
+    }
+    (template.collide_mask & required) != 0
 }

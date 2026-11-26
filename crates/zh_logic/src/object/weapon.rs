@@ -6,7 +6,9 @@ use crate::gamelogic::global_data::{
 use crate::rules::combat_types::{
     DamageType, DeathType, WeaponStatus,
 };
-use zh_common::ini::{convert_duration_from_msecs_to_frames, IniError, IniReader};
+use zh_common::ini::{
+    convert_duration_from_msecs_to_frames, convert_velocity_in_secs_to_frames, IniError, IniReader,
+};
 use zh_common::math::{gm_ceilf, real_to_int_floor, Coord2D};
 use zh_common::random_value::PrngState;
 use zh_common::types::{
@@ -211,8 +213,8 @@ impl WeaponTemplate {
                     let i = IniReader::scan_index_list(value, &zh_common::ini::DEATH_TYPE_NAMES).map_err(|_| IniError::InvalidData)?;
                     self.death_type = DeathType::from_i32(i).unwrap_or(DeathType::Normal);
                 }
-                "WeaponSpeed" => self.weapon_speed = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "MinWeaponSpeed" => self.min_weapon_speed = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
+                "WeaponSpeed" => self.weapon_speed = convert_velocity_in_secs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?),
+                "MinWeaponSpeed" => self.min_weapon_speed = convert_velocity_in_secs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?),
                 "ScaleWeaponSpeed" => self.scale_weapon_speed = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
                 "WeaponRecoil" => self.weapon_recoil = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
                 "MinTargetPitch" => self.min_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,

@@ -6,6 +6,7 @@ pub mod behavior_module;
 pub mod bridge_scaffold_behavior;
 pub mod bridge_tower_behavior;
 pub mod bunker_buster_behavior;
+pub mod dumb_projectile_behavior;
 pub mod fire_weapon_when_damaged_behavior;
 pub mod fire_weapon_when_dead_behavior;
 pub mod generate_minefield_behavior;
@@ -31,6 +32,16 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Registers `WP-5.3` concrete `Behavior` module factories into `reg`.
 pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "DumbProjectileBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::PROJECTILE_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        dumb_projectile_behavior::parse_dumb_projectile_behavior_data,
+        dumb_projectile_behavior::create_dumb_projectile_behavior,
+    );
     reg.register_module(
         nk,
         "SpawnBehavior",
