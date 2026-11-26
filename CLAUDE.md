@@ -69,6 +69,7 @@ Each module's doc comment names its packet ID, packet doc and golden test (see `
 
 ## Gotchas
 
+- Do not run `cargo fmt --all`: the tree is not rustfmt-clean, so it rewrites about 190 files. Format only your new files with `rustfmt --edition 2021 <file>`, and not `lib.rs` or `mod.rs`, which pulls in child modules.
 - The golden vectors were recorded with `USE_DETERMINISTIC_MATH=1, RETAIL_COMPATIBLE_CRC=0`, so they pass only with default features. Under the `retail-crc` / `retail-xfer-save` features the crates compile, but golden suites such as `golden_pkt001_002` fail, and that is expected. Still port `#if RETAIL_COMPATIBLE_CRC` branches behind these features (conventions rule 10).
 - `docs/RUST_CONVENTIONS.md` says `zh_common::gamemath::gm_*`, but the real path is `zh_common::math::gm_*`. Most functions are re-exported from `math::gamemath`; `gm_floorf` and `gm_ceilf` are defined in `math/mod.rs`. `gm_powf`, `gm_expf` and `gm_logf` don't exist yet: port them with golden vectors first. Never fall back to std.
 - The dev profile sets `overflow-checks = true`, so a missing `wrapping_*` shows up as a panic in tests. Fix the arithmetic, not the test.
