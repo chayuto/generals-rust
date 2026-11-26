@@ -1167,6 +1167,19 @@ pub fn div_safe_f32(dividend: f32, divisor: f32) -> f32 {
     dividend / divisor.max(super::WWMATH_EPSILON)
 }
 
+/// A quotient as the reference build (ARM) stores it: a NaN made by the division
+/// itself is `0x7fc0_0000`, where x86 sets the sign bit. Use it where the result
+/// reaches saved or checksummed state and `0/0` or `inf/inf` can happen.
+#[inline]
+pub fn reference_div_f32(dividend: f32, divisor: f32) -> f32 {
+    let q = dividend / divisor;
+    if q.is_nan() && !dividend.is_nan() && !divisor.is_nan() {
+        f32::from_bits(0x7fc0_0000)
+    } else {
+        q
+    }
+}
+
 /// `WWMath::Clamp` (`wwmath.h:887`).
 #[inline]
 pub fn clamp_f32(val: f32, min: f32, max: f32) -> f32 {
@@ -1195,4 +1208,22 @@ pub fn wrap_f32(mut val: f32, min: f32, max: f32) -> f32 {
         val = max;
     }
     val
+}
+
+#[cfg(test)]
+mod reference_div_tests {
+    use super::reference_div_f32;
+
+    #[test]
+    fn a_generated_nan_has_the_reference_bits_on_every_target() {
+        let zero = std::hint::black_box(0.0_f32);
+        let inf = std::hint::black_box(f32::INFINITY);
+        assert_eq!(reference_div_f32(zero, zero).to_bits(), 0x7fc0_0000);
+        assert_eq!(reference_div_f32(inf, inf).to_bits(), 0x7fc0_0000);
+        // An operand NaN is passed through, and ordinary quotients are untouched.
+        let payload = std::hint::black_box(f32::from_bits(0xffc0_0001));
+        assert_eq!(reference_div_f32(payload, 1.0).to_bits(), 0xffc0_0001);
+        assert_eq!(reference_div_f32(1.0, zero), f32::INFINITY);
+        assert_eq!(reference_div_f32(6.0, 3.0), 2.0);
+    }
 }

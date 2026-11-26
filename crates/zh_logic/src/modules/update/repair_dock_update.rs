@@ -14,6 +14,7 @@ use crate::modules::module_factory::ModuleParseContext;
 use crate::rules::combat_types::{DamageType, DeathType};
 use crate::sim::{SimApi, SimView};
 use zh_common::ini::{IniError, IniReader};
+use zh_common::math::reference_div_f32;
 use zh_common::types::{Bool, NameKeyType, ObjectId, Real, UpdateSleepTime, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
@@ -81,9 +82,11 @@ impl DockFacet for RepairDockUpdate {
         };
         if self.last_repair == ObjectId::INVALID {
             self.last_repair = docker_id;
-            self.health_to_add_per_frame = (sim.object_max_health(docker)
-                - sim.object_health(docker))
-                / self.data.frames_for_full_heal;
+            // A zero repair time saves `0/0`, so the bits must match the reference.
+            self.health_to_add_per_frame = reference_div_f32(
+                sim.object_max_health(docker) - sim.object_health(docker),
+                self.data.frames_for_full_heal,
+            );
         }
         if sim.object_health(docker) >= sim.object_max_health(docker) {
             self.last_repair = ObjectId::INVALID;

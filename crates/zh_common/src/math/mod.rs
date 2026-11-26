@@ -9,7 +9,7 @@ pub mod geometry;
 pub mod partition_solver;
 
 pub use gamemath::{
-    clamp_f32, div_safe_f32, fast_float_ceil, fast_float_floor, fast_float_trunc,
+    clamp_f32, div_safe_f32, fast_float_ceil, fast_float_floor, fast_float_trunc, reference_div_f32,
     float_to_int_chop, float_to_int_floor, gm_acosf, gm_asinf, gm_atan2f, gm_atanf, gm_copysignf,
     gm_cosf, gm_fabsf, gm_lrintf, gm_lroundf, gm_rintf, gm_roundf, gm_scalbnf, gm_sinf, gm_sqrt,
     gm_tanf, inverse_lerp_f32, lerp_f32, normalize_angle, real_to_int_ceil, real_to_int_floor,

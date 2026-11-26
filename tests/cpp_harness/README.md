@@ -58,6 +58,13 @@ Each `gen_*.cpp` here compiles unmodified `vendor/GeneralsX` sources, with minim
 - **What happens:** most update modules add nothing in `crc()`, so the two differ.
 - **Guard:** `golden_pkt358_351_radar_power` compares the Rust `crc()` with `snapshot_crc`.
 
+### A generated NaN has a different sign on x86
+
+- **Where:** `RepairDockUpdate` with `TimeForFullHeal = 0` saves `0/0`.
+- **What happens:** the ARM reference stores `0x7FC00000`; x86 (CI's Linux runner) produces `0xFFC00000`. The suite passed on the Mac and failed in CI.
+- **Port contract:** where `0/0`, `inf - inf` or `0 * inf` can reach saved state, give it the reference bits (`zh_common::math::reference_div_f32`).
+- **Guard:** CI runs on x86. Reproduce locally with `cargo test --workspace --target x86_64-apple-darwin` (Rosetta; `rustup target add x86_64-apple-darwin`).
+
 ### Oversized integer INI tokens differ by platform
 
 `scanType` takes the `__APPLE__` branch for integers too: `MinSpreadDelay = 100000000000` saturates with a warning on the reference Mac and is rejected elsewhere. Keep fixture tokens in range.
