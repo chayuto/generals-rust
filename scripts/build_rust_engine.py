@@ -151,6 +151,15 @@ WITNESS = Swap(
 )
 
 
+# Used by `scripts/module_census.py`; counts module instances and replaces nothing.
+CENSUS = Swap(
+    "census",
+    VENDOR / "GeneralsMD/Code/GameEngine/Source/Common/Thing/ModuleFactory.cpp",
+    (),
+    (("Module *ModuleFactory::newModule(", '#include "zh_census_new_module.inc"'),),
+)
+
+
 class BuildError(Exception):
     pass
 
@@ -217,12 +226,16 @@ def run(args: list[str], cwd: pathlib.Path) -> None:
         raise BuildError(f"{args[0]} failed:\n{done.stderr[-4000:]}")
 
 
-def build(mutate: str | None, witness: bool = False, rust: bool = True) -> pathlib.Path:
+def build(
+    mutate: str | None, witness: bool = False, rust: bool = True, census: bool = False
+) -> pathlib.Path:
     """
     Builds the swapped engine; `mutate` names one swap to compile with a fault.
-    `witness` adds the extra CRC fields; `rust=False` leaves every swap out.
+    `witness` adds the extra CRC fields; `census` logs every module instance;
+    `rust=False` leaves every swap out.
     """
     swaps = (SWAPS if rust else ()) + ((WITNESS,) if witness else ())
+    swaps += (CENSUS,) if census else ()
     if not swaps:
         raise BuildError("nothing to build: the stock engine already exists")
     if not (BUILD_DIR / "compile_commands.json").is_file():
@@ -231,6 +244,7 @@ def build(mutate: str | None, witness: bool = False, rust: bool = True) -> pathl
     run(["cargo", "build", "--release", "-p", "zh_ffi"], REPO_ROOT)
 
     suffix = ("-rust" if rust else "") + ("-witness" if witness else "")
+    suffix += "-census" if census else ""
     suffix += f"-mutant-{mutate}" if mutate else ""
     work = REPO_ROOT / "target" / f"seam{suffix}"
     work.mkdir(parents=True, exist_ok=True)

@@ -60,7 +60,13 @@ def parse_log(text: str) -> dict:
     return {"crcs": crcs, "game_time": game_time}
 
 
-def run_replay(binary: pathlib.Path, assets: pathlib.Path, name: str, timeout: int) -> dict:
+def run_replay(
+    binary: pathlib.Path,
+    assets: pathlib.Path,
+    name: str,
+    timeout: int,
+    stderr_sink: list[str] | None = None,
+) -> dict:
     env = dict(os.environ)
     env["SDL_VIDEODRIVER"] = "dummy"
     env["SDL_AUDIODRIVER"] = "dummy"
@@ -88,6 +94,8 @@ def run_replay(binary: pathlib.Path, assets: pathlib.Path, name: str, timeout: i
         raise ReplayError(f"{name}: no exit within {timeout}s") from exc
     if done.returncode != 0:
         raise ReplayError(f"{name}: engine exited {done.returncode}")
+    if stderr_sink is not None:
+        stderr_sink.append(done.stderr)
     result = parse_log(done.stdout)
     if not result["crcs"]:
         raise ReplayError(f"{name}: the log has no CRC lines")

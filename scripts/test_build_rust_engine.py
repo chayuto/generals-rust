@@ -38,6 +38,11 @@ class BuildRustEngineTest(unittest.TestCase):
         for _, text in bre.WITNESS.inserts:
             self.assertTrue((FFI / "include" / text.split('"')[1]).is_file())
 
+    def test_census_replaces_nothing_and_its_file_exists(self) -> None:
+        self.assertEqual(bre.CENSUS.regions, ())
+        for _, text in bre.CENSUS.inserts:
+            self.assertTrue((FFI / "include" / text.split('"')[1]).is_file())
+
     def test_compile_args_replace_input_and_output(self) -> None:
         out = bre.compile_args(
             ["c++", "-O2", "-o", "old.o", "-c", "old.cpp"],
