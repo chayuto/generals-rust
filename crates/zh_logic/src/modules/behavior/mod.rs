@@ -3,13 +3,18 @@
 pub mod auto_heal_behavior;
 pub mod battle_bus_slow_death_behavior;
 pub mod behavior_module;
+pub mod bridge_scaffold_behavior;
 pub mod fire_weapon_when_damaged_behavior;
 pub mod fire_weapon_when_dead_behavior;
 pub mod grant_stealth_behavior;
 pub mod instant_death_behavior;
 pub mod jet_slow_death_behavior;
+pub mod overcharge_behavior;
+pub mod poisoned_behavior;
 pub mod prison_behavior;
 pub mod slow_death_behavior;
+pub mod supply_warehouse_crippling_behavior;
+pub mod tech_building_behavior;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;
@@ -98,6 +103,56 @@ pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGener
         false,
         jet_slow_death_behavior::parse_jet_slow_death_behavior_data,
         jet_slow_death_behavior::create_jet_slow_death_behavior,
+    );
+    reg.register_module(
+        nk,
+        "BridgeScaffoldBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::BRIDGE_SCAFFOLD.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        bridge_scaffold_behavior::parse_bridge_scaffold_behavior_data,
+        bridge_scaffold_behavior::create_bridge_scaffold_behavior,
+    );
+    reg.register_module(
+        nk,
+        "OverchargeBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x005 | FacetMask::OVERCHARGE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        overcharge_behavior::parse_overcharge_behavior_data,
+        overcharge_behavior::create_overcharge_behavior,
+    );
+    reg.register_module(
+        nk,
+        "PoisonedBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x005),
+        SleepyUpdatePhase::Normal,
+        false,
+        poisoned_behavior::parse_poisoned_behavior_data,
+        poisoned_behavior::create_poisoned_behavior,
+    );
+    reg.register_module(
+        nk,
+        "SupplyWarehouseCripplingBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x005),
+        SleepyUpdatePhase::Normal,
+        false,
+        supply_warehouse_crippling_behavior::parse_supply_warehouse_crippling_behavior_data,
+        supply_warehouse_crippling_behavior::create_supply_warehouse_crippling_behavior,
+    );
+    reg.register_module(
+        nk,
+        "TechBuildingBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x003),
+        SleepyUpdatePhase::Normal,
+        false,
+        tech_building_behavior::parse_tech_building_behavior_data,
+        tech_building_behavior::create_tech_building_behavior,
     );
 }
 

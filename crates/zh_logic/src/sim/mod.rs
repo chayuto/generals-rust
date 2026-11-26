@@ -982,6 +982,14 @@ pub trait SimView {
     fn object_veterancy_level(&self, owner: ObjectSlot) -> VeterancyLevel;
     fn object_health_ratio(&self, owner: ObjectSlot) -> Real;
     fn object_max_health(&self, owner: ObjectSlot) -> Real;
+    /// `BodyModuleInterface::getHealth`.
+    fn object_health(&self, owner: ObjectSlot) -> Real;
+    /// `BodyModuleInterface::getDamageState`.
+    fn object_body_damage_state(&self, owner: ObjectSlot) -> BodyDamageType;
+    /// `DockUpdateInterface::isDockOpen`; `TRUE` when nothing has closed it.
+    fn dock_is_open(&self, owner: ObjectSlot) -> Bool;
+    /// `Player::isPlayableSide` of the player controlling `team_id`.
+    fn player_is_playable_side(&self, team_id: TeamId) -> Bool;
     fn object_has_upgrade(&self, owner: ObjectSlot, mask: &UpgradeMaskType) -> Bool;
     fn object_can_crush(&self, crusher: ObjectSlot, victim: ObjectSlot) -> Bool;
     fn object_is_above_terrain(&self, owner: ObjectSlot) -> Bool;
@@ -1235,6 +1243,12 @@ pub trait SimApi: SimView {
     fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool);
     fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt);
     fn extend_power_plant(&mut self, owner: ObjectSlot);
+    /// `PowerPlantUpdateInterface::extendRods(FALSE)`.
+    fn retract_power_plant(&mut self, owner: ObjectSlot);
+    /// `DockUpdateInterface::setDockOpen`.
+    fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool);
+    /// `DockUpdateInterface::setDockCrippled`.
+    fn set_dock_crippled(&mut self, owner: ObjectSlot, crippled: Bool);
     fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot);
     fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot);
     fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool);
@@ -1508,6 +1522,12 @@ pub struct SimWorld {
     pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
     pub special_power_uses_delay: Bool,
     pub power_plant_extended: BTreeSet<ObjectId>,
+    /// `DockUpdateInterface::m_dockOpen == FALSE` (dock updates are unported).
+    pub dock_closed: BTreeSet<ObjectId>,
+    /// `DockUpdateInterface::m_dockCrippled` (dock updates are unported).
+    pub dock_crippled: BTreeSet<ObjectId>,
+    /// Teams whose controlling player is a playable side (`Player::isPlayableSide`).
+    pub playable_side_teams: BTreeSet<TeamId>,
     pub car_bombed_objects: Vec<(ObjectId, ObjectId)>,
     pub hijacked_objects: Vec<(ObjectId, ObjectId)>,
     pub dam_break_events: Vec<ObjectId>,
@@ -1602,6 +1622,9 @@ impl SimWorld {
             shared_special_power_ready_frames: BTreeMap::new(),
             special_power_uses_delay: TRUE,
             power_plant_extended: BTreeSet::new(),
+            dock_closed: BTreeSet::new(),
+            dock_crippled: BTreeSet::new(),
+            playable_side_teams: BTreeSet::new(),
             car_bombed_objects: Vec::new(),
             hijacked_objects: Vec::new(),
             dam_break_events: Vec::new(),
@@ -2726,6 +2749,42 @@ impl SimView for SimContext {
             } => div_safe_f32(health, max_health),
             _ => 0.0,
         }
+    }
+
+    fn object_health(&self, owner: ObjectSlot) -> Real {
+        let Some(bs) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return 0.0;
+        };
+        if let Some(b) = self.world.modules.payload(bs).and_then(|p| p.as_body()) {
+            return b.get_health();
+        }
+        match self.world.modules.sidecar(bs) {
+            ModuleSidecar::Body { health, .. } => health,
+            _ => 0.0,
+        }
+    }
+
+    fn object_body_damage_state(&self, owner: ObjectSlot) -> BodyDamageType {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.body_slot)
+            .and_then(|bs| self.world.modules.payload(bs))
+            .and_then(|p| p.as_body())
+            .map_or(BodyDamageType::Pristine, |b| b.get_damage_state())
+    }
+
+    fn dock_is_open(&self, owner: ObjectSlot) -> Bool {
+        Bool::from(
+            self.world
+                .objects
+                .id_of(owner)
+                .is_none_or(|id| !self.world.dock_closed.contains(&id)),
+        )
+    }
+
+    fn player_is_playable_side(&self, team_id: TeamId) -> Bool {
+        Bool::from(self.world.playable_side_teams.contains(&team_id))
     }
 
     fn object_max_health(&self, owner: ObjectSlot) -> Real {
@@ -4571,6 +4630,32 @@ impl SimApi for SimContext {
     fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
         let until = self.world.frame.saturating_add(frames);
         self.world.player_radar_disabled_until.insert(team_id, until);
+    }
+
+    fn retract_power_plant(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            self.world.power_plant_extended.remove(&id);
+        }
+    }
+
+    fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            if open != FALSE {
+                self.world.dock_closed.remove(&id);
+            } else {
+                self.world.dock_closed.insert(id);
+            }
+        }
+    }
+
+    fn set_dock_crippled(&mut self, owner: ObjectSlot, crippled: Bool) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            if crippled != FALSE {
+                self.world.dock_crippled.insert(id);
+            } else {
+                self.world.dock_crippled.remove(&id);
+            }
+        }
     }
 
     fn extend_power_plant(&mut self, owner: ObjectSlot) {
@@ -6549,6 +6634,22 @@ impl SimView for MockSimApi {
         self.ctx.object_health_ratio(owner)
     }
 
+    fn object_health(&self, owner: ObjectSlot) -> Real {
+        self.ctx.object_health(owner)
+    }
+
+    fn object_body_damage_state(&self, owner: ObjectSlot) -> BodyDamageType {
+        self.ctx.object_body_damage_state(owner)
+    }
+
+    fn dock_is_open(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.dock_is_open(owner)
+    }
+
+    fn player_is_playable_side(&self, team_id: TeamId) -> Bool {
+        self.ctx.player_is_playable_side(team_id)
+    }
+
     fn object_max_health(&self, owner: ObjectSlot) -> Real {
         self.ctx.object_max_health(owner)
     }
@@ -7215,6 +7316,18 @@ impl SimApi for MockSimApi {
 
     fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
         self.ctx.disable_radar(team_id, frames);
+    }
+
+    fn retract_power_plant(&mut self, owner: ObjectSlot) {
+        self.ctx.retract_power_plant(owner);
+    }
+
+    fn set_dock_open(&mut self, owner: ObjectSlot, open: Bool) {
+        self.ctx.set_dock_open(owner, open);
+    }
+
+    fn set_dock_crippled(&mut self, owner: ObjectSlot, crippled: Bool) {
+        self.ctx.set_dock_crippled(owner, crippled);
     }
 
     fn extend_power_plant(&mut self, owner: ObjectSlot) {

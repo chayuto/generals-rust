@@ -7,6 +7,7 @@ pub mod internet_hack_contain;
 pub mod mob_nexus_contain;
 pub mod open_contain;
 pub mod parachute_contain;
+pub mod railed_transport_contain;
 pub mod transport_contain;
 
 use crate::arena::FacetMask;
@@ -36,6 +37,16 @@ pub fn register_contain_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenera
         false,
         transport_contain::parse_transport_contain_data,
         transport_contain::create_transport_contain,
+    );
+    reg.register_module(
+        nk,
+        "RailedTransportContain",
+        ModuleType::Behavior,
+        FacetMask(0x057 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        transport_contain::parse_transport_contain_data,
+        railed_transport_contain::create_railed_transport_contain,
     );
     reg.register_module(
         nk,
