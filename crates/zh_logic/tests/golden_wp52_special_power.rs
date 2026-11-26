@@ -600,8 +600,6 @@ Object Obj_Demoralize
     MaxHealth = 200
     InitialHealth = 200
   End
-  Behavior = OpenContain ModuleTag_Contain
-  End
   Behavior = DemoralizeSpecialPower ModuleTag_SP
     SpecialPowerTemplate = Sp_Normal
     BaseRange = 100.0
@@ -649,8 +647,6 @@ Object Obj_SpyVision_Contain
     MaxHealth = 100
     InitialHealth = 100
   End
-  Behavior = OpenContain ModuleTag_Contain
-  End
   Behavior = SpyVisionSpecialPower ModuleTag_SP
     SpecialPowerTemplate = Sp_Ready
     BaseDuration = 5000
@@ -697,6 +693,9 @@ End
         .player_relationships
         .insert((2, 1), zh_common::types::Relationship::Enemies);
     let src = sim.spawn_object(id_of("Obj_Demoralize", &sim), team_a, Coord3D::default(), 0.0);
+    // The templates carry no `OpenContain` behavior: a real container would claim
+    // `contain_slot` first and hide this stand-in's occupancy of 2.
+    assert!(sim.object(src).unwrap().contain_slot.is_none());
     let contain_slot = sim.world.attach_module(
         src,
         NameKeyType(901),
