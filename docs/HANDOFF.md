@@ -62,6 +62,25 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
 - No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
 
+## First frames after game start
+
+`golden_game_frames` runs the 24 games for 300 frames with their recorded commands and compares each frame with the stock engine (`GameFrames.json`, `gen_game_frames.py`). It is a ratchet over `game_frames_agreement.txt`, not a parity test. Frame N below is the world after N logic frames. Energy, bridges and decks agree throughout.
+
+What differs first, by games reached (of 24):
+
+1. Script engine not run (`ScriptEngine::update`): 24 games, frame 1 (computer players' money). Its timer draws move the seed at frame 1 in 6 games; the other 18 move at frame 2.
+2. Computer player update not ported (`AIPlayer::update`, S21): 24 games, frames 1 and 2 (base building, upgrade choice, unit training).
+3. Dozer and Worker frame updates (S16): 23 games, frame 2, module wake frames of the human players' units too.
+4. Mood targets in idle not wired (`getNextMoodTarget`, S12; `mood.rs` is written, `NoAiSeams` answers none): 24 games, draws from frame 4.
+5. Turrets not wired (S14): 6 games, map objects wake at frame 4, draws from frame 9.
+6. Human orders: dozer construct is not carried out (6 games, objects from frame 146); queue unit create is not (6 games, money from frame 39); queue upgrade is silently dropped (5 games, money from frame 73), see below.
+7. Missing modules `RailroadBehavior` and `BoneFXUpdate` (2 games each, frame 1), and `StructureCollapseUpdate` (2 games, asleep in these frames).
+
+Pitfalls:
+
+- Name keys differ from the reference. A replay carries the reference's key (an upgrade as 2295; the port's upgrades are 199 to 873), so an order naming something by key is dropped without a report. `NameKeyGenerator` has to hand out the reference's numbers.
+- `TeamFactory` member lists are filled at game start only; frames keep `world.team_members`. The comparison counts the latter.
+
 ## Next
 
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.

@@ -427,6 +427,7 @@
 | `docs/golden_vectors/AiNewMap.json` | - | no |
 | `docs/golden_vectors/FIXES_ObjectWeapon.json` | - | no |
 | `docs/golden_vectors/GameDataLoad.json` | - | no |
+| `docs/golden_vectors/GameFrames.json` | - | no |
 | `docs/golden_vectors/GameStart.json` | - | no |
 | `docs/golden_vectors/JOINS2_Modules.json` | - | no |
 | `docs/golden_vectors/JOINS_Modules.json` | - | no |
@@ -567,6 +568,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_bridge_behavior.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_fixes_object_weapon.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_game_data_load.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_game_frames.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_game_start.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_joins2_modules.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_joins_modules.rs` | `active` |
