@@ -273,10 +273,6 @@ impl SpecialPowerModule {
         }
     }
 
-    pub fn on_disabled_edge(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, disabled: Bool) {
-        self.pause_countdown(sim, ctx, disabled);
-    }
-
     pub fn load_post_process(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         if let Some((tid, true, true)) = self.resolve_template(sim).map(|t| {
             (
@@ -371,6 +367,14 @@ impl SpecialPowerModule {
             return false;
         }
 
+        // Recorded whether or not an update module took the order.
+        if let Some(classification) = self
+            .resolve_template(&*sim)
+            .map(|t| t.academy_classification_type())
+        {
+            sim.record_special_power_used(ctx.owner_slot, classification);
+        }
+
         taken
     }
 
@@ -438,10 +442,6 @@ impl BehaviorModule for SpecialPowerModule {
 
     fn on_delete(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         SpecialPowerModule::on_delete(self, sim, ctx);
-    }
-
-    fn on_disabled_edge(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, disabled: Bool) {
-        SpecialPowerModule::on_disabled_edge(self, sim, ctx, disabled);
     }
 
     fn apply_deferred_op(&mut self, op: DeferredSelfOp, sim: &mut dyn SimApi, ctx: ModuleContext) {
@@ -857,16 +857,6 @@ macro_rules! impl_special_power_behavior {
             ) {
                 $crate::modules::special_power::special_power_module::SpecialPowerBehaviorImpl::base_mut(self)
                     .on_delete(sim, ctx);
-            }
-
-            fn on_disabled_edge(
-                &mut self,
-                sim: &mut dyn $crate::sim::SimApi,
-                ctx: $crate::arena::ModuleContext,
-                disabled: zh_common::types::Bool,
-            ) {
-                $crate::modules::special_power::special_power_module::SpecialPowerBehaviorImpl::base_mut(self)
-                    .on_disabled_edge(sim, ctx, disabled);
             }
 
             fn apply_deferred_op(

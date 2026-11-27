@@ -529,15 +529,11 @@ impl FiringTrackerHost for SimFiringTrackerHost<'_> {
     }
 
     fn set_weapon_bonus_condition(&mut self, cond: WeaponBonusConditionType) {
-        if let Some(obj) = self.sim.object_mut(self.ctx.owner_slot) {
-            obj.weapon_bonus_condition |= 1u32 << (cond as u32);
-        }
+        self.sim.set_weapon_bonus_condition(self.ctx.owner_slot, cond);
     }
 
     fn clear_weapon_bonus_condition(&mut self, cond: WeaponBonusConditionType) {
-        if let Some(obj) = self.sim.object_mut(self.ctx.owner_slot) {
-            obj.weapon_bonus_condition &= !(1u32 << (cond as u32));
-        }
+        self.sim.clear_weapon_bonus_condition(self.ctx.owner_slot, cond);
     }
 
     fn clear_and_set_model_condition_flags(

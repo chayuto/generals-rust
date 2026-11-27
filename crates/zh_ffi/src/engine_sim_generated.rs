@@ -6,6 +6,7 @@ use crate::engine_sim::{not_wired, EngineSim};
 use zh_logic::sim::*;
 use zh_logic::combat::WhichTurretType;
 use zh_logic::modules::update::battle_plan_update::{self, PlayerBattlePlans};
+use zh_logic::rules::AcademyClassificationType;
 use zh_logic::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 use zh_logic::arena::{
@@ -690,6 +691,9 @@ impl SimApi for EngineSim<'_> {
     }
     fn add_skill_points(&mut self, team_id: TeamId, points: Int) {
         not_wired("add_skill_points")
+    }
+    fn record_special_power_used( &mut self, owner: ObjectSlot, classification: AcademyClassificationType, ) {
+        not_wired("record_special_power_used")
     }
     fn record_building_capture(&mut self, team_id: TeamId) {
         not_wired("record_building_capture")

@@ -175,6 +175,12 @@ impl Default for WeaponTemplate {
     }
 }
 
+/// `INI::parseDurationUnsignedInt`: whole milliseconds, rounded up to frames.
+fn parse_duration_unsigned_int(value: &str) -> Result<UnsignedInt, IniError> {
+    let msec = IniReader::scan_unsigned_int(value)?;
+    Ok(gm_ceilf(convert_duration_from_msecs_to_frames(msec as Real)) as UnsignedInt)
+}
+
 impl WeaponTemplate {
     pub fn new() -> Self { Self::default() }
 
@@ -219,21 +225,21 @@ impl WeaponTemplate {
                 "WeaponRecoil" => self.weapon_recoil = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
                 "MinTargetPitch" => self.min_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
                 "MaxTargetPitch" => self.max_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
-                "RadiusDamageAngle" => self.radius_damage_angle = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
+                "RadiusDamageAngle" => self.radius_damage_angle = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
                 "ClipSize" => self.clip_size = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "ClipReloadTime" => self.clip_reload_time = gm_ceilf(convert_duration_from_msecs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?)) as Int,
+                "ClipReloadTime" => self.clip_reload_time = parse_duration_unsigned_int(value)? as Int,
                 "DelayBetweenShots" => self.parse_shot_delay(value)?,
                 "ContinuousFireOne" => self.continuous_fire_one_shots_needed = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
                 "ContinuousFireTwo" => self.continuous_fire_two_shots_needed = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "ContinuousFireCoast" => self.continuous_fire_coast_frames = gm_ceilf(convert_duration_from_msecs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?)) as UnsignedInt,
-                "AutoReloadWhenIdle" => self.auto_reload_when_idle_frames = gm_ceilf(convert_duration_from_msecs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?)) as UnsignedInt,
+                "ContinuousFireCoast" => self.continuous_fire_coast_frames = parse_duration_unsigned_int(value)?,
+                "AutoReloadWhenIdle" => self.auto_reload_when_idle_frames = parse_duration_unsigned_int(value)?,
                 "ShotsPerBarrel" => self.shots_per_barrel = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
                 "DamageDealtAtSelfPosition" => self.damage_dealt_at_self_position = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
                 "AutoReloadsClip" => self.reload_type = if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { WeaponReloadType::AutoReload } else { match value.to_ascii_uppercase().as_str() { "RETURN_TO_BASE" => WeaponReloadType::ReturnToBase, _ => WeaponReloadType::NoReload } },
-                "PreAttackDelay" => self.pre_attack_delay = gm_ceilf(convert_duration_from_msecs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?)) as Int,
+                "PreAttackDelay" => self.pre_attack_delay = parse_duration_unsigned_int(value)? as Int,
                 "PreAttackType" => self.prefire_type = match IniReader::scan_index_list(value, &WEAPON_PREFIRE_NAMES).unwrap_or(0) { 1 => WeaponPrefireType::PerAttack, 2 => WeaponPrefireType::PerClip, _ => WeaponPrefireType::PerShot },
                 "ContinueAttackRange" => self.continue_attack_range = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "SuspendFXDelay" => self.suspend_fx_delay = gm_ceilf(convert_duration_from_msecs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?)) as UnsignedInt,
+                "SuspendFXDelay" => self.suspend_fx_delay = parse_duration_unsigned_int(value)?,
                 "LeechRangeWeapon" => self.leech_range_weapon = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
                 "CapableOfFollowingWaypoints" => self.capable_of_following_waypoint = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
                 "ShowsAmmoPips" => self.is_shows_ammo_pips = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
@@ -276,20 +282,28 @@ impl WeaponTemplate {
         Ok(())
     }
 
+    /// `WeaponTemplate::parseShotDelay`: `<msec>` or `Min:<msec> Max:<msec>`.
     fn parse_shot_delay(&mut self, value: &str) -> Result<(), IniError> {
-        if let Some(rest) = value.strip_prefix("Min:") {
-            let mut parts = rest.split_whitespace();
-            let min_ms = IniReader::scan_real(parts.next().unwrap_or("0")).map_err(|_| IniError::InvalidData)?;
-            let max_text = parts.find(|p| p.starts_with("Max:")).unwrap_or("Max:0");
-            let max_ms = IniReader::scan_real(max_text.trim_start_matches("Max:")).map_err(|_| IniError::InvalidData)?;
-            self.min_delay_between_shots = gm_ceilf(convert_duration_from_msecs_to_frames(min_ms)) as Int;
-            self.max_delay_between_shots = gm_ceilf(convert_duration_from_msecs_to_frames(max_ms)) as Int;
+        let value = value.split(';').next().unwrap_or("");
+        let mut tokens = value
+            .split(|c| zh_common::ini::SEPS_COLON.contains(c))
+            .filter(|t| !t.is_empty());
+        let mut next = || tokens.next().ok_or(IniError::InvalidData);
+        let first = next()?;
+        let (min, max) = if first.eq_ignore_ascii_case("Min") {
+            let min = IniReader::scan_int(next()?)?;
+            if next()?.eq_ignore_ascii_case("Max") {
+                (min, IniReader::scan_int(next()?)?)
+            } else {
+                (min, min)
+            }
         } else {
-            let ms = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?;
-            let f = gm_ceilf(convert_duration_from_msecs_to_frames(ms)) as Int;
-            self.min_delay_between_shots = f;
-            self.max_delay_between_shots = f;
-        }
+            let both = IniReader::scan_int(first)?;
+            (both, both)
+        };
+        let frames = |msec: Int| gm_ceilf(convert_duration_from_msecs_to_frames(msec as Real)) as Int;
+        self.min_delay_between_shots = frames(min);
+        self.max_delay_between_shots = frames(max);
         Ok(())
     }
 

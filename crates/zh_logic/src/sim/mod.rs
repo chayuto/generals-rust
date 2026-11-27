@@ -10,6 +10,7 @@ mod production;
 
 use crate::combat::WhichTurretType;
 use crate::modules::update::battle_plan_update::{self, PlayerBattlePlans};
+use crate::rules::AcademyClassificationType;
 use crate::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -681,6 +682,9 @@ pub struct ObjectRecord {
     pub behaviors: Vec<(ModuleSlot, FacetMask)>,
     pub body_slot: Option<ModuleSlot>,
     pub contain_slot: Option<ModuleSlot>,
+    /// `isWeaponBonusPassedToPassengers` of the contain module. It is module data, kept here
+    /// so that it can be read while that module is executing.
+    pub contain_passes_weapon_bonus: Bool,
     pub stealth_slot: Option<ModuleSlot>,
     pub ai_slot: Option<ModuleSlot>,
     pub physics_slot: Option<ModuleSlot>,
@@ -786,6 +790,7 @@ impl ObjectRecord {
             behaviors: Vec::new(),
             body_slot: None,
             contain_slot: None,
+            contain_passes_weapon_bonus: FALSE,
             stealth_slot: None,
             ai_slot: None,
             physics_slot: None,
@@ -1444,6 +1449,12 @@ pub trait SimApi: SimView {
     fn add_experience_points(&mut self, owner: ObjectSlot, gain: Int);
     /// `Player::addSkillPoints`. Player ranks are unported; the world totals them.
     fn add_skill_points(&mut self, team_id: TeamId, points: Int);
+    /// `AcademyStats::recordSpecialPowerUsed` on the controlling player.
+    fn record_special_power_used(
+        &mut self,
+        owner: ObjectSlot,
+        classification: AcademyClassificationType,
+    );
     /// `AcademyStats::recordBuildingCapture`.
     fn record_building_capture(&mut self, team_id: TeamId);
     /// `StickyBombUpdate::initStickyBomb` of the charge.
@@ -2484,6 +2495,9 @@ impl SimWorld {
         module: Box<dyn BehaviorModule>,
     ) -> ModuleSlot {
         let initial_sidecar = module.sync_sidecar();
+        let passes_weapon_bonus = module
+            .as_contain()
+            .map_or(FALSE, |c| c.is_weapon_bonus_passed_to_passengers());
         let owner_id = self.objects.id_of(obj_slot).unwrap_or(ObjectId::INVALID);
         let mut meta = ModuleMeta::new(obj_slot, owner_id, tag_key, data_id, facet_mask, phase);
         meta.sidecar = initial_sidecar;
@@ -2496,6 +2510,7 @@ impl SimWorld {
             }
             if facet_mask.contains(FacetMask::CONTAIN) && obj.contain_slot.is_none() {
                 obj.contain_slot = Some(mod_slot);
+                obj.contain_passes_weapon_bonus = passes_weapon_bonus;
             }
             if facet_mask.contains(FacetMask::STEALTH_UPDATE) && obj.stealth_slot.is_none() {
                 obj.stealth_slot = Some(mod_slot);
@@ -4256,6 +4271,59 @@ impl SimContext {
         }
     }
 
+    /// `Object::onDisabledEdge`: every behaviour, then the power adjustment.
+    fn on_disabled_edge(&mut self, owner: ObjectSlot, becoming_disabled: Bool) {
+        let behaviors: Vec<ModuleSlot> = self
+            .world
+            .objects
+            .get(owner)
+            .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
+        for ms in behaviors {
+            if self.world.modules.is_alive(ms) {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    m.on_disabled_edge(sim, ctx, becoming_disabled);
+                });
+            }
+        }
+        self.adjust_power_on_disabled_edge(owner, becoming_disabled);
+    }
+
+    /// `Object::pauseAllSpecialPowers`.
+    fn pause_all_special_powers(&mut self, owner: ObjectSlot, pause: Bool) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::SPECIAL_POWER))
+                .map(|&(s, _)| s)
+                .collect()
+        });
+        for ms in slots {
+            if self.world.modules.is_executing(ms) {
+                let _ = self
+                    .world
+                    .modules
+                    .push_deferred_op(ms, DeferredSelfOp::SpecialPowerPause { pause });
+            } else {
+                let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                    if let Some(sp) = m.as_special_power_mut() {
+                        sp.pause_countdown(sim, ctx, pause);
+                    }
+                });
+            }
+        }
+    }
+
+    /// `WeaponSet::weaponSetOnWeaponBonusChange`.
+    fn weapon_set_on_weapon_bonus_change(&mut self, owner: ObjectSlot) {
+        for wslot in [
+            WeaponSlotType::Primary,
+            WeaponSlotType::Secondary,
+            WeaponSlotType::Tertiary,
+        ] {
+            crate::object::weapon_fire::on_weapon_bonus_change(self, owner, wslot);
+        }
+    }
+
     fn adjust_power_on_disabled_edge(&mut self, owner: ObjectSlot, becoming_disabled: Bool) {
         let Some((team_id, under_const, power)) = self.world.objects.get(owner).and_then(|o| {
             let tmpl = o
@@ -4744,12 +4812,7 @@ impl SimView for SimContext {
         };
         let mut flags = obj.weapon_bonus_condition;
         if let Some(container) = obj.contained_by.and_then(|c| self.world.objects.get(c)) {
-            let passes = container
-                .contain_slot
-                .and_then(|cs| self.world.modules.payload(cs))
-                .and_then(|p| p.as_contain())
-                .map_or(FALSE, |c| c.is_weapon_bonus_passed_to_passengers());
-            if passes != FALSE {
+            if container.contain_passes_weapon_bonus != FALSE {
                 flags |= container.weapon_bonus_condition;
             }
         }
@@ -5003,26 +5066,20 @@ impl SimView for SimContext {
         let Some(oc) = self.world.objects.get(crusher) else {
             return FALSE;
         };
-        let Some(ov) = self.world.objects.get(victim) else {
+        if self.world.objects.get(victim).is_none() {
             return FALSE;
-        };
-        let Some(tc) = oc
-            .thing
-            .template_override()
-            .get_final(&self.rules.thing_factory)
-        else {
+        }
+        // An unmanned vehicle crushes nobody; its riders were just booted out around it.
+        if oc.is_disabled_by_type(DisabledType::Unmanned) != FALSE {
             return FALSE;
-        };
-        let Some(tv) = ov
-            .thing
-            .template_override()
-            .get_final(&self.rules.thing_factory)
-        else {
+        }
+        // Order matters: whether the crusher considers the victim an ally.
+        if self.player_relationship(crusher, victim) == Relationship::Allies {
             return FALSE;
-        };
-        let crusher_lvl = tc.get_crusher_level();
-        let crushable_lvl = tv.get_crushable_level();
-        Bool::from(crusher_lvl > 1 && crusher_lvl > crushable_lvl)
+        }
+        let level = self.object_crusher_level(crusher) as u8;
+        let crushable = self.object_crushable_level(victim) as u8;
+        Bool::from(level != 0 && level > crushable)
     }
 
     fn object_is_above_terrain(&self, owner: ObjectSlot) -> Bool {
@@ -6350,6 +6407,17 @@ impl SimApi for SimContext {
         *total = total.wrapping_add(points);
     }
 
+    fn record_special_power_used(
+        &mut self,
+        owner: ObjectSlot,
+        classification: AcademyClassificationType,
+    ) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        self.academy(team).record_special_power_used(classification);
+    }
+
     fn record_building_capture(&mut self, team_id: TeamId) {
         self.academy(team_id).record_building_capture();
     }
@@ -6892,7 +6960,8 @@ impl SimApi for SimContext {
     }
 
     fn set_disabled(&mut self, owner: ObjectSlot, disabled_type: DisabledType) {
-        self.set_disabled_until(owner, disabled_type, u32::MAX);
+        // `FOREVER` (`GameCommon.h`).
+        self.set_disabled_until(owner, disabled_type, 0x3fff_ffff);
     }
 
     fn set_disabled_until(
@@ -6906,36 +6975,32 @@ impl SimApi for SimContext {
         if !(0..DISABLED_COUNT as Int).contains(&idx) {
             return;
         }
-        let Some(obj) = self.world.objects.get_mut(owner) else {
+        let Some(obj) = self.world.objects.get(owner) else {
             return;
         };
         let was_disabled = obj.is_disabled() != FALSE;
         let slot_idx = idx as usize;
-        let mut behaviors_to_edge = Vec::new();
         let changed = obj.disabled_till_frame[slot_idx] != till_frame;
-        if changed {
-            obj.disabled_till_frame[slot_idx] = till_frame;
-            obj.disabled_mask.set(idx, i32::from(till_frame > now));
-        }
-        // The reference reports the edge to an object that was not disabled even
-        // if this call leaves it enabled (a time that has already run out).
-        if !was_disabled {
-            behaviors_to_edge = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
+        // Each newly set type pauses once more; `HELD` never pauses special powers.
+        if changed
+            && disabled_type != DisabledType::Held
+            && obj.is_disabled_by_type(disabled_type) == FALSE
+        {
+            self.pause_all_special_powers(owner, TRUE);
         }
         if changed {
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.disabled_till_frame[slot_idx] = till_frame;
+                obj.disabled_mask.set(idx, i32::from(till_frame > now));
+            }
             self.with_weapon_slaves(owner, |spawn, sim| {
                 spawn.order_slaves_disabled_until(sim, disabled_type, till_frame);
             });
         }
-        if !behaviors_to_edge.is_empty() {
-            for ms in behaviors_to_edge {
-                if self.world.modules.is_alive(ms) {
-                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                        m.on_disabled_edge(sim, ctx, TRUE);
-                    });
-                }
-            }
-            self.adjust_power_on_disabled_edge(owner, TRUE);
+        // The edge runs whenever the object was not disabled on entry, even if this call
+        // leaves it enabled (`till_frame` not in the future).
+        if !was_disabled {
+            self.on_disabled_edge(owner, TRUE);
         }
     }
 
@@ -6944,11 +7009,14 @@ impl SimApi for SimContext {
         if !(0..DISABLED_COUNT as Int).contains(&idx) {
             return FALSE;
         }
-        let Some(obj) = self.world.objects.get_mut(owner) else {
+        let Some(obj) = self.world.objects.get(owner) else {
             return FALSE;
         };
         if obj.is_disabled_by_type(disabled_type) == FALSE {
             return FALSE;
+        }
+        if disabled_type != DisabledType::Held {
+            self.pause_all_special_powers(owner, FALSE);
         }
         self.with_weapon_slaves(owner, |spawn, sim| {
             spawn.order_slaves_to_clear_disabled(sim, disabled_type);
@@ -6958,25 +7026,16 @@ impl SimApi for SimContext {
         };
         obj.disabled_till_frame[idx as usize] = 0;
         obj.disabled_mask.set(idx, 0);
-        // Another state that has run out goes now, and may report the edge first.
+        // "In case we just edged": an expired type is cleared here, which can run the edge
+        // below a second time.
         crate::gamelogic::frame::check_disabled_status(self, owner);
-        let Some(obj) = self.world.objects.get(owner) else {
-            return TRUE;
-        };
-        let behaviors_to_edge: Vec<ModuleSlot> = if obj.is_disabled() == FALSE {
-            obj.behaviors.iter().map(|&(ms, _)| ms).collect()
-        } else {
-            Vec::new()
-        };
-        if !behaviors_to_edge.is_empty() {
-            for ms in behaviors_to_edge {
-                if self.world.modules.is_alive(ms) {
-                    let _ = self.dispatch_module(ms, |m, sim, ctx| {
-                        m.on_disabled_edge(sim, ctx, FALSE);
-                    });
-                }
-            }
-            self.adjust_power_on_disabled_edge(owner, FALSE);
+        if self
+            .world
+            .objects
+            .get(owner)
+            .is_some_and(|o| o.is_disabled() == FALSE)
+        {
+            self.on_disabled_edge(owner, FALSE);
         }
         TRUE
     }
@@ -7222,8 +7281,13 @@ impl SimApi for SimContext {
         owner: ObjectSlot,
         cond: WeaponBonusConditionType,
     ) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.set_weapon_bonus_condition(cond);
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let old = obj.weapon_bonus_condition;
+        obj.set_weapon_bonus_condition(cond);
+        if old != obj.weapon_bonus_condition {
+            self.weapon_set_on_weapon_bonus_change(owner);
         }
     }
 
@@ -7232,8 +7296,13 @@ impl SimApi for SimContext {
         owner: ObjectSlot,
         cond: WeaponBonusConditionType,
     ) {
-        if let Some(obj) = self.world.objects.get_mut(owner) {
-            obj.clear_weapon_bonus_condition(cond);
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        let old = obj.weapon_bonus_condition;
+        obj.clear_weapon_bonus_condition(cond);
+        if old != obj.weapon_bonus_condition {
+            self.weapon_set_on_weapon_bonus_change(owner);
         }
     }
 
@@ -11269,6 +11338,14 @@ impl SimApi for MockSimApi {
 
     fn add_skill_points(&mut self, team_id: TeamId, points: Int) {
         self.ctx.add_skill_points(team_id, points);
+    }
+
+    fn record_special_power_used(
+        &mut self,
+        owner: ObjectSlot,
+        classification: AcademyClassificationType,
+    ) {
+        self.ctx.record_special_power_used(owner, classification);
     }
 
     fn record_building_capture(&mut self, team_id: TeamId) {

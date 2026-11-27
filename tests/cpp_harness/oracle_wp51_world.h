@@ -129,6 +129,13 @@ public:
         return 0.0f;
     }
 
+    // The base `TerrainLogic::getLayerHeight` answers 0 with a zeroed normal. On the ground
+    // layer the shipped terrain answers `getGroundHeight`, so a subclass with sloped ground
+    // gets matching layer heights.
+    Real getLayerHeight(Real x, Real y, PathfindLayerEnum, Coord3D* normal = nullptr, Bool = true) const override {
+        return getGroundHeight(x, y, normal);
+    }
+
     Bool isCliffCell(Real, Real) const override { return FALSE; }
 
     Bool isUnderwater(Real, Real, Real* waterZ = nullptr, Real* terrainZ = nullptr) override {

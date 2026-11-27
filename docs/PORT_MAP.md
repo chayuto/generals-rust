@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`258` implemented, `0` seeded skeletons, `205` unported)
-- **Golden Vector Oracles:** `86` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `84` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `87` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `85` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -314,6 +314,7 @@
 
 | Oracle JSON | Declared Vectors | `source_sha256` |
 |---|---:|---|
+| `docs/golden_vectors/FIXES_ObjectWeapon.json` | - | no |
 | `docs/golden_vectors/JOINS_Modules.json` | - | no |
 | `docs/golden_vectors/PARTITION_COLLIDE.json` | 520 | no |
 | `docs/golden_vectors/PARTITION_GRID.json` | 1200 | no |
@@ -420,6 +421,7 @@
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2_big_vfs.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2b_compression.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_xfer.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_fixes_object_weapon.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_joins_modules.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_collide.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |

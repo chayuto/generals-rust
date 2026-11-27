@@ -33,7 +33,7 @@ use std::cell::Cell;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::{gm_atan2f, gm_fabsf, gm_sinf, gm_sqrtf, Coord3D, Matrix3D};
 use zh_common::types::{
-    Bool, Int, NameKeyType, ObjectId, Real, Relationship, UnsignedInt, UpdateSleepTime, FALSE, TRUE,
+    Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UpdateSleepTime, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
@@ -1322,18 +1322,6 @@ fn fire_crash_weapon(sim: &mut dyn SimApi, owner: ObjectSlot, building: bool, po
     }
 }
 
-/// `Object::canCrushOrSquish(other, TEST_CRUSH_ONLY)`.
-fn can_crush(sim: &dyn SimView, crusher: ObjectSlot, victim: ObjectSlot) -> bool {
-    if is_disabled(sim, crusher, DisabledType::Unmanned) {
-        return false;
-    }
-    let level = sim.object_crusher_level(crusher) as u8;
-    if sim.player_relationship(crusher, victim) == Relationship::Allies {
-        return false;
-    }
-    level != 0 && level > sim.object_crushable_level(victim) as u8
-}
-
 fn perps_logically_equal(a: Real, b: Real) -> bool {
     const PERP_RANGE: Real = 0.15;
     gm_fabsf(a - b) <= PERP_RANGE
@@ -1434,8 +1422,9 @@ fn check_for_overlap_collision(sim: &mut dyn SimApi, owner: ObjectSlot, other: O
     if physics(sim, owner).is_none_or(|p| is_very_small_3d(&p.vel)) {
         return false;
     }
-    let crushing = can_crush(sim, owner, other);
-    let crushed = can_crush(sim, other, owner);
+    // `canCrushOrSquish(.., TEST_CRUSH_ONLY)`.
+    let crushing = sim.object_can_crush(owner, other) != FALSE;
+    let crushed = sim.object_can_crush(other, owner) != FALSE;
     if crushing && crushed {
         return false;
     }

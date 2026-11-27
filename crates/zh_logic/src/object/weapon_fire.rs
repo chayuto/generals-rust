@@ -93,6 +93,40 @@ pub fn reload_ammo(weapon: &mut Weapon, sim: &mut dyn SimApi, owner: ObjectSlot)
     reload_with_bonus(weapon, sim, owner, &bonus, FALSE);
 }
 
+/// `Weapon::onWeaponBonusChange` for the weapon in `wslot` of the owner's set: a running
+/// reload or shot delay restarts from now with the new rate of fire.
+pub fn on_weapon_bonus_change(sim: &mut dyn SimApi, owner: ObjectSlot, wslot: WeaponSlotType) {
+    let Some(mut weapon) = sim
+        .object(owner)
+        .and_then(|o| o.weapon_set.get_weapon_in_weapon_slot(wslot))
+        .cloned()
+    else {
+        return;
+    };
+    let bonus = compute_bonus(&weapon, sim, owner, 0);
+    let now = sim.frame();
+    // `getStatus` stores the refreshed status in the weapon.
+    let delay = match weapon.get_status(now) {
+        WeaponStatus::ReloadingClip => Some(weapon.template.get_clip_reload_time(&bonus)),
+        WeaponStatus::BetweenFiringShots => Some(delay_between_shots(&weapon, sim, &bonus)),
+        _ => None,
+    };
+    if let Some(delay) = delay {
+        weapon.when_last_reload_started = now;
+        weapon.when_we_can_fire_again = now.wrapping_add(delay as UnsignedInt);
+    }
+    let when = weapon.when_we_can_fire_again;
+    if let Some(stored) = sim
+        .object_mut(owner)
+        .and_then(|o| o.weapon_set.get_weapon_in_weapon_slot_mut(wslot))
+    {
+        *stored = weapon;
+    }
+    if delay.is_some() && sim.is_reload_time_shared(owner) != FALSE {
+        sim.share_weapon_reload(owner, when, WeaponStatus::ReloadingClip);
+    }
+}
+
 /// `WeaponTemplate::getDelayBetweenShots`, drawing from the logic stream only for a real range.
 pub fn delay_between_shots(weapon: &Weapon, sim: &mut dyn SimApi, bonus: &WeaponBonus) -> Int {
     let lo = weapon.template.min_delay_between_shots;

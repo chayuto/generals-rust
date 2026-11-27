@@ -150,7 +150,7 @@ fn check_disabled_statuses(sim: &mut SimContext) {
 }
 
 /// `Object::checkDisabledStatus`. `Object::clearDisabled` runs it too.
-pub(crate) fn check_disabled_status(sim: &mut SimContext, owner: ObjectSlot) {
+pub fn check_disabled_status(sim: &mut SimContext, owner: ObjectSlot) {
     let now = sim.world.frame;
     for index in 0..DISABLED_COUNT as Int {
         let Some(disabled_type) = DisabledType::from_i32(index) else {

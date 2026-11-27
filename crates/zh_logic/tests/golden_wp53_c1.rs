@@ -575,7 +575,6 @@ fn run_scaffold(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
 fn run_overcharge(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
     let o = spawn(sim, &format!("P53C_Over{}", v.variant), TEAM_A);
     let m = module_named(sim, o, "OverchargeBehavior");
-    let id = sim.object(o).expect("object").id;
     let crc = module_crc(sim, m);
     let mut frame = v.frame;
     let mut rows = Vec::new();
@@ -818,7 +817,6 @@ fn run_railed(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
 fn run_supply(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
     let o = spawn(sim, &format!("P53C_Supply{}", v.variant), TEAM_A);
     let m = module_named(sim, o, "SupplyWarehouseCripplingBehavior");
-    let id = sim.object(o).expect("object").id;
     let mut frame = v.frame;
     let mut rows = Vec::new();
     for &[code, a, ..] in &v.ops {
