@@ -51,22 +51,6 @@ const KINDS: [&str; 12] = [
     "seed", "flags", "ai", "build", "score", "energy", "objx", "unit", "path", "moving", "cells",
     "shroud",
 ];
-/// `(game, stage)` where a computer player tells a unit to get out of a new
-/// building's way. The reference's move state then reserves the goal cell and asks
-/// for a path; the move states are not ported (`AI_PORT_PLAN.md` S10), so the
-/// `moving` rows (goal cell and path request of units in the move state) differ.
-const UNITS_TOLD_TO_MOVE: [(&str, &str); 9] = [
-    ("linux_6p_custom_map.rep", "end"),
-    ("linux_6p_custom_map.rep", "built"),
-    ("macos_6p_custom_map.rep", "end"),
-    ("macos_6p_custom_map.rep", "built"),
-    ("macos_2p_custom_map.rep", "built"),
-    ("whiteout.rep", "built"),
-    ("silent_river.rep", "built"),
-    ("dark_night.rep", "end"),
-    ("dark_night.rep", "built"),
-];
-
 fn lines(text: &str) -> impl Iterator<Item = &str> {
     text.lines().filter_map(|line| {
         line.trim()
@@ -581,11 +565,6 @@ fn retail_map_setup_matches_the_reference() {
                 .cloned()
                 .collect();
             let got = digest(&of);
-            // Known to differ: a fix has to take the game off the list.
-            if kind == "moving" && UNITS_TOLD_TO_MOVE.contains(&(name, stage)) {
-                assert_ne!(got, values[kind], "{name}: the move states are ported now?");
-                continue;
-            }
             if got != values[kind] {
                 failures.push(format!(
                     "{name} {stage} {kind}: reference {}, port {got}",
