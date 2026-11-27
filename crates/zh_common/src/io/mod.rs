@@ -16,6 +16,8 @@ pub mod big_file_system;
 pub mod compression;
 pub mod data_chunk;
 pub mod file;
+pub mod map_object;
+pub mod map_reader_writer_info;
 pub mod ram_file;
 
 pub use archive_file::{search_string_matches, ArchiveFile, ArchivedFileInfo};

@@ -186,6 +186,11 @@ impl PolygonTrigger {
         if self.bounds_needs_update != FALSE {
             self.update_bounds();
         }
+        self.contains_point(point)
+    }
+
+    /// [`Self::point_in_trigger`] for a trigger whose bounds are up to date.
+    pub fn contains_point(&self, point: ICoord3D) -> Bool {
         if point.x < self.bounds.lo.x
             || point.y < self.bounds.lo.y
             || point.x > self.bounds.hi.x

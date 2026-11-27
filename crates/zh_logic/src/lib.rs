@@ -14,3 +14,4 @@ pub mod scheduler;
 pub mod scripts;
 pub mod sim;
 pub mod spatial;
+pub mod terrain;

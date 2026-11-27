@@ -141,6 +141,18 @@ impl CliffMap {
         }
     }
 
+    /// The stored flag rows and their length in bytes, as a map file carries them.
+    pub(crate) fn rows_mut(&mut self) -> (usize, &mut [u8]) {
+        (self.stride as usize, &mut self.bits)
+    }
+
+    /// Shrinks the sampled area without moving the stored rows, as a version 1
+    /// blend chunk does after the flags exist.
+    pub(crate) fn set_sample_size(&mut self, width: Int, height: Int) {
+        self.width = width;
+        self.height = height;
+    }
+
     /// `getCliffState`.
     pub fn get_cliff_state(&self, x: Int, y: Int) -> Bool {
         match self.bit(x, y) {
