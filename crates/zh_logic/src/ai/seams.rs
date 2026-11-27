@@ -265,13 +265,15 @@ pub trait AiSeams: Send {
         Err(XferError::InvalidData)
     }
 
-    /// `AIUpdateInterface::getNextMoodTarget` (S12).
+    /// Replaces `AIUpdateInterface::getNextMoodTarget`
+    /// (`ai_update::next_mood_target`) with a recorded answer; `None` leaves the
+    /// question to the sim.
     fn next_mood_target(
         &mut self,
         _owner: ObjectId,
         _called_by_ai: Bool,
         _during_idle: Bool,
-    ) -> Option<ObjectId> {
+    ) -> Option<Option<ObjectId>> {
         None
     }
     /// `AI::findClosestRepulsor` (S12).
@@ -498,7 +500,7 @@ forward! {
     state_xfer(owner: ObjectId, state: StateId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
     turret_update(owner: ObjectId, turret: usize) -> UpdateSleepTime;
     turret_xfer(owner: ObjectId, turret: usize, xfer: &mut dyn Xfer) -> Result<(), XferError>;
-    next_mood_target(owner: ObjectId, called_by_ai: Bool, during_idle: Bool) -> Option<ObjectId>;
+    next_mood_target(owner: ObjectId, called_by_ai: Bool, during_idle: Bool) -> Option<Option<ObjectId>>;
     closest_repulsor(owner: ObjectId, range: Real) -> Option<ObjectId>;
     can_act_on(query: AiActionQuery, owner: ObjectId, target: ObjectId, source: CommandSourceType) -> Bool;
     closest_edge_point(pos: &Coord3D) -> Coord3D;

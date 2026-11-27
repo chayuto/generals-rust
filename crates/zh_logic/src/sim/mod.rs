@@ -95,7 +95,7 @@ use crate::modules::update::horde_update::TerrainDecalType;
 use crate::spatial::partition_query::{
     measure_distance_squared, DistanceCalculationType, IterOrderType, QueryCenter,
 };
-use crate::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
+use crate::spatial::partition_shroud::{CellShroudStatus, ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
@@ -1302,6 +1302,14 @@ pub trait SimView {
     fn neutral_team_id(&self) -> TeamId;
     fn player_index(&self, team_id: TeamId) -> Int;
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort;
+    /// `Team::m_commonAttackTarget` of the team of `owner`; `None` unless its
+    /// prototype has `m_attackCommonTarget`.
+    fn team_common_target(&self, owner: ObjectSlot) -> Option<ObjectId>;
+    /// Whether `Team::setTeamTargetObject` keeps a target for the team of `owner`:
+    /// only a computer player that is not easy does.
+    fn team_keeps_common_target(&self, owner: ObjectSlot) -> Bool;
+    /// `owner->getShroudedStatus(player_index) == OBJECTSHROUD_CLEAR`.
+    fn object_is_clear_of_shroud(&self, owner: ObjectSlot, player_index: Int) -> Bool;
     /// `PartitionManager::getDistanceSquared` from `owner` to `other`, or to `pos`.
     fn partition_distance_squared(
         &self,
@@ -2163,6 +2171,8 @@ pub trait SimApi: SimView {
     fn ai_hack_internet(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType);
     fn ai_set_attitude(&mut self, owner: ObjectSlot, attitude: AttitudeType);
     fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot);
+    /// Stores the common target of the team of `owner`, if it has one at all.
+    fn set_team_common_target(&mut self, owner: ObjectSlot, target: ObjectId);
     fn set_locomotor_max_lift(&mut self, owner: ObjectSlot, max_lift: Real);
     fn set_locomotor_max_turn_rate(&mut self, owner: ObjectSlot, max_turn_rate: Real);
     fn set_locomotor_ultra_accurate(&mut self, owner: ObjectSlot, ultra: Bool);
@@ -2508,6 +2518,9 @@ pub struct SimWorld {
     pub local_player_index: Int,
     /// `Player::getDefaultTeam()` by player index.
     pub player_default_teams: BTreeMap<Int, TeamId>,
+    /// `Team::m_commonAttackTarget` of the teams whose prototype attacks a common
+    /// target; other teams have no entry. Filled by `sync_teams`.
+    pub team_common_targets: BTreeMap<TeamId, ObjectId>,
     /// Teams controlled by a skirmish AI player (`Player::isSkirmishAIPlayer`).
     pub skirmish_ai_teams: BTreeSet<TeamId>,
     /// What the unported `ActionManager` would allow: (actor, target, question).
@@ -2655,6 +2668,7 @@ impl SimWorld {
             ),
             local_player_index: 0,
             player_default_teams: BTreeMap::new(),
+            team_common_targets: BTreeMap::new(),
             skirmish_ai_teams: BTreeSet::new(),
             action_permissions: BTreeSet::new(),
             control_bar_overrides: BTreeMap::new(),
@@ -6042,6 +6056,49 @@ impl SimView for SimContext {
         let ms = self.world.objects.get(projectile)?.projectile_slot?;
         let module = self.world.modules.payload(ms)?;
         module.as_projectile().map(|p| p.projectile_get_launcher_id())
+    }
+
+    fn team_common_target(&self, owner: ObjectSlot) -> Option<ObjectId> {
+        let team = self.world.objects.get(owner)?.team_id;
+        self.world.team_common_targets.get(&team).copied()
+    }
+
+    fn team_keeps_common_target(&self, owner: ObjectSlot) -> Bool {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return FALSE;
+        };
+        // `DIFFICULTY_EASY` is 0.
+        Bool::from(
+            self.player_is_human(team) == FALSE
+                && self
+                    .world
+                    .ai_players
+                    .get(&self.player_index_for_team(team))
+                    .is_some_and(|ai| ai.difficulty != 0),
+        )
+    }
+
+    fn object_is_clear_of_shroud(&self, owner: ObjectSlot, player_index: Int) -> Bool {
+        if self.object_is_kind_of(owner, KindOfType::AlwaysVisible) != FALSE {
+            return TRUE;
+        }
+        let Some(id) = self.world.objects.get(owner).map(|o| o.id) else {
+            return FALSE;
+        };
+        let partition = &self.world.partition;
+        // No `PartitionData`.
+        if !partition.is_registered(id) {
+            return TRUE;
+        }
+        let cells = partition.object_cells(id);
+        let clear = |&cell: &usize| {
+            partition
+                .shroud_cell(cell)
+                .is_some_and(|c| c.status(player_index as usize) == CellShroudStatus::Clear)
+        };
+        Bool::from(
+            partition.updated_since_last_reset() && !cells.is_empty() && cells.iter().all(clear),
+        )
     }
 
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
@@ -10826,6 +10883,15 @@ impl SimApi for SimContext {
         }
     }
 
+    fn set_team_common_target(&mut self, owner: ObjectSlot, target: ObjectId) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        if let Some(stored) = self.world.team_common_targets.get_mut(&team) {
+            *stored = target;
+        }
+    }
+
     fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot) {
         if self.call_ai(owner, &AiCall::WakeUpAndAttemptToTarget) {
             return;
@@ -12039,6 +12105,18 @@ impl SimView for MockSimApi {
 
     fn projectile_launcher_id(&self, projectile: ObjectSlot) -> Option<ObjectId> {
         self.ctx.projectile_launcher_id(projectile)
+    }
+
+    fn team_common_target(&self, owner: ObjectSlot) -> Option<ObjectId> {
+        self.ctx.team_common_target(owner)
+    }
+
+    fn team_keeps_common_target(&self, owner: ObjectSlot) -> Bool {
+        self.ctx.team_keeps_common_target(owner)
+    }
+
+    fn object_is_clear_of_shroud(&self, owner: ObjectSlot, player_index: Int) -> Bool {
+        self.ctx.object_is_clear_of_shroud(owner, player_index)
     }
 
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
@@ -13814,6 +13892,10 @@ impl SimApi for MockSimApi {
 
     fn ai_set_attitude(&mut self, owner: ObjectSlot, attitude: AttitudeType) {
         self.ctx.ai_set_attitude(owner, attitude);
+    }
+
+    fn set_team_common_target(&mut self, owner: ObjectSlot, target: ObjectId) {
+        self.ctx.set_team_common_target(owner, target);
     }
 
     fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot) {

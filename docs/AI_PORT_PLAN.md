@@ -147,7 +147,7 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `wake_up_and_attempt_to_target`, `attack_priority`, `evaluate_morale_bonus`. Unblocks `PKT-325` and `PKT-311`.
 - Risks: partition iteration order breaks ties; one draw offsets the mood check time.
 - Seen: idle units notice enemies.
-- **Done, without a caller.** `zh_logic::ai::ai` (searches, vision range) and `zh_logic::ai::mood` (mood matrix, mood timer, `next_mood_target`). Direct over random crowds: `golden_s12_targeting`.
+- **Done and wired** (`ai_update/mood_target.rs`). `zh_logic::ai::ai` (searches, vision range) and `zh_logic::ai::mood` (mood matrix, mood timer, `next_mood_target`). Direct over random crowds: `golden_s12_targeting`.
   - S8 keeps a `MoodState` (it saves both members), fills a `MoodUnit` and calls in; `attack_priority` is `AttackPriorityInfo::priority_of`; `evaluate_morale_bonus` already sits in `horde_update`.
   - `PartitionManager` searches with filters are `SimView::closest_object_from` and `objects_from_near_to_far`. Gaps: `OPEN_DECISIONS.md`.
 

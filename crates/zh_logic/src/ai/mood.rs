@@ -229,6 +229,7 @@ fn may_acquire(
 
 /// `getNextMoodTarget`. It draws one logic random number when it spreads the
 /// next check of an AI caller.
+#[allow(clippy::too_many_arguments)]
 pub fn next_mood_target(
     sim: &mut dyn SimApi,
     seams: &mut dyn TargetingSeams,
@@ -239,8 +240,34 @@ pub fn next_mood_target(
     called_by_ai: Bool,
     called_during_idle: Bool,
 ) -> Option<ObjectSlot> {
+    match mood_check(
+        sim,
+        seams,
+        owner,
+        unit,
+        state,
+        called_by_ai,
+        called_during_idle,
+    ) {
+        Err(answer) => answer,
+        Ok(()) => mood_search(sim, seams, ai_data, owner, unit, called_by_ai),
+    }
+}
+
+/// `getNextMoodTarget` up to the search: whether the unit may look at all, the
+/// team's target and the check timer. `Err` is the answer without a search. Split
+/// off so that a caller can search with the rules borrowed from `sim`.
+pub fn mood_check(
+    sim: &mut dyn SimApi,
+    seams: &mut dyn TargetingSeams,
+    owner: ObjectSlot,
+    unit: &MoodUnit<'_>,
+    state: &mut MoodState,
+    called_by_ai: Bool,
+    called_during_idle: Bool,
+) -> Result<(), Option<ObjectSlot>> {
     if !may_acquire(sim, owner, unit, called_during_idle) {
-        return None;
+        return Err(None);
     }
     let now = sim.frame();
 
@@ -253,12 +280,12 @@ pub fn next_mood_target(
         });
         if let Some(victim) = team_victim {
             if unit.attitude as i32 >= AttitudeType::Normal as i32 {
-                return Some(victim);
+                return Err(Some(victim));
             }
         }
 
         if now < state.next_mood_check_time {
-            return None;
+            return Err(None);
         }
         let check_rate = unit.mood_attack_check_rate as Int;
         state.next_mood_check_time = now.wrapping_add(check_rate as UnsignedInt);
@@ -270,7 +297,18 @@ pub fn next_mood_target(
             state.randomly_offset_mood_check = FALSE;
         }
     }
+    Ok(())
+}
 
+/// The rest of `getNextMoodTarget`: the range and the search.
+pub fn mood_search(
+    sim: &dyn SimView,
+    seams: &mut dyn TargetingSeams,
+    ai_data: &AiData,
+    owner: ObjectSlot,
+    unit: &MoodUnit<'_>,
+    called_by_ai: Bool,
+) -> Option<ObjectSlot> {
     let matrix = mood_matrix_value(sim, owner, unit);
     let mut range = adjusted_vision_range(
         sim,

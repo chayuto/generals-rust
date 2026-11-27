@@ -201,7 +201,7 @@ fn idle_update(sim: &mut dyn SimApi, ctx: ModuleContext) -> StateReturnType {
         if !disabled {
             let adjust = ai_update::mood_matrix_action_adjustment(sim, ctx, MoodMatrixAction::Idle);
             if adjust & MAA_AFFECT_RANGE_IGNORE_ALL == 0 {
-                let enemy = ai_seams(sim).next_mood_target(ctx.owner_id, TRUE, TRUE);
+                let enemy = ai_update::next_mood_target(sim, ctx, TRUE, TRUE);
                 if let Some(enemy) = enemy {
                     let mut parms =
                         AiCommandParms::new(AiCommandType::AttackObject, CommandSourceType::FromAi);

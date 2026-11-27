@@ -1109,7 +1109,7 @@ fn attack_move_update(sim: &mut dyn SimApi, ctx: ModuleContext) -> StateReturnTy
             sub_set_state(sim, ctx, state_id::PICK_UP_CRATE);
             return StateReturnType::Continue;
         }
-        let target = ai_seams(sim).next_mood_target(ctx.owner_id, Bool::from(!retarget_now), FALSE);
+        let target = ai_update::next_mood_target(sim, ctx, Bool::from(!retarget_now), FALSE);
         if let Some(target) = target {
             ai(sim, ctx).ending_move();
             sub_set_goal_object(sim, ctx, target);

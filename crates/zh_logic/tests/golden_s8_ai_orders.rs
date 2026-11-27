@@ -242,8 +242,8 @@ impl AiSeams for Seams {
         owner: ObjectId,
         by_ai: Bool,
         during_idle: Bool,
-    ) -> Option<ObjectId> {
-        object(&self.take(format!("M,{},{by_ai},{during_idle}", owner.0)))
+    ) -> Option<Option<ObjectId>> {
+        Some(object(&self.take(format!("M,{},{by_ai},{during_idle}", owner.0))))
     }
 
     fn closest_repulsor(&mut self, owner: ObjectId, range: Real) -> Option<ObjectId> {

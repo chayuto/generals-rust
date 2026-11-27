@@ -502,7 +502,7 @@ fn aim_turret_at_mood_target(sim: &mut dyn SimApi, ctx: ModuleContext, force: Bo
     let Some(turret) = cur_turret(sim, ctx) else {
         return;
     };
-    let target = ai_seams(sim).next_mood_target(ctx.owner_id, TRUE, FALSE);
+    let target = ai_update::next_mood_target(sim, ctx, TRUE, FALSE);
     if let Some(target) = target.and_then(|id| sim.find_object(id)) {
         turret_target_object(sim, ctx, turret, Some(target), force);
     }
@@ -1390,6 +1390,7 @@ fn fire_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateR
     let victim = goal_object(sim, ctx, host);
     if let Some(victim) = victim {
         let id = id_of(sim, victim);
+        ai_update::offer_team_target(sim, owner, victim);
         ai_seams(sim).offer_team_target(ctx.owner_id, id);
     }
     sim.set_status(owner, ObjectStatusType::IsFiringWeapon);
@@ -1875,6 +1876,7 @@ pub fn on_enter(
 fn release_victim(sim: &mut dyn SimApi, ctx: ModuleContext, victim: ObjectSlot) {
     ai_update::friend_set_goal_object(sim, ctx, None);
     let id = id_of(sim, victim);
+    ai_update::drop_team_target(sim, ctx.owner_slot, victim);
     ai_seams(sim).drop_team_target(ctx.owner_id, id);
 }
 

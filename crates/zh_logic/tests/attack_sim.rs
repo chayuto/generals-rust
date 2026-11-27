@@ -1,17 +1,23 @@
 //! An attack order alone makes one unit destroy another on a loaded pathfind
 //! map: the attack states choose the weapon, close in, aim and fire (slice S14;
-//! held to the reference by `golden_s14_attack_states.rs`).
+//! held to the reference by `golden_s14_attack_states.rs`). An idle unit does it
+//! unordered once an enemy is in range (`golden_s12_targeting.rs`).
 
 use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::{Coord3D, Region3D};
-use zh_common::types::{Bool, Real, Relationship, TeamId, FALSE, TRUE};
+use zh_common::types::{Bool, ObjectId, Real, Relationship, TeamId, FALSE, TRUE};
+use zh_logic::ai::ai_player::AiPlayer;
 use zh_logic::ai::ai_state_machine::state_id;
 use zh_logic::arena::{ModuleSlot, ObjectSlot};
 use zh_logic::combat::locomotor::LocomotorTemplate;
 use zh_logic::gamelogic::frame::{run_frame, NoFrameSeams};
-use zh_logic::modules::update::ai_update::{self, AiCall, AiCommandParms, AiCommandType, AiUpdate};
+use zh_logic::modules::update::ai_update::{
+    self, drop_team_target, offer_team_target, AiCall, AiCommandParms, AiCommandType, AiUpdate,
+};
 use zh_logic::modules::CommandSourceType;
 use zh_logic::object::weapon::{WeaponTemplate, NO_MAX_SHOTS_LIMIT};
+use zh_logic::player::seams::AiKind;
+use zh_logic::rules::object_status_types::ObjectStatusType;
 use zh_logic::sim::{SimApi, SimContext, SimView};
 
 const ATTACKERS: TeamId = TeamId(1);
@@ -81,7 +87,8 @@ fn world() -> SimContext {
         7.0,
         gun,
     ) + &object_ini("Dummy", "SELECTABLE VEHICLE", "Treads", 7.0, "")
-        + &object_ini("Bunker", "STRUCTURE IMMOBILE", "", 14.0, "");
+        + &object_ini("Bunker", "STRUCTURE IMMOBILE", "", 14.0, "")
+        + &object_ini("Beacon", "ALWAYS_VISIBLE IMMOBILE", "", 4.0, "");
     let mut reader = IniReader::new("object.ini", ini.as_bytes(), IniLoadType::Overwrite);
     sim.rules
         .load_thing_templates_from_ini(&mut reader)
@@ -313,4 +320,141 @@ fn an_attack_on_a_spot_keeps_firing_until_ordered_to_stop() {
         .is_none());
     let status: Bool = sim.object(attacker).map_or(FALSE, |o| o.status.test(23));
     assert_eq!(status, FALSE, "no longer attacking");
+}
+
+/// `getNextMoodTarget` from the idle state: no order is given to the one that
+/// shoots. A human's idle unit takes only what is already within weapon range.
+#[test]
+fn an_idle_unit_attacks_an_enemy_that_comes_into_range() {
+    let mut sim = world();
+    // `AIData.ini`'s `GuardOuterModifierHuman`: the share of the vision range a
+    // human's unit scans. The constructor's value is zero.
+    sim.rules.ai_data.guard_outer_modifier_human = 1.5;
+    let ini = object_ini("Sentry", "SELECTABLE INFANTRY CAN_ATTACK", "Legs", 4.0, "")
+        .replace(
+            "Object Sentry",
+            "Object Sentry\n  ShroudClearingRange = 150",
+        )
+        .replace(
+            "ModuleTag_AI\n",
+            "ModuleTag_AI\n    AutoAcquireEnemiesWhenIdle = Yes\n    MoodAttackCheckRate = 500\n",
+        )
+        .replacen(
+            "  Locomotor = SET_NORMAL Legs\n",
+            "  Locomotor = SET_NORMAL Legs\n  WeaponSet\n    Conditions = None\n    \
+             Weapon = PRIMARY Rifle\n  End\n",
+            1,
+        );
+    let mut reader = IniReader::new("sentry.ini", ini.as_bytes(), IniLoadType::Overwrite);
+    sim.rules
+        .load_thing_templates_from_ini(&mut reader)
+        .expect("templates");
+    let sentry = spawn(&mut sim, "Sentry", ATTACKERS, 45.0, 205.0);
+    let enemy = spawn(&mut sim, "Dummy", DEFENDERS, 345.0, 205.0);
+    for _ in 0..90 {
+        run_frame(&mut sim, &mut NoFrameSeams);
+    }
+    assert_eq!(
+        ai(&mut sim, sentry).machine.current_state_id(),
+        state_id::IDLE,
+        "out of range"
+    );
+    let start = position(&sim, sentry);
+    order(
+        &mut sim,
+        enemy,
+        AiCommandType::MoveToPosition,
+        None,
+        Coord3D::new(95.0, 205.0, 0.0),
+    );
+    let mut acquired_at = None;
+    for _ in 0..600 {
+        run_frame(&mut sim, &mut NoFrameSeams);
+        if ai(&mut sim, sentry).machine.current_state_id() == state_id::ATTACK_OBJECT {
+            acquired_at = Some(position(&sim, enemy).x - start.x);
+            break;
+        }
+    }
+    let distance = acquired_at.expect("the idle unit notices the enemy");
+    assert!(
+        distance > 40.0 && distance < 95.0,
+        "taken inside weapon range: {distance}"
+    );
+    fight(&mut sim, sentry, enemy);
+}
+
+/// What the sim answers the targeting search about walls, fog and a team that
+/// attacks a common target, asked outside the idle state.
+#[test]
+fn the_mood_search_heeds_walls_fog_and_the_teams_target() {
+    let mut sim = world();
+    sim.rules.ai_data.guard_outer_modifier_human = 1.5;
+    sim.rules.ai_data.guard_outer_modifier_ai = 1.5;
+    let gunner = spawn(&mut sim, "Gunner", ATTACKERS, 105.0, 205.0);
+    let enemy = spawn(&mut sim, "Dummy", DEFENDERS, 175.0, 205.0);
+    let far = spawn(&mut sim, "Dummy", DEFENDERS, 385.0, 25.0);
+    settle(&mut sim);
+    let id = |sim: &SimContext, slot| sim.object(slot).expect("object").id;
+    let (enemy_id, far_id) = (id(&sim, enemy), id(&sim, far));
+    let ms = ai_slot(&sim, gunner);
+    let ctx = sim.world.modules.meta(ms).context(ms);
+    let ask = |sim: &mut SimContext, by_ai| ai_update::next_mood_target(sim, ctx, by_ai, FALSE);
+
+    assert_eq!(sim.object_is_clear_of_shroud(far, 1), FALSE);
+    let beacon = spawn(&mut sim, "Beacon", DEFENDERS, 385.0, 385.0);
+    settle(&mut sim);
+    assert_eq!(sim.object_is_clear_of_shroud(beacon, 1), TRUE);
+    sim.world.partition.unregister(far_id);
+    assert_eq!(sim.object_is_clear_of_shroud(far, 1), TRUE);
+    sim.world.partition.register(far_id);
+    settle(&mut sim);
+    assert_eq!(ask(&mut sim, FALSE), Some(enemy_id));
+    sim.rules.ai_data.attack_uses_line_of_sight = TRUE;
+    assert_eq!(ask(&mut sim, FALSE), Some(enemy_id), "nothing between");
+    let wall = spawn(&mut sim, "Bunker", DEFENDERS, 140.0, 205.0);
+    sim.add_object_to_pathfind_map(wall);
+    settle(&mut sim);
+    assert_ne!(ask(&mut sim, FALSE), Some(enemy_id), "behind the wall");
+    sim.remove_object_from_pathfind_map(wall);
+    sim.destroy_object(wall);
+    settle(&mut sim);
+
+    // A computer team that is not easy keeps the target it first fires at.
+    sim.world.player_is_human.insert(ATTACKERS, FALSE);
+    sim.world
+        .ai_players
+        .insert(1, AiPlayer::new(AiKind::Skirmish, 1, 0, 1, 10));
+    offer_team_target(&mut sim, gunner, far);
+    assert_eq!(sim.team_common_target(gunner), None, "no common target");
+    sim.world
+        .team_common_targets
+        .insert(ATTACKERS, ObjectId::INVALID);
+    sim.world.ai_players.get_mut(&1).expect("ai").difficulty = 0;
+    offer_team_target(&mut sim, gunner, far);
+    assert_eq!(sim.team_common_target(gunner), Some(ObjectId::INVALID));
+    sim.world.ai_players.get_mut(&1).expect("ai").difficulty = 1;
+    offer_team_target(&mut sim, gunner, far);
+    offer_team_target(&mut sim, gunner, enemy);
+    assert_eq!(sim.team_common_target(gunner), Some(far_id), "the first");
+    // Out of range, still the team's.
+    assert_eq!(ask(&mut sim, TRUE), Some(far_id));
+    drop_team_target(&mut sim, gunner, enemy);
+    assert_eq!(sim.team_common_target(gunner), Some(far_id));
+    drop_team_target(&mut sim, gunner, far);
+    assert_eq!(sim.team_common_target(gunner), Some(ObjectId::INVALID));
+    // A stealthed one is forgotten unless detected, whatever is asked about.
+    offer_team_target(&mut sim, gunner, far);
+    sim.set_status(far, ObjectStatusType::Stealthed);
+    sim.set_status(far, ObjectStatusType::Detected);
+    drop_team_target(&mut sim, gunner, enemy);
+    assert_eq!(sim.team_common_target(gunner), Some(far_id));
+    sim.clear_status(far, ObjectStatusType::Detected);
+    drop_team_target(&mut sim, gunner, enemy);
+    assert_eq!(sim.team_common_target(gunner), Some(ObjectId::INVALID));
+    sim.clear_status(far, ObjectStatusType::Stealthed);
+    // A dead target is forgotten when asked for.
+    offer_team_target(&mut sim, gunner, far);
+    sim.object_mut(far).expect("far").set_effectively_dead(TRUE);
+    assert_ne!(ask(&mut sim, TRUE), Some(far_id));
+    assert_eq!(sim.team_common_target(gunner), Some(ObjectId::INVALID));
 }

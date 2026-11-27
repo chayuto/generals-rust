@@ -27,6 +27,8 @@ use crate::ai::ResidentEntries;
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::combat::locomotor::{Locomotor, LocomotorWorld};
 use crate::combat::locomotor_set::{LocomotorSet, LocomotorSetType};
+use crate::ai::ai::{MM_CONTROLLER_AI, MM_MOOD_SLEEP};
+use crate::ai::mood;
 use crate::combat::turret_ai::{TurretAIData, TURRET_AI_DATA_FIELD_PARSE};
 use crate::modules::update::dozer_ai_update::{self, DozerAi};
 use crate::modules::update::worker_ai_update::{self, WorkerAi};
@@ -56,6 +58,7 @@ use zh_common::xfer::{Xfer, XferError, XferMode};
 mod allies;
 mod attack_path;
 mod collision;
+mod mood_target;
 mod path_follow;
 
 use allies::{move_allies, move_allies_away_from_destination, private_move_away_from_unit};
@@ -67,6 +70,8 @@ pub use path_follow::{
     request_safe_path,
 };
 pub use attack_path::is_attack_view_blocked_by_obstacle;
+pub use crate::ai::mood::MoodMatrixAction;
+pub use mood_target::{drop_team_target, next_mood_target, offer_team_target};
 pub(crate) use path_follow::{goal_position, update_goal};
 use path_follow::{point_on_path, set_path, with_pathfinder};
 
@@ -85,28 +90,6 @@ pub const GUARDTARGET_LOCATION: Int = 0;
 pub const GUARDTARGET_OBJECT: Int = 1;
 pub const GUARDTARGET_AREA: Int = 2;
 pub const GUARDTARGET_NONE: Int = 3;
-
-/// `MoodMatrixParameters`.
-pub const MM_CONTROLLER_PLAYER: UnsignedInt = 0x0000_0001;
-pub const MM_CONTROLLER_AI: UnsignedInt = 0x0000_0002;
-pub const MM_UNIT_TYPE_NON_TURRETED: UnsignedInt = 0x0000_0010;
-pub const MM_UNIT_TYPE_TURRETED: UnsignedInt = 0x0000_0020;
-pub const MM_UNIT_TYPE_AIR: UnsignedInt = 0x0000_0040;
-pub const MM_MOOD_SLEEP: UnsignedInt = 0x0000_0100;
-pub const MM_MOOD_PASSIVE: UnsignedInt = 0x0000_0200;
-pub const MM_MOOD_NORMAL: UnsignedInt = 0x0000_0400;
-pub const MM_MOOD_ALERT: UnsignedInt = 0x0000_0800;
-pub const MM_MOOD_AGGRESSIVE: UnsignedInt = 0x0000_1000;
-const MM_MOOD_BITMASK: UnsignedInt = 0x0000_1f00;
-
-/// `MoodMatrixAction`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MoodMatrixAction {
-    Idle,
-    Move,
-    Attack,
-    AttackMove,
-}
 
 /// `LocoGoalType`; written by `xfer`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -931,36 +914,25 @@ pub fn is_doing_ground_movement(sim: &mut dyn SimApi, ctx: ModuleContext) -> Boo
     TRUE
 }
 
+/// What the mood code of [`mood`] asks this module about itself. The attack
+/// priority sets are the script engine's, which no frame fills yet.
+fn mood_unit(state: &AiUpdate) -> mood::MoodUnit<'static> {
+    mood::MoodUnit {
+        has_state_machine: state.machine_made,
+        attitude: state.attitude,
+        valid_surfaces: state.locomotor_set.get_valid_surfaces(),
+        has_primary_turret: Bool::from(state.data.turrets[0].is_some()),
+        is_attacking: Bool::from(state.is_attacking_state()),
+        auto_acquire_enemies_when_idle: state.data.auto_acquire_enemies_when_idle,
+        mood_attack_check_rate: state.data.mood_attack_check_rate,
+        attack_info: None,
+    }
+}
+
 /// `getMoodMatrixValue`.
 pub fn mood_matrix_value(sim: &mut dyn SimApi, ctx: ModuleContext) -> UnsignedInt {
-    if ai(sim, ctx).machine_made == FALSE {
-        return 0;
-    }
-    let Some(team) = sim.object(ctx.owner_slot).map(|o| o.team_id) else {
-        return 0;
-    };
-    let human = sim.player_is_human(team) != FALSE;
-    let state = ai(sim, ctx);
-    let mut value = if human {
-        MM_CONTROLLER_PLAYER
-    } else {
-        MM_CONTROLLER_AI
-            | match state.attitude {
-                AttitudeType::Sleep => MM_MOOD_SLEEP,
-                AttitudeType::Passive => MM_MOOD_PASSIVE,
-                AttitudeType::Alert => MM_MOOD_ALERT,
-                AttitudeType::Aggressive => MM_MOOD_AGGRESSIVE,
-                _ => MM_MOOD_NORMAL,
-            }
-    };
-    value |= if state.locomotor_set.get_valid_surfaces() & LOCOMOTORSURFACE_AIR != 0 {
-        MM_UNIT_TYPE_AIR
-    } else if state.data.turrets[0].is_some() {
-        MM_UNIT_TYPE_TURRETED
-    } else {
-        MM_UNIT_TYPE_NON_TURRETED
-    };
-    value
+    let unit = mood_unit(ai(sim, ctx));
+    mood::mood_matrix_value(sim, ctx.owner_slot, &unit)
 }
 
 /// `getMoodMatrixActionAdjustment`.
@@ -969,50 +941,17 @@ pub fn mood_matrix_action_adjustment(
     ctx: ModuleContext,
     action: MoodMatrixAction,
 ) -> UnsignedInt {
-    const OK: UnsignedInt = 0x01;
-    const TO_IDLE: UnsignedInt = 0x02;
-    const TO_ATTACK_MOVE: UnsignedInt = 0x04;
-    const IGNORE_ALL: UnsignedInt = 0x10;
-    const WAIT_FOR_ATTACK: UnsignedInt = 0x20;
-    const ALERT: UnsignedInt = 0x40;
-    const AGGRESSIVE: UnsignedInt = 0x80;
-
-    if sim.object_is_kind_of(ctx.owner_slot, KindOfType::Infantry) != FALSE
-        && sim.object_is_kind_of(ctx.owner_slot, KindOfType::IgnoredInGui) != FALSE
-    {
-        return OK;
-    }
-    let matrix = mood_matrix_value(sim, ctx);
-    if matrix & MM_CONTROLLER_PLAYER != 0 {
-        return OK;
-    }
-    let mood = matrix & MM_MOOD_BITMASK;
-    use MoodMatrixAction as A;
-    match (action, mood) {
-        (A::Idle, MM_MOOD_SLEEP) => OK | IGNORE_ALL,
-        (A::Idle, MM_MOOD_PASSIVE) => OK | WAIT_FOR_ATTACK,
-        (A::Idle, MM_MOOD_ALERT) => OK | ALERT,
-        (A::Idle, MM_MOOD_AGGRESSIVE) => OK | AGGRESSIVE,
-        (A::Move, MM_MOOD_SLEEP) => TO_IDLE | IGNORE_ALL,
-        (A::Move, MM_MOOD_PASSIVE) => OK | WAIT_FOR_ATTACK,
-        (A::Move, MM_MOOD_ALERT) => TO_ATTACK_MOVE | ALERT,
-        (A::Move, MM_MOOD_AGGRESSIVE) => TO_ATTACK_MOVE | AGGRESSIVE,
-        (A::Attack, MM_MOOD_SLEEP) => TO_IDLE | IGNORE_ALL,
-        (A::AttackMove, MM_MOOD_SLEEP) => TO_IDLE | IGNORE_ALL,
-        (A::AttackMove, MM_MOOD_ALERT) => OK | ALERT,
-        (A::AttackMove, MM_MOOD_AGGRESSIVE) => OK | AGGRESSIVE,
-        _ => OK,
-    }
+    let unit = mood_unit(ai(sim, ctx));
+    mood::mood_matrix_action_adjustment(sim, ctx.owner_slot, &unit, action)
 }
 
 /// `resetNextMoodCheckTime`.
 pub fn reset_next_mood_check_time(sim: &mut dyn SimApi, ctx: ModuleContext) {
-    let when = sim
-        .frame()
-        .wrapping_add(sim.rules().ai_data.force_idle_frames_count);
+    let mut timer = mood::MoodState::default();
+    timer.reset_next_mood_check_time(sim.frame(), &sim.rules().ai_data);
     let state = ai(sim, ctx);
-    state.next_mood_check_time = when;
-    state.randomly_offset_mood_check = TRUE;
+    state.next_mood_check_time = timer.next_mood_check_time;
+    state.randomly_offset_mood_check = timer.randomly_offset_mood_check;
 }
 
 /// `setCurrentVictim`. Telling the old victim it lost a targeter only matters to

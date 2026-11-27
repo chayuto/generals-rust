@@ -158,14 +158,14 @@ impl AiSeams for Seams {
         owner: ObjectId,
         called_by_ai: Bool,
         during_idle: Bool,
-    ) -> Option<ObjectId> {
+    ) -> Option<Option<ObjectId>> {
         // The reference's stand-in answers nothing, unrecorded, for an idle unit.
         if during_idle != FALSE {
-            return None;
+            return Some(None);
         }
-        let answer = self.answer(format!("T,{},{called_by_ai}", owner.0))?;
-        let id = number(&answer) as i32;
-        (id != 0).then_some(ObjectId(id))
+        let answer = self.answer(format!("T,{},{called_by_ai}", owner.0));
+        let id = answer.map(|a| number(&a) as i32);
+        Some(id.filter(|&id| id != 0).map(ObjectId))
     }
     fn replaces_searches(&mut self) -> Bool {
         TRUE

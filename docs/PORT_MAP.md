@@ -391,6 +391,7 @@
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/allies.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/attack_path.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/collision.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/mood_target.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/path_follow.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_actions.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_effects.rs` | `implemented` |

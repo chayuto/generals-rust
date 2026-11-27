@@ -88,7 +88,7 @@ use zh_logic::modules::update::horde_update::TerrainDecalType;
 use zh_logic::spatial::partition_query::{
     measure_distance_squared, DistanceCalculationType, IterOrderType, QueryCenter,
 };
-use zh_logic::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
+use zh_logic::spatial::partition_shroud::{CellShroudStatus, ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
@@ -427,6 +427,15 @@ impl SimView for EngineSim<'_> {
     }
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
         not_wired("player_mask")
+    }
+    fn team_common_target(&self, owner: ObjectSlot) -> Option<ObjectId> {
+        not_wired("team_common_target")
+    }
+    fn team_keeps_common_target(&self, owner: ObjectSlot) -> Bool {
+        not_wired("team_keeps_common_target")
+    }
+    fn object_is_clear_of_shroud(&self, owner: ObjectSlot, player_index: Int) -> Bool {
+        not_wired("object_is_clear_of_shroud")
     }
     fn partition_distance_squared( &self, owner: ObjectSlot, other: Option<ObjectSlot>, pos: &Coord3D, rule: DistanceCalculationType, ) -> Real {
         not_wired("partition_distance_squared")
@@ -1519,6 +1528,9 @@ impl SimApi for EngineSim<'_> {
     }
     fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot) {
         not_wired("ai_wake_up_and_attempt_to_target")
+    }
+    fn set_team_common_target(&mut self, owner: ObjectSlot, target: ObjectId) {
+        not_wired("set_team_common_target")
     }
     fn set_locomotor_max_lift(&mut self, owner: ObjectSlot, max_lift: Real) {
         not_wired("set_locomotor_max_lift")

@@ -71,7 +71,7 @@ What differs first, by games reached (of 24):
 1. Script engine not run (`ScriptEngine::update`): 24 games, frame 1 (computer players' money). Its timer draws move the seed at frame 1 in 6 games; the other 18 move at frame 2.
 2. Computer player update not ported (`AIPlayer::update`, S21): 24 games, frames 1 and 2 (base building, upgrade choice, unit training).
 3. Dozer and Worker frame updates (S16): 23 games, frame 2, module wake frames of the human players' units too.
-4. Mood targets in idle not wired (`getNextMoodTarget`, S12; `mood.rs` is written, `NoAiSeams` answers none): 24 games, draws from frame 4.
+4. Mood targets are wired (`getNextMoodTarget`); the ratchet cannot show it while items 1 and 2 shift the seed. At frame 4 the mood draws match the stock engine except for computer dozers that item 2 leaves idle (2 games checked).
 5. Turrets not wired (S14): 6 games, map objects wake at frame 4, draws from frame 9.
 6. Human orders: dozer construct is not carried out (6 games, objects from frame 146); queue unit create is not (6 games, money from frame 39); queue upgrade is silently dropped (5 games, money from frame 73), see below.
 7. Missing modules `RailroadBehavior` and `BoneFXUpdate` (2 games each, frame 1), and `StructureCollapseUpdate` (2 games, asleep in these frames).
@@ -84,8 +84,8 @@ Pitfalls:
 ## Next
 
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
-- A unit moves: a move order alone takes a unit to its goal (S4, S5, S9, S10; `move_order_retail` on the six replay maps, starting units only, not compared with the reference). All searches are wired. Units fight: an attack order alone destroys a target (`attack_sim`, hand-built units, not tried with retail data or replay commands). Missing for a play test: idle units do not fight back, no turrets, missiles never detonate, terrain sight is always clear. Squad, hunt and attack-area states and the second half of S14 (turrets, weapon half of the AI update) are not ported.
-- Wiring still missing: targeting has no caller; the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
+- A unit moves: a move order alone takes a unit to its goal (S4, S5, S9, S10; `move_order_retail` on the six replay maps, starting units only, not compared with the reference). All searches are wired. Units fight: an attack order alone destroys a target (`attack_sim`, hand-built units, not tried with retail data or replay commands). Idle units pick targets and fight back (`attack_sim`, hand-built units). Missing for a play test: no turrets, missiles never detonate, terrain sight is always clear. Squad, hunt and attack-area states and the second half of S14 (turrets, weapon half of the AI update) are not ported.
+- Wiring still missing: the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
 - The computer opponent's frame updates (`AIPlayer::update`, slice S21) are not ported.
 - Client crates: ask the owner before adding the first one (item 12).
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).

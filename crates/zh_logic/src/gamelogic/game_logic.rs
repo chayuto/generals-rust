@@ -973,7 +973,16 @@ pub fn sync_teams(sim: &mut SimContext, players: &PlayerList, teams: &TeamFactor
         let mut lists: Vec<Vec<TeamId>> = Vec::new();
         for &prototype in &player.team_prototypes {
             let instances = teams.instance_ids(prototype);
+            let common_target = teams
+                .prototype(prototype)
+                .is_some_and(|p| p.template.attack_common_target);
             for &team in &instances {
+                if common_target {
+                    sim.world
+                        .team_common_targets
+                        .entry(team)
+                        .or_insert(ObjectId::INVALID);
+                }
                 sim.world.team_players.insert(team, index);
                 sim.world
                     .team_is_neutral
