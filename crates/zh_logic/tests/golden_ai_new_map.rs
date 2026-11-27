@@ -26,6 +26,7 @@ use zh_common::types::{ObjectId, FALSE, TRUE};
 use zh_common::xfer::{Snapshot, XferSave};
 use zh_logic::ai::ai_player::{base_center_and_radius, new_map};
 use zh_logic::ai::ai_skirmish_player::move_build_list;
+use zh_logic::ai::ai_state_machine::state_id;
 use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader};
 use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, StartStage};
 use zh_logic::modules::update::ai_update::AiUpdate;
@@ -46,13 +47,14 @@ const GOLDEN: &str = include_str!("../../../docs/golden_vectors/AiNewMap.json");
 /// The cases of `golden_game_start.rs`, which name each game's options string.
 const GAMES: &str = include_str!("../../../docs/golden_vectors/GameStart.json");
 
-const KINDS: [&str; 11] = [
-    "seed", "flags", "ai", "build", "score", "energy", "objx", "unit", "path", "cells", "shroud",
+const KINDS: [&str; 12] = [
+    "seed", "flags", "ai", "build", "score", "energy", "objx", "unit", "path", "moving", "cells",
+    "shroud",
 ];
 /// `(game, stage)` where a computer player tells a unit to get out of a new
 /// building's way. The reference's move state then reserves the goal cell and asks
-/// for a path; the move states are not ported (`AI_PORT_PLAN.md` S10), so the `path`
-/// rows differ.
+/// for a path; the move states are not ported (`AI_PORT_PLAN.md` S10), so the
+/// `moving` rows (goal cell and path request of units in the move state) differ.
 const UNITS_TOLD_TO_MOVE: [(&str, &str); 9] = [
     ("linux_6p_custom_map.rep", "end"),
     ("linux_6p_custom_map.rep", "built"),
@@ -333,7 +335,12 @@ fn rows(sim: &SimContext, players: &PlayerList) -> Vec<String> {
             ai.last_command_source as i32,
         ));
         out.push(format!(
-            "path\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}",
+            if ai.machine.current_state_id() == state_id::MOVE_TO {
+                "moving"
+            } else {
+                "path"
+            },
             obj.id.0,
             ai.pathfind_goal_cell.x,
             ai.pathfind_goal_cell.y,
@@ -575,7 +582,7 @@ fn retail_map_setup_matches_the_reference() {
                 .collect();
             let got = digest(&of);
             // Known to differ: a fix has to take the game off the list.
-            if kind == "path" && UNITS_TOLD_TO_MOVE.contains(&(name, stage)) {
+            if kind == "moving" && UNITS_TOLD_TO_MOVE.contains(&(name, stage)) {
                 assert_ne!(got, values[kind], "{name}: the move states are ported now?");
                 continue;
             }

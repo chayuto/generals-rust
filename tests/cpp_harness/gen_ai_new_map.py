@@ -21,7 +21,7 @@ import gen_game_start as game_start
 
 ROOT = game_start.ROOT
 STAGES = ("before_ai", "end")
-KINDS = ("seed", "flags", "ai", "build", "score", "energy", "objx", "unit", "path", "cells", "shroud")
+KINDS = ("seed", "flags", "ai", "build", "score", "energy", "objx", "unit", "path", "moving", "cells", "shroud")
 # The game whose start also makes the calls with chosen inputs.
 SYNTHETIC = "macos_2p_vanilla_map.rep"
 

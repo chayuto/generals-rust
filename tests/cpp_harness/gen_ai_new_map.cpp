@@ -134,9 +134,11 @@ void write_objects(FILE* out) {
             static_cast<unsigned>(ai->getCurrentStateID()), bits(goal->x), bits(goal->y),
             bits(goal->z), static_cast<unsigned>(ai->getStateMachine()->m_goalObjectID),
             static_cast<int>(ai->getLastCommandSource()));
-        // The reserved goal cell and whether a path was asked for.
-        std::fprintf(out, "path\t%u\t%d\t%d\t%d\n", entry.first, cell->x, cell->y,
-            ai->isWaitingForPath() ? 1 : 0);
+        // The reserved goal cell and whether a path was asked for, kept apart for units
+        // in the move state.
+        std::fprintf(out, "%s\t%u\t%d\t%d\t%d\n",
+            ai->getCurrentStateID() == AI_MOVE_TO ? "moving" : "path", entry.first, cell->x,
+            cell->y, ai->isWaitingForPath() ? 1 : 0);
     }
 }
 
