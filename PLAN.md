@@ -1,6 +1,6 @@
 # Architectural & Execution Plan: Zero Hour Engine Port to Rust (`generals-rust`)
 
-> **Goal (owner, 2026-11-27):** the whole game in Rust, with no C++. This plan stops at a headless simulator; the client it does not cover is sized in `docs/OPEN_DECISIONS.md` item 10.
+> **Goal (owner, 2026-11-27):** the whole game in Rust, with no C++. This plan stops at a headless simulator; `docs/FULL_PORT_PLAN.md` covers the whole game.
 
 ## 1. Objective & Milestones
 
