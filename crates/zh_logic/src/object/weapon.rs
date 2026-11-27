@@ -17,6 +17,8 @@ use zh_common::types::{
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
 use super::weapon_set::WeaponSlotType;
+use crate::rules::object_status_types::{ObjectStatusType, OBJECT_STATUS_NAMES};
+use zh_common::ini::VETERANCY_NAMES;
 
 pub const NO_MAX_SHOTS_LIMIT: Int = 0x7fff_ffff;
 pub const PATHFIND_CELL_SIZE_F: Real = 10.0_f32;
@@ -143,6 +145,22 @@ pub struct WeaponTemplate {
     pub missile_calls_on_die: Bool,
     pub suspend_fx_delay: UnsignedInt,
     pub extra_bonus: WeaponBonusSet,
+    /// `m_projectileName`; empty for `None`.
+    pub projectile_name: String,
+    /// `m_damageStatusType`.
+    pub damage_status_type: ObjectStatusType,
+    /// `m_fireOCLNames`, by veterancy level; empty is none.
+    pub fire_ocl: [String; 4],
+    /// `m_projectileDetonationOCLNames`.
+    pub projectile_detonation_ocl: [String; 4],
+    pub projectile_stream_name: String,
+    pub laser_name: String,
+    pub laser_bone_name: String,
+    pub historic_bonus_time: UnsignedInt,
+    pub historic_bonus_radius: Real,
+    pub historic_bonus_count: Int,
+    /// Name of `m_historicBonusWeapon`; empty is none.
+    pub historic_bonus_weapon: String,
 }
 
 impl Default for WeaponTemplate {
@@ -171,6 +189,12 @@ impl Default for WeaponTemplate {
             is_shows_ammo_pips: FALSE, allow_attack_garrisoned_buildings: FALSE,
             play_fx_when_stealthed: FALSE, missile_calls_on_die: FALSE,
             suspend_fx_delay: 0, extra_bonus: WeaponBonusSet::new(),
+            projectile_name: String::new(), damage_status_type: ObjectStatusType::None,
+            fire_ocl: Default::default(), projectile_detonation_ocl: Default::default(),
+            projectile_stream_name: String::new(), laser_name: String::new(),
+            laser_bone_name: String::new(), historic_bonus_time: 0,
+            historic_bonus_radius: 0.0, historic_bonus_count: 0,
+            historic_bonus_weapon: String::new(),
         }
     }
 }
@@ -179,6 +203,32 @@ impl Default for WeaponTemplate {
 fn parse_duration_unsigned_int(value: &str) -> Result<UnsignedInt, IniError> {
     let msec = IniReader::scan_unsigned_int(value)?;
     Ok(gm_ceilf(convert_duration_from_msecs_to_frames(msec as Real)) as UnsignedInt)
+}
+
+/// A name field where `None` means no reference.
+fn name_or_none(value: &str) -> String {
+    if value.eq_ignore_ascii_case("None") { String::new() } else { value.to_string() }
+}
+
+/// `ObjectStatusMaskType::parseSingleBitFromINI`.
+fn parse_damage_status(value: &str) -> Result<ObjectStatusType, IniError> {
+    OBJECT_STATUS_NAMES
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case(value))
+        .and_then(|i| ObjectStatusType::from_i32(i as Int))
+        .ok_or(IniError::InvalidData)
+}
+
+/// `parsePerVetLevelAsciiString`: a veterancy level name, then the value.
+fn parse_per_vet_level(names: &mut [String; 4], value: &str) -> Result<(), IniError> {
+    let mut parts = value.split_whitespace();
+    let level = parts.next().unwrap_or("");
+    let index = VETERANCY_NAMES
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case(level))
+        .ok_or(IniError::InvalidData)?;
+    names[index] = name_or_none(parts.next().ok_or(IniError::InvalidData)?);
+    Ok(())
 }
 
 impl WeaponTemplate {
@@ -226,6 +276,19 @@ impl WeaponTemplate {
                 "MinTargetPitch" => self.min_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
                 "MaxTargetPitch" => self.max_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
                 "RadiusDamageAngle" => self.radius_damage_angle = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
+                "ProjectileObject" => self.projectile_name = name_or_none(value),
+                "DamageStatusType" => self.damage_status_type = parse_damage_status(value)?,
+                "FireOCL" => self.fire_ocl = std::array::from_fn(|_| name_or_none(value)),
+                "ProjectileDetonationOCL" => self.projectile_detonation_ocl = std::array::from_fn(|_| name_or_none(value)),
+                "VeterancyFireOCL" => parse_per_vet_level(&mut self.fire_ocl, value)?,
+                "VeterancyProjectileDetonationOCL" => parse_per_vet_level(&mut self.projectile_detonation_ocl, value)?,
+                "ProjectileStreamName" => self.projectile_stream_name = value.to_string(),
+                "LaserName" => self.laser_name = value.to_string(),
+                "LaserBoneName" => self.laser_bone_name = value.to_string(),
+                "HistoricBonusTime" => self.historic_bonus_time = parse_duration_unsigned_int(value)?,
+                "HistoricBonusRadius" => self.historic_bonus_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
+                "HistoricBonusCount" => self.historic_bonus_count = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
+                "HistoricBonusWeapon" => self.historic_bonus_weapon = name_or_none(value),
                 "ClipSize" => self.clip_size = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
                 "ClipReloadTime" => self.clip_reload_time = parse_duration_unsigned_int(value)? as Int,
                 "DelayBetweenShots" => self.parse_shot_delay(value)?,
