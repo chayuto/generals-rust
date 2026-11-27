@@ -65,7 +65,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 ## Next
 
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
-- Toward a moving unit (`AI_PORT_PLAN.md`): S4 goal reservations is done; then S5 and S6 searches, S9 path following, S10 movement states. These build on each other. S13 weapon firing is done and waits for S14 to call it.
+- Toward a moving unit (`AI_PORT_PLAN.md`): S4 goal reservations, S5 and S6 searches and S9 path following are done; S10 movement states is next. The S6 searches still need wiring into S9 (`OPEN_DECISIONS.md`). S13 weapon firing is done and waits for S14 to call it.
 - Wiring still missing: targeting has no caller; the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
 - The computer opponent's frame updates (`AIPlayer::update`, slice S21) are not ported.
 - Client crates: ask the owner before adding the first one (item 12).
