@@ -29,11 +29,14 @@ use crate::pathfinder::pathfind_zone_manager::{
 use crate::terrain::bridge::BridgeGeometry;
 use crate::terrain::{ElevatedLayers, TerrainEffects, TerrainLogic};
 
+mod attack;
 mod closest;
+mod escape;
 mod goals;
 mod hierarchical;
 mod queries;
 mod search;
+pub use attack::*;
 pub use goals::*;
 pub use hierarchical::*;
 pub use queries::*;

@@ -93,6 +93,9 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - C++: closest, attack, safe, ground-group, patch and move-away searches (about 1,500). One worker, split by search if the bundle is too large.
 - Oracle and stubs as S5; weapon range and view-blocked questions from tape.
 - Seen: blocked, attacking and fleeing units get matching paths.
+- **Done.** `pathfinder/ai_pathfind/{closest,attack,escape}.rs`: `find_closest_path`, `patch_path`, `find_attack_path`, `find_safe_path` and `get_move_away_from_path`; the ground path for a group is S5's `find_ground_path`. Direct: `golden_s6_other_searches` (path and every cell and record after each call).
+  - Not yet called by the sim: S9 passes the unit as a `SearchUnit` plus its position, and the weapon as an `AttackProbe`. `PathUnits` gained `goal_object` (airfield check) and `is_idle`, both with defaults.
+  - Found: `patchPath` and `getMoveAwayFromPath` offset the start cell in `x` twice and never in `y`; `findSafePath` and `findAttackPath` run with whatever tunneling flag the previous search left; under the fixed code `patchPath` with nothing to rejoin leaves the start on the open list; the AI states move goal reservations as they change, so the harness sets them before building the map.
 
 ### S7. Locomotor movement
 - C++: `Locomotor.cpp` movement (1,240, of which air and hover 450). One worker; split ground and air if needed.

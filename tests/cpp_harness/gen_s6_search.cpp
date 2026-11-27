@@ -53,7 +53,7 @@ static void s6_templates() {
         std::string kinds = i % 3 == 0 ? "INFANTRY" : "VEHICLE";
         if (i % 4 == 3) kinds += " ATTACK_NEEDS_LINE_OF_SIGHT";
         if (i % 4 == 1) kinds += " ATTACK_NEEDS_LINE_OF_SIGHT";
-        const int crusher = i % 5 == 4 ? 2 : 0;
+        const int crusher = i % 5 == 4 ? 2 : i % 5 == 1 ? 1 : 0;
         std::string extra = "  CrusherLevel = " + num(crusher) + "\n  CrushableLevel = " + num(i % 3) + "\n" + ai +
                             "  WeaponSet\n    Conditions = None\n    Weapon = PRIMARY S6Gun" + num(i % 6) +
                             "\n  End\n";
@@ -95,14 +95,19 @@ static void goal_object_rows(const Scene& s) {
     }
 }
 
-// Some units busy, the rest idle; which ones the searches can tell apart.
+// Some units busy, the rest idle. Changing state moves goal reservations, so
+// this comes before the map is built again.
+static void set_busy(const Scene& s) {
+    for (Object* o : s.units) {
+        AIStateMachine* machine = o->getAIUpdateInterface()->*access_member(AiMachine());
+        if (chance(50)) machine->setState(AI_BUSY);
+    }
+}
+
 static void idle_row(const Scene& s) {
     std::string out = "idle";
     for (Object* o : s.units) {
-        AIUpdateInterface* ai = o->getAIUpdateInterface();
-        AIStateMachine* machine = ai->*access_member(AiMachine());
-        machine->setState(chance(50) ? AI_BUSY : AI_IDLE);
-        if (ai->isIdle()) out += " " + num(o->getID());
+        if (o->getAIUpdateInterface()->isIdle()) out += " " + num(o->getID());
     }
     row(out);
 }
@@ -156,6 +161,18 @@ static void ease(Placed& p) {
     set.*access_member(LsDownhill()) = false;
 }
 
+// A place on or just off a fence, which only a crusher may stand on.
+static bool by_fence(const Scene& s, float off, Coord3D& at) {
+    std::vector<Object*> fences;
+    for (Object* o : s.blocks)
+        if (o->getTemplate()->getFenceWidth() > 0.0f) fences.push_back(o);
+    if (fences.empty()) return false;
+    at = *pick(fences)->getPosition();
+    at.x += between(-off, off);
+    at.y += between(-off, off);
+    return true;
+}
+
 static void closest_row(Scene& s) {
     Coord3D from, to;
     if (chance(50)) endpoints(s, from, to);
@@ -181,7 +198,8 @@ static void closest_row(Scene& s) {
         to = *parked.second->getPosition();
         to.x += between(-15.0f, 15.0f);
         to.y += between(-15.0f, 15.0f);
-        p.m.ignore = chance(70) ? parked.first->getID() : pick(s.blocks)->getID();
+        // Not the mover itself, whose goal object row would be stale.
+        p.m.ignore = chance(70) && parked.first != p.m.unit ? parked.first->getID() : pick(s.blocks)->getID();
         pf()->*access_member(PfIgnore()) = p.m.ignore;
     }
     if (chance(8)) {  // an ignored obstacle that is gone
@@ -214,6 +232,19 @@ static void occupy_cell(const Scene& s, PathfindLayerEnum layer, const Coord3D& 
         cell->setGoalUnit(u->getID(), at);
         row("goal " + where);
     }
+}
+
+// A unit standing still: its position and goal on one cell.
+static void stand_row(const Scene& s, const Coord3D& pos) {
+    const ICoord2D at = cell_of(pos);
+    PathfindCell* cell = pf()->getCell(LAYER_GROUND, at.x, at.y);
+    if (!cell) return;
+    Object* u = pick(s.units);
+    const std::string where = num(LAYER_GROUND) + " " + num(at.x) + " " + num(at.y) + " " + num(u->getID());
+    cell->setGoalUnit(u->getID(), at);
+    row("goal " + where);
+    cell->setPosUnit(u->getID(), at);
+    row("pos " + where);
 }
 
 // A path to patch: one the ground search found, or nodes at cell centres.
@@ -297,6 +328,11 @@ static void patch_rows(Scene& s) {
     deleteInstance(old);
 }
 
+// Set by the fence rows: a crusher that cannot do more than crush a fence,
+// standing on one.
+static Object* g_crusher = nullptr;
+static Coord3D g_fence;
+
 static void moveaway_row(Scene& s) {
     Coord3D from_a, from_b;
     Path* avoid = old_path(s, from_a);
@@ -311,9 +347,11 @@ static void moveaway_row(Scene& s) {
         at.y += between(-12.0f, 12.0f);
     }
     if (chance(8)) at = point(s, true);
+    if (chance(20)) by_fence(s, 6.0f, at);
+    if (g_crusher) at = g_fence;
     passable(s);
     Placed p;
-    place(s, p, at);
+    place(s, p, at, g_crusher);
     ease(p);
     Object* other = pick(s.units);
     const bool tunneling = chance(20);
@@ -361,7 +399,8 @@ static void attack_row(Scene& s, const std::vector<Object*>& armed) {
         std::fprintf(stderr, "armed unit without a weapon\n");
         std::exit(1);
     }
-    const Coord3D at = chance(80) ? far_point(s) : point(s);
+    Coord3D at = chance(80) ? far_point(s) : point(s);
+    if (chance(15)) by_fence(s, 14.0f, at);
     Object* victim = nullptr;
     if (chance(60)) {
         victim = chance(50) || s.blocks.empty() ? pick(s.units) : pick(s.blocks);
@@ -374,6 +413,15 @@ static void attack_row(Scene& s, const std::vector<Object*>& armed) {
         target.x += between(-reach, reach);
         target.y += between(-reach, reach);
     }
+    if (g_crusher) {
+        at = g_fence;
+        at.x += between(-8.0f, 8.0f);
+        at.y += between(-8.0f, 8.0f);
+        target = at;
+        target.x += between(-90.0f, 90.0f);
+        target.y += between(-90.0f, 90.0f);
+        victim = nullptr;
+    }
     Coord3D victim_was;
     if (victim) {
         victim_was = *victim->getPosition();
@@ -385,10 +433,28 @@ static void attack_row(Scene& s, const std::vector<Object*>& armed) {
             target = victim_was;
         }
     }
+    const Coord3D victim_at = victim ? *victim->getPosition() : target;
+    // The attacker may aim at where the victim was last seen.
+    if (victim && chance(20)) {
+        target.x += between(-70.0f, 70.0f);
+        target.y += between(-70.0f, 70.0f);
+    }
+    // Units about where the attacker would stop, in the way of a vehicle.
+    for (int k = below(8); k > 0; --k) {
+        Coord3D back;
+        back.set(at.x - target.x, at.y - target.y, 0);
+        back.normalize();
+        const float out = weapon->getAttackRange(attacker) * between(0.6f, 1.6f);
+        Coord3D spot = target;
+        spot.x += back.x * out + between(-15.0f, 15.0f);
+        spot.y += back.y * out + between(-15.0f, 15.0f);
+        if (chance(30)) occupy_cell(s, LAYER_GROUND, spot);
+        else stand_row(s, spot);
+    }
     Placed p;
     place(s, p, at, attacker);
     ease(p);
-    const bool tunneling = chance(20);
+    const bool tunneling = chance(25);
     pf()->*access_member(PfTunnel()) = tunneling;
 
     // Every position the search can ask the weapon about.
@@ -398,7 +464,8 @@ static void attack_row(Scene& s, const std::vector<Object*>& armed) {
     std::vector<Coord3D> asked;
     {
         Coord3D delta;
-        delta.set(target.x - at.x, target.y - at.y, 0);
+        const Coord3D aim = victim ? victim_at : target;
+        delta.set(aim.x - at.x, aim.y - at.y, 0);
         delta.normalize();
         delta.x *= PATHFIND_CELL_SIZE_F;
         delta.y *= PATHFIND_CELL_SIZE_F;
@@ -431,7 +498,7 @@ static void attack_row(Scene& s, const std::vector<Object*>& armed) {
     Path* path = services()->findAttackPath(attacker, p.m.set, &at, victim, &target, weapon);
     tally("attack", path);
     row("attack " + mover_text(p.m) + " " + c3(at) + " " + num(tunneling) + " " + num(victim != nullptr) + " " +
-        num(above) + " " + c3(target) + " " + f32(distance) + " " + num(entries) + table + " = " + path_dump(path) +
+        num(above) + " " + c3(victim_at) + " " + c3(target) + " " + f32(distance) + " " + num(entries) + table + " = " + path_dump(path) +
         " | " + state(s));
     if (path) deleteInstance(path);
     pf()->*access_member(PfTunnel()) = false;
@@ -584,6 +651,7 @@ static void s6_open(Scene& s, int index, const Shape& shape, std::vector<Object*
         object_row(o);
     }
     row(order);
+    set_busy(s);
     ThePartitionManager->update();
     pf()->newMap();
     index_cells(s);
@@ -610,9 +678,28 @@ static void s6_close(Scene& s) {
 static void each_search(Scene& s, const std::vector<Object*>& armed) {
     closest_row(s);
     patch_rows(s);
-    //REST moveaway_row(s);
-    //REST safe_row(s);
-    //REST attack_row(s, armed);
+    moveaway_row(s);
+    safe_row(s);
+    attack_row(s, armed);
+}
+
+static void fence_rows(Scene& s, const std::vector<Object*>& armed) {
+    for (int n = 0; n < 6 && by_fence(s, 3.0f, g_fence); ++n) {
+        std::vector<Object*> light, light_armed;
+        for (Object* o : s.units)
+            if (o->getCrusherLevel() == 1) light.push_back(o);
+        for (Object* o : armed)
+            if (o->getCrusherLevel() == 1) light_armed.push_back(o);
+        if (!light.empty()) {
+            g_crusher = pick(light);
+            moveaway_row(s);
+        }
+        if (!light_armed.empty()) {
+            g_crusher = pick(light_armed);
+            attack_row(s, light_armed);
+        }
+        g_crusher = nullptr;
+    }
 }
 
 static void s6_scene(int index) {
@@ -637,11 +724,12 @@ static void s6_scene(int index) {
     if (index % 3 == 0) occupy_edges(s, 60);
     const int rounds = large ? 6 : 10;
     for (int n = 0; n < rounds; ++n) {
-        if (n % 3 == 2) idle_row(s);
         each_search(s, armed);
         closest_row(s);
-        //REST attack_row(s, armed);
+        attack_row(s, armed);
+        attack_row(s, armed);
     }
+    fence_rows(s, armed);
     // The same calls under the fixed code.
     if (index % 2 == 1) {
         for (int n = 0; n < 30 && !s_useFixedPathfinding; ++n) chain_row(s);
@@ -668,10 +756,10 @@ static void s6_exhaust(int index, bool fixed) {
         // The pool is shared with the occupants' records.
         hoard_row(s, n);
         closest_row(s);
-        //REST safe_row(s);
+        safe_row(s);
         patch_rows(s);
-        //REST moveaway_row(s);
-        //REST attack_row(s, armed);
+        moveaway_row(s);
+        attack_row(s, armed);
         hoard_row(s, -1);
     }
     // Long searches, to pass the cell limits.
