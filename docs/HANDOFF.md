@@ -6,7 +6,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
-- The Rust random generator, experience tracker, money, energy, one behavior module (`LifetimeUpdate`) and the sleepy-update heap now run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline; see `BASELINE.md`. Nothing else ported runs in the game. Windowed play is untested.
+- The Rust random generator, experience tracker, money, energy, the sleepy-update heap and seven behavior modules (`LifetimeUpdate`, `SupplyWarehouseCreate`, `ArmorUpgrade`, `ModelConditionUpgrade`, `RadarUpdate`, `PowerPlantUpdate`, `DefaultProductionExitUpdate`) run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline. The replays verify only part of that: see `BASELINE.md` before treating a swapped module as checked. Windowed play is untested.
 - Packets: 258 of 463 implemented, 205 unported (Phase 2: 102, Phase 4: 4, Phase 5: 53, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
 
 ## Recently done
@@ -39,6 +39,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | after `fc9d180` | Second joined oracle with save loading (34,259 rows); fixed the weapon set model condition lost at drawable binding |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
+| after `575ade7` | `SWAP_CANDIDATES.md` count; six more modules swapped into the engine; value accessors for `object()` reads; money, upgrades and energy keyed by player (`golden_player_state`) |
 
 ## Not verified
 
@@ -51,6 +52,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game), then item 11 (whether to port the unit AI beyond slice S0, `AI_PORT_PLAN.md`). The AI classes are the only behavior modules the replays create that are not ported.
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
 - Packet counts overstate completeness (see the known gaps): `Locomotor` has no movement code and weapons do no damage.
+- Next faithfulness gap of the same kind as the per-player fix: sciences, radar, cost modifiers and handicaps are still keyed by team.
 - Cheap further engine swaps: the byte CRC and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.
 
