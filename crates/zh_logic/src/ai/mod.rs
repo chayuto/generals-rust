@@ -28,8 +28,10 @@
 //! setters that only touch the module. The module itself is
 //! [`crate::modules::update::ai_update`].
 
+pub mod ai;
 pub mod ai_state_machine;
 pub mod ai_states;
+pub mod mood;
 pub mod seams;
 
 use crate::arena::ModuleContext;

@@ -1115,6 +1115,11 @@ pub trait SimView {
     fn is_in_range_bounding_2d(&self, owner: ObjectSlot, target: ObjectSlot, radius: Real) -> Bool;
     /// `iterateObjectsInRange(center, radius, FROM_CENTER_2D, ITER_SORTED_NEAR_TO_FAR)`.
     fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    /// `ThePartitionManager->getClosestObject(owner, radius, rule, filters)`; `filter`
+    /// is the filter chain, `true` keeping an object.
+    fn closest_object_from(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot>;
+    /// `iterateObjectsInRange(owner, radius, rule, filters, ITER_SORTED_NEAR_TO_FAR)`.
+    fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot>;
     /// `getClosestObject(center, FROM_CENTER_2D)` among the objects of `kind` that the player
     /// controlling `team_id` owns.
     fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot>;
@@ -4930,6 +4935,32 @@ impl SimView for SimContext {
                 &|id| partition_object(objects, factory, id),
                 &mut |_| true,
             )
+            .into_iter()
+            .filter_map(|(id, _)| objects.slot_by_id(id))
+            .collect()
+    }
+
+    fn closest_object_from(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let lookup = |id| partition_object(objects, factory, id);
+        let me = lookup(objects.id_of(owner)?)?;
+        let mut allow = |id| objects.slot_by_id(id).is_some_and(&mut *filter);
+        let found = self.world.partition.get_closest_object(QueryCenter::Object(&me), radius, rule, &lookup, &mut allow);
+        found.id.and_then(|id| objects.slot_by_id(id))
+    }
+
+    fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let lookup = |id| partition_object(objects, factory, id);
+        let Some(me) = objects.id_of(owner).and_then(lookup) else {
+            return Vec::new();
+        };
+        let mut allow = |id| objects.slot_by_id(id).is_some_and(&mut *filter);
+        self.world
+            .partition
+            .iterate_objects_in_range(QueryCenter::Object(&me), radius, rule, IterOrderType::SortedNearToFar, &lookup, &mut allow)
             .into_iter()
             .filter_map(|(id, _)| objects.slot_by_id(id))
             .collect()
@@ -11204,6 +11235,14 @@ impl SimView for MockSimApi {
 
     fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
         self.ctx.find_objects_near_to_far(center, radius)
+    }
+
+    fn closest_object_from(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot> {
+        self.ctx.closest_object_from(owner, radius, rule, filter)
+    }
+
+    fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot> {
+        self.ctx.objects_from_near_to_far(owner, radius, rule, filter)
     }
 
     fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {

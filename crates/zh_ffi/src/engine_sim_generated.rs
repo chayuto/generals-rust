@@ -164,6 +164,12 @@ impl SimView for EngineSim<'_> {
     fn find_objects_near_to_far(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
         not_wired("find_objects_near_to_far")
     }
+    fn closest_object_from(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot> {
+        not_wired("closest_object_from")
+    }
+    fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot> {
+        not_wired("objects_from_near_to_far")
+    }
     fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {
         not_wired("find_closest_team_object_of_kind")
     }
