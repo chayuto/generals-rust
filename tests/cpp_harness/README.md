@@ -374,3 +374,19 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 - **Where:** `SlavedUpdate::update` (`masterAI->getPath()`), `SpawnBehavior::computeAggregateStates` (`getDrawable()`).
 - **What happens:** a slave with a `ScoutRange` whose slaver has no AI crashes. With no spawn left, the aggregate health box offset becomes NaN (`0 * inf`).
 - **How the oracle handles it:** scouting slaves are only enslaved to objects with an AI. `PartitionManager` shroud updates for the local player need a display, so the local player is set to an unused index before objects change teams.
+
+### `setDisabledUntil` reports an edge without disabling
+
+- **Where:** `Object::setDisabledUntil` (`edgeCase = !isDisabled()` taken before the change).
+- **What happens:** every call on an object that is not disabled runs `onDisabledEdge(true)`, also when the end frame has already come, so the object stays enabled. Modules (and the energy total) are told it became disabled and are never told it ended.
+- **What guards it:** `golden_s0_frame_driver` (disable for 0 frames with a `SpyVisionUpdate` listening).
+
+### Driving the real `GameLogic::update`
+
+- `oracle_wp51_world.h` is not enough on its own: also create `TheFramePacer`, `TheRecorder` (`init()`ed) and `TheCommandList`, or the frame crashes. Real `AIUpdateInterface` units path and drive in that world.
+- Every `GameLogic::update` subsystem can be replaced by a subclass to observe its turn. Replace `TheWeaponStore` and `ThePartitionManager` before loading INI or spawning objects. `AIPlayer::update` is the only virtual hook inside `PlayerList::update`.
+- `AIUpdateInterface`'s constructor asks for the next frame, so a unit does not update in the frame it is created in; `doPathfind` ends in `wakeUpNow`.
+
+### Device terrain code links but needs a render object
+
+- `libz_gameenginedevice.a` links into a headless harness (headers under both `Core/GameEngineDevice/Include` and `GeneralsMD/Code/GameEngineDevice/Include`; pass them with `--extra-flag=-I...`). `W3DTerrainLogic::getGroundHeight` runs without map data; `isCliffCell` dereferences the null `TheTerrainRenderObject`.

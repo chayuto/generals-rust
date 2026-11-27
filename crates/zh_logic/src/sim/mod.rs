@@ -35,6 +35,7 @@ use crate::modules::{
     ParkingPlaceInfo, StealthParams,
 };
 use crate::modules::module::SupplyTruckAiFacet;
+use crate::ai::seams::{NoPathServices, PathServices};
 use crate::modules::module::AiUpdateFacet;
 use crate::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use crate::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
@@ -2030,6 +2031,12 @@ pub trait SimApi: SimView {
     fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType);
     fn client(&mut self) -> &mut dyn ClientSink;
 
+    /// The state of a resident module, for its own entry points and its callers.
+    /// `None` while a `&mut self` method of it is running.
+    fn resident_state_mut(&mut self, module: ModuleSlot) -> Option<&mut dyn std::any::Any>;
+    /// `TheAI->pathfinder()`.
+    fn paths(&mut self) -> &mut dyn PathServices;
+
     /// `GameClientRandomValue`.
     fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int;
     fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real);
@@ -2580,6 +2587,8 @@ pub struct SimContext {
     pub world: SimWorld,
     pub terrain: Box<dyn ThingTerrainAccess>,
     pub client: Box<dyn ClientSink>,
+    /// The path queue, until the pathfinder is ported into the world.
+    pub paths: Box<dyn PathServices>,
 }
 
 impl Default for SimContext {
@@ -2595,6 +2604,7 @@ impl SimContext {
             world: SimWorld::new(),
             terrain: Box::new(FlatTerrain),
             client: Box::new(NoopClientSink),
+            paths: Box::new(NoPathServices),
         }
     }
 
@@ -3726,17 +3736,24 @@ impl SimContext {
                 .objects
                 .get(owner_slot)
                 .map_or(0, |o| o.disabled_mask.to_unsigned_int() as u64);
-            let proc_bits = self
-                .world
-                .modules
-                .payload(u)
-                .and_then(|m| m.as_update())
-                .map_or(0, |upd| upd.disabled_types_to_process().to_unsigned_int() as u64);
+            let resident = self.world.modules.payload(u).and_then(|m| m.resident());
+            let proc_bits = match &resident {
+                Some(entries) => entries.disabled_types_to_process.to_unsigned_int() as u64,
+                None => self
+                    .world
+                    .modules
+                    .payload(u)
+                    .and_then(|m| m.as_update())
+                    .map_or(0, |upd| upd.disabled_types_to_process().to_unsigned_int() as u64),
+            };
 
             let mut sleep_len = UpdateSleepTime::NONE;
             if should_process_disabled_update(disabled_bits, proc_bits) {
                 self.world.sleepy_updates.set_cur_update_module(Some(u));
-                if let Ok(ret) = self.dispatch_module(u, |m, sim, ctx| {
+                if let Some(entries) = resident {
+                    let ctx = self.world.modules.meta(u).context(u);
+                    sleep_len = (entries.update)(self, ctx);
+                } else if let Ok(ret) = self.dispatch_module(u, |m, sim, ctx| {
                     m.as_update_mut()
                         .map_or(UpdateSleepTime::FOREVER, |upd| upd.update(sim, ctx))
                 }) {
@@ -6796,7 +6813,9 @@ impl SimApi for SimContext {
             obj.disabled_till_frame[slot_idx] = till_frame;
             obj.disabled_mask.set(idx, i32::from(till_frame > now));
         }
-        if !was_disabled && obj.is_disabled() != FALSE {
+        // The reference reports the edge to an object that was not disabled even
+        // if this call leaves it enabled (a time that has already run out).
+        if !was_disabled {
             behaviors_to_edge = obj.behaviors.iter().map(|&(ms, _)| ms).collect();
         }
         if changed {
@@ -6835,6 +6854,11 @@ impl SimApi for SimContext {
         };
         obj.disabled_till_frame[idx as usize] = 0;
         obj.disabled_mask.set(idx, 0);
+        // Another state that has run out goes now, and may report the edge first.
+        crate::gamelogic::frame::check_disabled_status(self, owner);
+        let Some(obj) = self.world.objects.get(owner) else {
+            return TRUE;
+        };
         let behaviors_to_edge: Vec<ModuleSlot> = if obj.is_disabled() == FALSE {
             obj.behaviors.iter().map(|&(ms, _)| ms).collect()
         } else {
@@ -10137,6 +10161,14 @@ impl SimApi for SimContext {
         self.client.as_mut()
     }
 
+    fn resident_state_mut(&mut self, module: ModuleSlot) -> Option<&mut dyn std::any::Any> {
+        self.world.modules.payload_mut(module)?.as_any_mut()
+    }
+
+    fn paths(&mut self) -> &mut dyn PathServices {
+        self.paths.as_mut()
+    }
+
     fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int {
         self.world.rng.get_game_client_random_value(lo, hi)
     }
@@ -12368,6 +12400,14 @@ impl SimApi for MockSimApi {
 
     fn client(&mut self) -> &mut dyn ClientSink {
         self.ctx.client()
+    }
+
+    fn resident_state_mut(&mut self, module: ModuleSlot) -> Option<&mut dyn std::any::Any> {
+        self.ctx.resident_state_mut(module)
+    }
+
+    fn paths(&mut self) -> &mut dyn PathServices {
+        self.ctx.paths()
     }
 
     fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int {

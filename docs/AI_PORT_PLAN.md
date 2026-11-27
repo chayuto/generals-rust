@@ -31,6 +31,11 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Trace over a world with no AI behaviour. Must first prove two unknowns: that a real AI module runs headless in the oracle world, and whether real `GameLogic::update` can be called (otherwise the harness reproduces its order).
 - Rust: one frame step (sleepy modules, AI and path queue, players, grid, destroy list); terrain, path and unit-query traits; AI code in new files, not in `sim/mod.rs`. Decide how a module calls back into an executing AI: today such calls are skipped or answer FALSE, which AI states would hit all the time.
 - Risks: update order. Seen: scripted frames run in Rust and match C++ object by object.
+- **Done.** Both unknowns hold: a real `AIUpdateInterface` paths and drives headless, and the real `GameLogic::update` can be called (it also needs `TheFramePacer`, `TheRecorder`, `TheCommandList`). The S1 question too: the device library links; cliff queries need a `TheTerrainRenderObject`.
+  - Frame step: `gamelogic::frame::run_frame`; unported subsystems are `FrameSeams` methods. Trace: `golden_s0_frame_driver`.
+  - Call-back decision: the AI is a **resident** module, never moved out of the arena (`crate::ai`). Its orders still arrive through `&mut self` facet methods; S8 must turn the orders that act into entry points.
+  - The path queue (ring and cell budget) stays behind `ai::seams::PathServices` for S5. `PathUnitQueries` and `MapTerrain` are signatures only, unchecked.
+  - For S8: the AI constructor asks for the next frame (the Rust `ai_construct` stand-in does not), and `doPathfind` ends in `wakeUpNow`.
 
 ### S1. Terrain queries and height sampling
 - C++: `TerrainLogic.cpp` without bridges (about 1,400); height, cliff and map-data reading from the three device files (about 700). Two workers; the second, for the device code, is a small one.

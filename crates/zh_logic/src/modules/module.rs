@@ -457,6 +457,12 @@ impl ModuleSnapshotHeader {
 pub trait BehaviorModule: Send {
     fn module_name_key(&self) -> NameKeyType;
 
+    /// `Some` for a module that is never moved out of the arena to run, so calls
+    /// back into it are delivered. See [`crate::ai`].
+    fn resident(&self) -> Option<crate::ai::ResidentEntries> {
+        None
+    }
+
     /// Work the C++ module constructor does against the live world (PRNG draws, status bits).
     /// Runs once, in module order, while the owner is still being constructed.
     fn on_construct(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}

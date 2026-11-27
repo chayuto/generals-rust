@@ -30,6 +30,7 @@ use zh_logic::modules::{
     ParkingPlaceInfo, StealthParams,
 };
 use zh_logic::modules::module::SupplyTruckAiFacet;
+use zh_logic::ai::seams::{NoPathServices, PathServices};
 use zh_logic::modules::module::AiUpdateFacet;
 use zh_logic::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use zh_logic::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
@@ -1412,6 +1413,12 @@ impl SimApi for EngineSim<'_> {
     }
     fn client(&mut self) -> &mut dyn ClientSink {
         not_wired("client")
+    }
+    fn resident_state_mut(&mut self, module: ModuleSlot) -> Option<&mut dyn std::any::Any> {
+        not_wired("resident_state_mut")
+    }
+    fn paths(&mut self) -> &mut dyn PathServices {
+        not_wired("paths")
     }
     fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int {
         not_wired("rng_client_int")
