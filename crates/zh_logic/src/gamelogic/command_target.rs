@@ -12,7 +12,7 @@
 //! in [`CommandState::not_carried_out`].
 
 use crate::ai::ai_group::{self, GroupId, PowerTarget, NO_MAX_SHOTS_LIMIT};
-use crate::arena::ObjectSlot;
+use crate::arena::{ObjectSlot, ThingTemplateId};
 use crate::modules::module::CommandSourceType;
 use crate::modules::update::ai_update::{AiCommandParms, AiCommandType};
 use crate::object::weapon_set::{WeaponLockType, WeaponSlotType};
@@ -25,7 +25,7 @@ use zh_common::io::recorder::{
 };
 use zh_common::math::Coord3D;
 use zh_common::runtime::game_logic_dispatch::{self as dispatcher, CommandTarget};
-use zh_common::types::{Int, NameKeyType, ObjectId};
+use zh_common::types::{Int, NameKeyType, ObjectId, UnsignedShort};
 
 pub const MSG_DO_WEAPON: Int = 1037;
 pub const MSG_DO_WEAPON_AT_LOCATION: Int = 1038;
@@ -70,6 +70,11 @@ pub struct CommandState {
     pub squads: BTreeMap<Int, PlayerSquads>,
     /// The types of the commands nothing here carries out, in arrival order.
     pub not_carried_out: Vec<Int>,
+    /// `(message type, number)` of every order naming a science or upgrade key,
+    /// or a thing template id, that the loaded rules do not have. The reference
+    /// ignores such an order, which in a replay of the same data means the
+    /// port's numbering differs.
+    pub unknown_names: Vec<(Int, Int)>,
 }
 
 impl Default for CommandState {
@@ -78,6 +83,7 @@ impl Default for CommandState {
             in_game: true,
             squads: BTreeMap::new(),
             not_carried_out: Vec::new(),
+            unknown_names: Vec::new(),
         }
     }
 }
@@ -144,6 +150,32 @@ impl SimCommands<'_> {
 
     fn skip(&mut self, msg: &ReplayCommand) {
         self.state.not_carried_out.push(msg.msg_type);
+    }
+
+    fn unknown(&mut self, msg: &ReplayCommand, number: Int) {
+        self.state.unknown_names.push((msg.msg_type, number));
+    }
+
+    /// `TheUpgradeCenter->findUpgradeByKey` for an order; reports an unknown key.
+    fn upgrade_key(&mut self, msg: &ReplayCommand, raw: u32) -> Option<NameKeyType> {
+        let key = NameKeyType(raw as Int);
+        let upgrades = &self.sim.rules.upgrade_center;
+        if upgrades.find_upgrade_by_key(key).is_none() {
+            self.unknown(msg, key.0);
+            return None;
+        }
+        Some(key)
+    }
+
+    /// `TheThingFactory->findByTemplateID` for an order (an `UnsignedShort`);
+    /// reports an unknown id.
+    fn template_id(&mut self, msg: &ReplayCommand, raw: Int) -> Option<ThingTemplateId> {
+        let id = raw as UnsignedShort;
+        if self.sim.rules.thing_factory.find_by_template_id(id).is_none() {
+            self.unknown(msg, raw);
+            return None;
+        }
+        Some(ThingTemplateId(u32::from(id)))
     }
 
     fn release_locks(&mut self, group: GroupId) {
@@ -413,27 +445,27 @@ impl CommandTarget for SimCommands<'_> {
         );
     }
 
-    fn purchase_science(&mut self, msg: &ReplayCommand, _player: i32, _science: i32) {
+    /// Not carried out: the science purchase points are with the `PlayerList`.
+    fn purchase_science(&mut self, msg: &ReplayCommand, _player: i32, science: i32) {
+        if !self.sim.rules.science_store.is_valid_science(science) {
+            self.unknown(msg, science);
+        }
         self.skip(msg);
     }
 
-    fn queue_upgrade(&mut self, _msg: &ReplayCommand, _group: &[u32], upgrade: u32) {
+    fn queue_upgrade(&mut self, msg: &ReplayCommand, _group: &[u32], upgrade: u32) {
+        let Some(key) = self.upgrade_key(msg, upgrade) else {
+            return;
+        };
         if let Some(group) = self.group {
-            ai_group::queue_upgrade(self.sim, group, NameKeyType(upgrade as Int));
+            ai_group::queue_upgrade(self.sim, group, key);
         }
     }
 
-    fn cancel_upgrade(&mut self, _msg: &ReplayCommand, producer: u32, upgrade: u32) {
-        let key = NameKeyType(upgrade as Int);
-        if self
-            .sim
-            .rules
-            .upgrade_center
-            .find_upgrade_by_key(key)
-            .is_none()
-        {
+    fn cancel_upgrade(&mut self, msg: &ReplayCommand, producer: u32, upgrade: u32) {
+        let Some(key) = self.upgrade_key(msg, upgrade) else {
             return;
-        }
+        };
         if let Some(slot) = self.slot(producer) {
             let _ = self.sim.with_production(slot, |production, sim, ctx| {
                 production.cancel_upgrade(sim, ctx, key)
@@ -441,16 +473,22 @@ impl CommandTarget for SimCommands<'_> {
         }
     }
 
-    /// The template argument is a `ThingTemplate` id of the retail rule data,
-    /// which has no counterpart here yet.
+    /// `onQueueUnitCreate`. Ownership is not checked here.
     fn queue_unit_create(
         &mut self,
         msg: &ReplayCommand,
-        _producer: u32,
-        _template: i32,
-        _production_id: i32,
+        producer: u32,
+        template: i32,
+        production_id: i32,
     ) {
-        self.skip(msg);
+        let Some(template) = self.template_id(msg, template) else {
+            return;
+        };
+        if let Some(slot) = self.slot(producer) {
+            let _ = self.sim.with_production(slot, |production, sim, ctx| {
+                production.queue_create_unit(sim, ctx, template, production_id)
+            });
+        }
     }
 
     fn cancel_unit_create(&mut self, _msg: &ReplayCommand, producer: u32, production_id: i32) {

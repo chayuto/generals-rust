@@ -447,6 +447,12 @@ fn compare(
             .is_none_or(|next| next >= FRAMES),
         "{game}: commands left untaken"
     );
+    // An order naming a key or template id the rules lack would be dropped.
+    assert_eq!(
+        playback.state.unknown_names,
+        [],
+        "{game}: orders naming unknown keys or templates"
+    );
     if std::env::var("GAME_FRAMES_DUMP").is_ok() {
         eprintln!(
             "{game}: commands not carried out {:?}",
