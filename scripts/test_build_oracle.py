@@ -104,6 +104,33 @@ class TestBuildOracle(unittest.TestCase):
             self.assertFalse(any("googletest" in tok for tok in cmd))
             self.assertFalse(any("GlobalData.cpp" in tok for tok in cmd))
 
+    def test_wrap_directives_become_relink_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = Path(tmp) / "gen.cpp"
+            driver.write_text(
+                "// oracle-wrap: lib/libx.a A.cpp.o __Zfoo\n"
+                "// oracle-wrap: lib/libx.a A.cpp.o __Zbar\n"
+                "int main() { return 0; } // oracle-wrap: not at line start\n"
+            )
+            wanted = build_oracle.parse_wrap_directives([driver])
+            self.assertEqual(wanted, {("lib/libx.a", "A.cpp.o"): ["__Zfoo", "__Zbar"]})
+            work = Path(tmp) / "work"
+            [(extract, relink, wrapped)] = build_oracle.wrap_commands(
+                wanted, Path(tmp) / "build", work, "arm64"
+            )
+            self.assertEqual(extract[:2], ["ar", "x"])
+            self.assertTrue(extract[2].endswith("build/lib/libx.a"))
+            self.assertEqual(wrapped, work.resolve() / "A.cpp.o.wrapped.o")
+            joined = " ".join(relink)
+            self.assertIn("-alias __Zfoo _oracle_real__Zfoo -unexported_symbol __Zfoo", joined)
+            self.assertIn("-unexported_symbol __Zbar", joined)
+
+    def test_wrap_member_may_not_be_a_path(self) -> None:
+        with self.assertRaises(ValueError):
+            build_oracle.wrap_commands(
+                {("a.a", "../x.o"): ["__Zfoo"]}, Path("build"), Path("work"), "arm64"
+            )
+
     def test_cli_dry_run_exits_zero(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp).resolve()

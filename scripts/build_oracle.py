@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import re
 import shlex
 import subprocess
@@ -237,6 +238,49 @@ def parse_link_args(build_dir: Path, repo_root: Path) -> List[str]:
     return rpaths + resolved
 
 
+# `// oracle-wrap: <archive under the build dir> <member> <mangled symbol>` in a driver
+# asks to answer that library function in the driver, to record the calls other library
+# code makes to it. The reference function stays reachable as `_oracle_real<symbol>`.
+WRAP_RE = re.compile(r"^//[ \t]*oracle-wrap:[ \t]*(\S+)[ \t]+(\S+)[ \t]+(\S+)[ \t]*$", re.M)
+WRAP_ALIAS_PREFIX = "_oracle_real"
+
+
+def parse_wrap_directives(sources: Sequence[Path]) -> Dict[Tuple[str, str], List[str]]:
+    """Maps (archive, member) to the symbols the drivers want to answer themselves."""
+    wanted: Dict[Tuple[str, str], List[str]] = {}
+    for source in sources:
+        if not Path(source).is_file():
+            continue
+        text = Path(source).read_text(encoding="utf-8", errors="replace")
+        for archive, member, symbol in WRAP_RE.findall(text):
+            symbols = wanted.setdefault((archive, member), [])
+            if symbol not in symbols:
+                symbols.append(symbol)
+    return wanted
+
+
+def wrap_commands(
+    wanted: Dict[Tuple[str, str], List[str]], build_dir: Path, work_dir: Path, arch: str
+) -> List[Tuple[List[str], List[str], Path]]:
+    """(extract, relink, object) per wrapped member. Both commands run inside `work_dir`.
+
+    The copy of the member keeps its own calls to a wrapped function; only the symbol
+    other objects bind to is hidden, so that the driver's definition takes its place.
+    The archive itself is only read.
+    """
+    steps = []
+    for (archive, member), symbols in sorted(wanted.items()):
+        if "/" in member:
+            raise ValueError(f"oracle-wrap member must be a plain name: {member}")
+        wrapped = work_dir.resolve() / f"{member}.wrapped.o"
+        extract = ["ar", "x", str((build_dir / archive).resolve()), member]
+        relink = ["ld", "-r", "-arch", arch, member, "-o", str(wrapped)]
+        for symbol in symbols:
+            relink += ["-alias", symbol, WRAP_ALIAS_PREFIX + symbol, "-unexported_symbol", symbol]
+        steps.append((extract, relink, wrapped))
+    return steps
+
+
 def build_command(
     sources: Sequence[Path],
     output: Path,
@@ -352,8 +396,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    repo_root = args.repo_root.resolve()
+    work_dir = Path(f"{args.output.resolve()}.wrap")
+    steps = wrap_commands(
+        parse_wrap_directives(args.sources),
+        args.build_dir if args.build_dir is not None else repo_root / DEFAULT_BUILD_REL,
+        work_dir,
+        platform.machine(),
+    )
     cmd = build_command(
-        sources=args.sources,
+        sources=list(args.sources) + [wrapped for _, _, wrapped in steps],
         output=args.output,
         repo_root=args.repo_root.resolve(),
         build_dir=args.build_dir,
@@ -370,6 +422,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ensure_libzh_ffi(args.repo_root.resolve())
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    for extract, relink, _ in steps:
+        work_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call(extract, cwd=str(work_dir))
+        subprocess.check_call(relink, cwd=str(work_dir))
     subprocess.check_call(cmd, cwd=str(args.repo_root.resolve()))
     return 0
 
