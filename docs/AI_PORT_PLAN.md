@@ -72,6 +72,10 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Dump of reservations after scripted places and moves. Stubbed: unit queries (moving, idle, radius) from tape.
 - Seams: `pathfinder_adjust_destination`, `pathfinder_adjust_to_possible_destination`, the cliff and path checks missing from `find_position_around`. Risks: spiral order, ownership of shared cells.
 - Seen: produced units and exits get the right landing cells.
+- **Done.** `pathfinder/ai_pathfind/goals.rs`: goal, aircraft goal and position reservations, `removeUnitFromPathfindMap`, `updateLayer`, snapping, the four `adjust*` searches over the spiral, `tightenPath`, `moveAllies` and `moveAlliesAwayFromDestination`. Dump and Direct: `golden_s4_reservations` (every changed cell and unit after each operation).
+  - Wired once a map exists: `pathfinder_adjust_destination`, `pathfinder_adjust_to_possible_destination`, `pathfinder_update_goal`.
+  - Seams: `PathCost` (`checkPathCost`, S5), a weapon range closure, `MoveAlliesWorld`. Gaps: `OPEN_DECISIONS.md`.
+  - Found: `removeGoal` clears one cell more than a footprint of radius 0 reserved; a failed `adjustToPossibleDestination` can leave the destination moved; `updateAircraftGoal` compares with the goal it has just cleared; `adjustDestination` looks at more than 400 cells (the budget is checked per ring).
 
 ### S5. Core search: queue, hierarchical pass, ground A*
 - C++: `AIPathfind.cpp` `findPath`, hierarchical search, `internalFindPath`, neighbour and movement checks, path building, `processPathfindQueue` (about 1,500). Two workers (a ground move needs both parts).

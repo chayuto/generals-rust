@@ -696,6 +696,8 @@ pub struct ObjectRecord {
     pub weapon_barrel_count: [Int; WEAPONSLOT_COUNT],
     pub armor_set_flags: ArmorSetFlags,
     pub layer: PathfindLayerEnum,
+    /// `m_destinationLayer`: the layer of the path goal.
+    pub destination_layer: PathfindLayerEnum,
     pub contained_by: Option<ObjectSlot>,
     pub contained_by_frame: UnsignedInt,
     /// `Object::m_group`.
@@ -810,6 +812,7 @@ impl ObjectRecord {
             weapon_barrel_count: [0; WEAPONSLOT_COUNT],
             armor_set_flags: ArmorSetFlags::new(),
             layer: PathfindLayerEnum::Ground,
+            destination_layer: PathfindLayerEnum::Ground,
             contained_by: None,
             contained_by_frame: 0,
             ai_group: None,
@@ -2117,7 +2120,8 @@ pub trait SimApi: SimView {
         options: &FindPositionOptions,
     ) -> Option<Coord3D>;
     fn pathfinder_add_object(&mut self, owner: ObjectSlot);
-    /// `Pathfinder::adjustDestination` as on open ground; the pathfinder is unported.
+    /// `Pathfinder::adjustDestination`. Without a pathfind map, only the goal cell
+    /// is tried, against the cells scripted by a test.
     fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool;
     /// `AIUpdateInterface::aiFollowExitProductionPath`. Recorded only.
     fn ai_follow_exit_production_path(
@@ -6333,18 +6337,7 @@ impl SimView for SimContext {
             return TRUE;
         }
         let air = crate::rules::combat_types::LocomotorSurfaceType::Air.as_i32();
-        // `LocomotorSet::getValidSurfaces` of the chosen set.
-        let valid_surfaces = obj.ai_locomotor_set.map_or(0, |set| {
-            obj.thing
-                .template_override()
-                .get_final(&self.rules.thing_factory)
-                .map_or(0, |t| {
-                    t.get_locomotor_set(set)
-                        .iter()
-                        .filter_map(|name| self.rules.locomotor_store.find_by_name(name))
-                        .fold(0, |mask, l| mask | l.surfaces)
-                })
-        });
+        let valid_surfaces = self.locomotor_set_surfaces(owner);
         if valid_surfaces == air {
             return FALSE;
         }
@@ -10723,12 +10716,15 @@ impl SimApi for SimContext {
     }
 
     fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool {
+        if let Some(found) = self.adjust_destination_on_map(owner, dest) {
+            return Bool::from(found);
+        }
         if self.object_is_kind_of(owner, KindOfType::Projectile) != FALSE {
             return TRUE;
         }
         let layer = self.get_layer_for_destination(dest);
         let (cell_x, cell_y, center) = self.pathfind_goal_cell(owner, dest);
-        // Only the goal cell is tried: no spiral search, unit footprints or zones.
+        // Without a map: no spiral search, unit footprints or zones.
         if self.pathfind_cell_type(layer, cell_x, cell_y) != PathfindCellType::Clear {
             return FALSE;
         }
@@ -10775,6 +10771,9 @@ impl SimApi for SimContext {
         owner: ObjectSlot,
         dest: &mut Coord3D,
     ) -> Bool {
+        if let Some(found) = self.adjust_to_possible_destination_on_map(owner, dest) {
+            return Bool::from(found);
+        }
         let layer = self.get_layer_for_destination(dest);
         if self.valid_movement_terrain(layer, owner, dest) != FALSE {
             return TRUE;
@@ -10803,6 +10802,7 @@ impl SimApi for SimContext {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.pathfind_goals.insert(id, (*pos, layer));
         }
+        self.update_goal_on_map(owner, pos, layer);
     }
 
     fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {

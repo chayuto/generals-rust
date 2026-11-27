@@ -238,16 +238,16 @@ fn push_out(end: &mut Coord3D, building: &Coord3D, radius: Real) -> bool {
 }
 
 impl Pathfinder {
-    fn cell_ref(&self, idx: CellIdx) -> &PathfindCell {
+    pub(super) fn cell_ref(&self, idx: CellIdx) -> &PathfindCell {
         self.map.grid().cell(idx)
     }
 
-    fn cell_info(&self, idx: CellIdx) -> Option<&PathfindCellInfo> {
+    pub(super) fn cell_info(&self, idx: CellIdx) -> Option<&PathfindCellInfo> {
         let info = self.cell_ref(idx).info_idx?;
         self.map.pool().get(info)
     }
 
-    fn pos_unit(&self, idx: CellIdx) -> ObjectId {
+    pub(super) fn pos_unit(&self, idx: CellIdx) -> ObjectId {
         self.cell_info(idx)
             .map_or(ObjectId::INVALID, |i| i.pos_unit_id)
     }
@@ -600,7 +600,7 @@ impl Pathfinder {
         0
     }
 
-    fn walk(
+    pub(super) fn walk(
         &self,
         start: &Coord3D,
         end: &Coord3D,

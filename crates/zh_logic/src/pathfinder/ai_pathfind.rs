@@ -27,7 +27,9 @@ use crate::pathfinder::pathfind_zone_manager::{
 use crate::terrain::bridge::BridgeGeometry;
 use crate::terrain::{ElevatedLayers, TerrainEffects, TerrainLogic};
 
+mod goals;
 mod queries;
+pub use goals::*;
 pub use queries::*;
 
 /// What the pathfinder reads from an object.
@@ -162,6 +164,8 @@ pub struct Pathfinder {
     queue_head: Int,
     queue_tail: Int,
     pub cumulative_cells_allocated: Int,
+    /// `m_moveAlliesDepth`: how deep [`Pathfinder::move_allies`] is nested.
+    move_allies_depth: Int,
     /// Set by `GameLogic::processDestroyList`; read under `retail-crc` only.
     pub classify_fence_zero_init: bool,
 }
@@ -192,6 +196,7 @@ impl Pathfinder {
             queue_head: 0,
             queue_tail: 0,
             cumulative_cells_allocated: 0,
+            move_allies_depth: 0,
             classify_fence_zero_init: false,
         };
         out.reset(wall_height);
@@ -211,6 +216,7 @@ impl Pathfinder {
         self.is_tunneling = false;
         self.is_map_ready = false;
         self.cumulative_cells_allocated = 0;
+        self.move_allies_depth = 0;
         self.queued_requests = [ObjectId::INVALID; PATHFIND_QUEUE_LEN as usize];
         self.queue_head = 0;
         self.queue_tail = 0;
