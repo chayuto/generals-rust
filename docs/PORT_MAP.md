@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`284` implemented, `39` data only, `0` seeded skeletons, `140` unported)
-- **Golden Vector Oracles:** `114` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `109` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `115` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `110` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
