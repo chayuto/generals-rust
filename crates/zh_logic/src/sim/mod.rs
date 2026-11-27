@@ -691,6 +691,11 @@ pub struct ObjectRecord {
     pub layer: PathfindLayerEnum,
     pub contained_by: Option<ObjectSlot>,
     pub contained_by_frame: UnsignedInt,
+    /// `Object::m_group`.
+    pub ai_group: Option<crate::ai::ai_group::GroupId>,
+    /// `m_formationID` and, while it is set, `m_formationOffset`.
+    pub formation_id: UnsignedInt,
+    pub formation_offset: zh_common::math::Coord2D,
     /// `AIUpdateInterface::m_lastCommandSource`; the AI update is unported.
     pub ai_last_command_source: CommandSourceType,
     pub producer_id: ObjectId,
@@ -800,6 +805,9 @@ impl ObjectRecord {
             layer: PathfindLayerEnum::Ground,
             contained_by: None,
             contained_by_frame: 0,
+            ai_group: None,
+            formation_id: crate::ai::ai_group::NO_FORMATION_ID,
+            formation_offset: zh_common::math::Coord2D::default(),
             ai_last_command_source: CommandSourceType::FromAi,
             producer_id: ObjectId::INVALID,
             builder_id: ObjectId::INVALID,
@@ -2283,6 +2291,8 @@ pub enum ActionQuery {
 pub struct SimWorld {
     pub frame: UnsignedInt,
     pub rng: PrngState,
+    /// `TheAI`'s groups.
+    pub ai_groups: crate::ai::ai_group::AiGroups,
     pub objects: ObjectArena<ObjectRecord>,
     pub modules: ModuleArena<Box<dyn BehaviorModule>>,
     pub sleepy_updates: SleepyUpdateHeap<ModuleSlot>,
@@ -2461,6 +2471,7 @@ impl SimWorld {
             objects_to_destroy: Vec::new(),
             next_object_id: 1,
             ai_enable_repulsors: TRUE,
+            ai_groups: Default::default(),
             team_players: BTreeMap::new(),
             team_members: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),
@@ -2754,6 +2765,12 @@ impl SimContext {
             .unwrap_or_default()
     }
 
+    /// `aiDoCommand` for a caller outside the world (`AIGroup`). `false` for an
+    /// object without a resident AI module.
+    pub(crate) fn deliver_ai_command(&mut self, owner: ObjectSlot, parms: AiCommandParms) -> bool {
+        self.call_ai(owner, &AiCall::Command(parms))
+    }
+
     /// Delivers `call` to the owner's AI if that is a resident module with a
     /// command entry. `false` for module stand-ins.
     fn call_ai(&mut self, owner: ObjectSlot, call: &AiCall) -> bool {
@@ -2891,7 +2908,7 @@ impl SimContext {
     }
 
     /// `Object::getControllingPlayer` of a member of `team_id`; a null `Team*` has none.
-    fn controlling_player(&self, team_id: TeamId) -> Option<Int> {
+    pub(crate) fn controlling_player(&self, team_id: TeamId) -> Option<Int> {
         (team_id != TeamId::INVALID).then(|| self.player_index_for_team(team_id))
     }
 
@@ -4058,6 +4075,7 @@ impl SimContext {
             // `Object::~Object`.
             if let Some(id) = self.world.objects.id_of(slot) {
                 self.world.partition.unregister(id);
+                crate::ai::ai_group::leave_group(self, id);
             }
             if let Some(team) = self.world.objects.get(slot).map(|o| o.team_id) {
                 self.world.team_member_remove(team, slot);

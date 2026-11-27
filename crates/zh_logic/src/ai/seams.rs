@@ -7,6 +7,7 @@
 
 use crate::combat::locomotor::LocomotorSeams;
 use crate::modules::module::CommandSourceType;
+use crate::modules::update::ai_update::AiCommandParms;
 use crate::object::thing::ThingTerrainAccess;
 use crate::rules::combat_types::LocomotorSurfaceTypeMask;
 use crate::sim::SimView;
@@ -14,7 +15,7 @@ use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use zh_common::core::state_machine::{StateExitType, StateId, StateReturnType};
 use zh_common::math::{Coord3D, ICoord2D, Region3D};
-use zh_common::types::{Bool, ObjectId, Real, UpdateSleepTime, FALSE};
+use zh_common::types::{Bool, Int, ObjectId, Real, UnsignedInt, UpdateSleepTime, FALSE};
 use zh_common::xfer::{Xfer, XferError};
 
 /// `TheAI->pathfinder()` as far as the frame step and the AI orders use it. The
@@ -234,6 +235,67 @@ pub trait AiSeams: Send {
     fn closest_edge_point(&mut self, pos: &Coord3D) -> Coord3D {
         *pos
     }
+
+    // What `AIGroup` asks (S19).
+    /// A recorder of group orders: `TRUE` takes the order, so the member's AI
+    /// does not get it.
+    fn group_order(&mut self, _owner: ObjectId, _parms: &AiCommandParms) -> Bool {
+        FALSE
+    }
+    /// `Pathfinder::removeGoal` (S4).
+    fn remove_goal(&mut self, _owner: ObjectId) {}
+    /// `Pathfinder::adjustDestination` (S4).
+    fn adjust_destination(
+        &mut self,
+        _owner: ObjectId,
+        _dest: &mut Coord3D,
+        _group_dest: Option<&Coord3D>,
+    ) {
+    }
+    /// `Pathfinder::isLinePassable` (S3).
+    fn is_line_passable(
+        &mut self,
+        _owner: ObjectId,
+        _surfaces: LocomotorSurfaceTypeMask,
+        _layer: PathfindLayerEnum,
+        _from: &Coord3D,
+        _to: &Coord3D,
+    ) -> Bool {
+        1
+    }
+    /// `Pathfinder::findGroundPath` (S5): the optimized nodes of the path.
+    fn find_ground_path(
+        &mut self,
+        _from: &Coord3D,
+        _to: &Coord3D,
+        _diameter: Int,
+    ) -> Option<Vec<Coord3D>> {
+        None
+    }
+    /// `TerrainLogic::getExtent`, or `getMaximumPathfindExtent`.
+    fn map_extent(&mut self, extent: Region3D, _maximum_pathfind: bool) -> Region3D {
+        extent
+    }
+    /// `ActionManager::canDoSpecialPower` and its location and object forms.
+    fn can_do_special_power(
+        &mut self,
+        _owner: ObjectId,
+        _power: UnsignedInt,
+        _target: (Option<ObjectId>, Option<Coord3D>),
+        _options: UnsignedInt,
+    ) -> Bool {
+        FALSE
+    }
+    /// `BuildAssistant::sellObject`.
+    fn sell_object(&mut self, _owner: ObjectId) {}
+    /// `findSpecialPowerWithOverridableDestinationActive` and the call on it.
+    fn override_special_power_destination(
+        &mut self,
+        _owner: ObjectId,
+        _power_type: Int,
+        _location: &Coord3D,
+    ) {
+    }
 }
 
 /// A world without any of the code behind [`AiSeams`].
@@ -295,6 +357,15 @@ forward! {
     closest_attack_victim(owner: ObjectId, pos: &Coord3D, range: Real, source: CommandSourceType) -> Option<ObjectId>;
     can_act_on(query: AiActionQuery, owner: ObjectId, target: ObjectId, source: CommandSourceType) -> Bool;
     closest_edge_point(pos: &Coord3D) -> Coord3D;
+    group_order(owner: ObjectId, parms: &AiCommandParms) -> Bool;
+    remove_goal(owner: ObjectId);
+    adjust_destination(owner: ObjectId, dest: &mut Coord3D, group_dest: Option<&Coord3D>);
+    is_line_passable(owner: ObjectId, surfaces: LocomotorSurfaceTypeMask, layer: PathfindLayerEnum, from: &Coord3D, to: &Coord3D) -> Bool;
+    find_ground_path(from: &Coord3D, to: &Coord3D, diameter: Int) -> Option<Vec<Coord3D>>;
+    map_extent(extent: Region3D, maximum_pathfind: bool) -> Region3D;
+    can_do_special_power(owner: ObjectId, power: UnsignedInt, target: (Option<ObjectId>, Option<Coord3D>), options: UnsignedInt) -> Bool;
+    sell_object(owner: ObjectId);
+    override_special_power_destination(owner: ObjectId, power_type: Int, location: &Coord3D);
 }
 
 impl LocomotorSeams for SeamsGuard {

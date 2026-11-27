@@ -29,6 +29,7 @@
 //! [`crate::modules::update::ai_update`].
 
 pub mod ai;
+pub mod ai_group;
 pub mod ai_state_machine;
 pub mod ai_states;
 pub mod mood;

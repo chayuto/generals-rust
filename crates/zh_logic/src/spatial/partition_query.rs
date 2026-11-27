@@ -176,22 +176,8 @@ pub(crate) fn shrink(dist_sqr: Real, total: Real) -> (Real, Real) {
     }
 }
 
-/// `SimpleObjectIterator::sort`: a bottom-up merge sort that takes from the left
-/// run while `compare(left, right) <= 0`, so equal entries keep their order.
-fn sort_clumps(clumps: &mut Vec<Clump>, order: IterOrderType) {
-    use IterOrderType as Order;
-    let compare = |a: &Clump, b: &Clump| -> Real {
-        match order {
-            Order::Fastest => 0.0,
-            Order::SortedNearToFar => a.numeric - b.numeric,
-            Order::SortedFarToNear => b.numeric - a.numeric,
-            Order::SortedCheapToExpensive => a.build_cost.wrapping_sub(b.build_cost) as Real,
-            Order::SortedExpensiveToCheap => b.build_cost.wrapping_sub(a.build_cost) as Real,
-        }
-    };
-    if order == Order::Fastest {
-        return;
-    }
+/// The merge sort of `SimpleObjectIterator::sort` over any list.
+pub(crate) fn iterator_merge_sort<T: Copy>(clumps: &mut Vec<T>, compare: impl Fn(&T, &T) -> Real) {
     let len = clumps.len();
     let mut merged = Vec::with_capacity(len);
     let mut width = 1;
@@ -215,6 +201,25 @@ fn sort_clumps(clumps: &mut Vec<Clump>, order: IterOrderType) {
         std::mem::swap(clumps, &mut merged);
         width *= 2;
     }
+}
+
+/// `SimpleObjectIterator::sort`: a bottom-up merge sort that takes from the left
+/// run while `compare(left, right) <= 0`, so equal entries keep their order.
+fn sort_clumps(clumps: &mut Vec<Clump>, order: IterOrderType) {
+    use IterOrderType as Order;
+    let compare = |a: &Clump, b: &Clump| -> Real {
+        match order {
+            Order::Fastest => 0.0,
+            Order::SortedNearToFar => a.numeric - b.numeric,
+            Order::SortedFarToNear => b.numeric - a.numeric,
+            Order::SortedCheapToExpensive => a.build_cost.wrapping_sub(b.build_cost) as Real,
+            Order::SortedExpensiveToCheap => b.build_cost.wrapping_sub(a.build_cost) as Real,
+        }
+    };
+    if order == Order::Fastest {
+        return;
+    }
+    iterator_merge_sort(clumps, compare);
 }
 
 impl PartitionGrid {

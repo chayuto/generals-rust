@@ -52,6 +52,18 @@ Each `gen_*.cpp` here compiles unmodified `vendor/GeneralsX` sources, with minim
 - **Port contract:** a callback replayed after the damage returns must see the object status of its turn (`attempt_damage_watching`), not the status afterwards.
 - **Guard:** `golden_pkt330_327_fire` (one vector of 1,000 shows the difference).
 
+### `oracle-wrap` does not reach virtual calls
+
+- **Where:** `scripts/build_oracle.py` wraps a symbol by hiding it from other objects. The wrapped member keeps its own references, vtables and `non-virtual thunk`s included.
+- **What happens:** wrapping `AIUpdateInterface::aiDoCommand` records nothing, because every order goes through the `AICommandInterface` vtable. Defining the member in the driver instead gives a duplicate thunk symbol.
+- **How the oracle handles it:** `gen_pkt423_ai_group.cpp` points each unit's `AICommandInterface` vtable (one slot) at its recorder (`hook_orders`).
+- **Guard:** `golden_pkt423_ai_group` asserts the number of recorded orders.
+
+### `Snapshot` is often not the first base
+
+- **Where:** `AIGroup` and `Squad` derive from `MemoryPoolObject` first. `reinterpret_cast<Snapshot*>` to call `oracle_wp51::World::snapshot_crc` skips the pointer adjustment, calls through the wrong vtable and corrupts the object; the crash shows up later, elsewhere.
+- **Rule:** cast with `(Snapshot*)obj`.
+
 ### `snapshot_save_hex`'s CRC is not the module's CRC
 
 - **Where:** `oracle_wp51::World::snapshot_save_hex(s, &crc)` returns a CRC of the saved bytes. `snapshot_crc(s)` runs the module's own `crc()`.

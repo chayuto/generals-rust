@@ -8,8 +8,10 @@
 //! special powers and the CRC messages. Every other message, and every message the
 //! target cannot carry out, reaches [`CommandTarget::unhandled`].
 //!
-//! Not modelled: `AIGroup` membership of an object (`enterGroup` / `leaveGroup`), the
-//! statistics collector, and the replay camera.
+//! `AIGroup` membership belongs to the target (`zh_logic::gamelogic::command_target`),
+//! which [`CommandTarget::transient_group`] tells of the groups made here.
+//!
+//! Not modelled: the statistics collector, and the replay camera.
 
 use crate::io::recorder::{
     ReplayCommand, MSG_BEGIN_NETWORK_MESSAGES, MSG_END_NETWORK_MESSAGES, MSG_LOGIC_CRC,
@@ -177,6 +179,10 @@ pub trait CommandTarget {
     fn playback_logic_crc(&mut self, crc: u32);
     /// A message nothing here carries out.
     fn unhandled(&mut self, msg: &ReplayCommand, group: Option<&[u32]>);
+    /// A throwaway `AIGroup` that `selectObject` or `deselectObject` fills with
+    /// `members` and destroys: it uses up a group id, and the members end up in
+    /// no group. A target without groups has nothing to do.
+    fn transient_group(&mut self, _members: &[u32]) {}
 }
 
 /// `logicMessageDispatcher`.
@@ -362,6 +368,7 @@ fn select_object<T: CommandTarget + ?Sized>(
     if !target.is_mass_selectable(object) && !create_new {
         return;
     }
+    target.transient_group(&[object]);
     let joins = target.can_join_group(object);
     let selection = &mut target.squads(player).selection.ids;
     if create_new {
@@ -376,6 +383,7 @@ fn select_object<T: CommandTarget + ?Sized>(
 /// group, so members that cannot be selected now are dropped too.
 fn deselect_object<T: CommandTarget + ?Sized>(target: &mut T, object: u32, player: i32) {
     let mut members = selection_group(target, player);
+    target.transient_group(&members);
     if let Some(i) = members.iter().position(|&x| x == object) {
         members.remove(i);
     }

@@ -4,4 +4,5 @@ pub mod player_list;
 pub mod radar;
 pub mod seams;
 pub mod sparse_match_finder;
+pub mod squad;
 pub mod team;
