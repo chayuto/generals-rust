@@ -33,8 +33,9 @@ and the audio and window backends that duplicate the one chosen.
 
 ## Assumed until the owner says otherwise
 
-- Client crates (window, graphics, audio, video) may be used, each checked for
-  bundled non-Rust code. None has been added (`OPEN_DECISIONS.md` item 12).
+- Client crates (window, graphics, audio, video) are planned for, each checked
+  for bundled non-Rust code. None has been added, and the owner is asked before
+  the first one is (`OPEN_DECISIONS.md` item 12).
 - Online services whose servers no longer exist come last, after LAN play.
 
 ## Order
