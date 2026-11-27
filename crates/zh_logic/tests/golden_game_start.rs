@@ -346,7 +346,7 @@ fn check_report(game: &GameStart, before: &[String], failures: &mut Vec<String>,
         .iter()
         .any(|part| call.contains(part))
     });
-    if left_out || count("mobile starting unit without AI") != 0 || count("ScriptEngine") != 1 {
+    if left_out || count("mobile starting unit without AI") != 0 {
         failures.push(format!("{name}: unported calls {:?}", report.unported));
     }
 }

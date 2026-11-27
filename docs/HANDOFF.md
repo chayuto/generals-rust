@@ -68,24 +68,31 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 What differs first, by games reached (of 24):
 
-1. Script engine not run (`ScriptEngine::update`): 24 games, frame 1 (computer players' money). Its timer draws move the seed at frame 1 in 6 games; the other 18 move at frame 2.
-2. Computer player update not ported (`AIPlayer::update`, S21): 24 games, frames 1 and 2 (base building, upgrade choice, unit training).
-3. Dozer and Worker frame updates (S16): 23 games, frame 2, module wake frames of the human players' units too.
-4. Mood targets are wired (`getNextMoodTarget`); the ratchet cannot show it while items 1 and 2 shift the seed. At frame 4 the mood draws match the stock engine except for computer dozers that item 2 leaves idle (2 games checked).
-5. Turrets not wired (S14): 6 games, map objects wake at frame 4, draws from frame 9.
-6. Human orders: dozer construct is not carried out (6 games, objects from frame 146); queue unit create is not (6 games, money from frame 39); queue upgrade is silently dropped (5 games, money from frame 73), see below.
-7. Missing modules `RailroadBehavior` and `BoneFXUpdate` (2 games each, frame 1), and `StructureCollapseUpdate` (2 games, asleep in these frames).
+1. Computer player update not ported (`AIPlayer::update`, S21): 24 games, frames 1 and 2. The skirmish scripts now give the computer its money (player rows agree at frame 1 in 19 games and first differ at 2, where the reference's AI spends it; in the other 5 it spends in frame 1), then base building, upgrade choice and unit training differ. The seed agrees at frame 1 in all games and first differs at 2.
+2. Dozer and Worker frame updates (S16) are ported (`golden_s16_dozer_worker_frames`): the human players' module wake frames agree to the end in 17 games and to frames 146 to 249 in the `*_2p_*` and `*_6p_*` games. The construct order and the Worker's supply half are missing.
+3. Mood targets are wired (`getNextMoodTarget`); the ratchet cannot show it while items 1 and 2 shift the seed. At frame 4 the mood draws match the stock engine except for computer dozers that item 2 leaves idle (2 games checked).
+4. Turrets not wired (S14): 6 games, map objects wake at frame 4, draws from frame 9.
+5. Human orders: dozer construct is not carried out (6 games, objects from frame 146); queue unit create is not (6 games, money from frame 39); queue upgrade is silently dropped (5 games, money from frame 73), see below.
+6. Missing modules `RailroadBehavior` and `BoneFXUpdate` (2 games each, frame 1), and `StructureCollapseUpdate` (2 games, asleep in these frames).
+
+The script engine runs in frames (`scripts/script_world.rs`, `golden_script_world`). Still unported among what these frames reach, counted by the engine and by `GameScripts::unported` (`GAME_FRAMES_DUMP` prints them):
+
+- Actions (the first three are `AIPlayer` calls, S21): `SKIRMISH_BUILD_BUILDING` (24 games), `BUILD_TEAM` (5), `AI_PLAYER_BUILD_SUPPLY_CENTER` (4), `TEAM_USE_COMMANDBUTTON_ABILITY` (1).
+- Conditions, each answering false: `SKIRMISH_SPECIAL_POWER_READY` (24 games, needs special power modules), `SKIRMISH_VALUE_IN_AREA` (5) and `TEAM_INSIDE_AREA_PARTIALLY` (4, both need trigger areas and enter/exit tracking), `SKIRMISH_TECH_BUILDING_WITHIN_DISTANCE` (5).
+- `MUSIC_TRACK_HAS_COMPLETED` answers false: there is no audio.
 
 Pitfalls:
 
-- Name keys differ from the reference. A replay carries the reference's key (an upgrade as 2295; the port's upgrades are 199 to 873), so an order naming something by key is dropped without a report. `NameKeyGenerator` has to hand out the reference's numbers.
-- `TeamFactory` member lists are filled at game start only; frames keep `world.team_members`. The comparison counts the latter.
+- A field can agree by coincidence while two parts are missing. `bitter_winter.rep player` agreed at frame 1 with no scripts run, because the reference gives the computer 200 and spends it on a worker in the same frame; it now first differs at 1, and the ratchet was rewritten with that one step back. To see the reference's money, search candidate values for the one whose player rows give the recorded digest.
+- A script chunk reader given an empty `ScriptTemplateRegistry` turns every condition into `CONDITION_FALSE` without an error. Game start did that until the engine ran; `golden_script_world` now requires the start to leave nothing unported, but check `unported_conditions` is not empty-because-nothing-ran after touching the loading.
+- Name keys differ from the reference. A replay carries the reference's key (an upgrade as 2295; the port's upgrades are 199 to 873), so an order naming something by key is dropped without a report. `NameKeyGenerator` has to hand out the reference's numbers. Game start now interns the script template names before the map, as `ScriptEngine::init` does, but not at the reference's point among the other `init` calls.
+- `TeamFactory` member lists are filled at game start only; frames keep `world.team_members`. The comparison counts the latter. The script adapter copies them into the factory before `updateTeamStates`.
 
 ## Next
 
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
 - A unit moves: a move order alone takes a unit to its goal (S4, S5, S9, S10; `move_order_retail` on the six replay maps, starting units only, not compared with the reference). All searches are wired. Units fight: an attack order alone destroys a target (`attack_sim`, hand-built units, not tried with retail data or replay commands). Idle units pick targets and fight back (`attack_sim`, hand-built units). Missing for a play test: no turrets, missiles never detonate, terrain sight is always clear. Squad, hunt and attack-area states and the second half of S14 (turrets, weapon half of the AI update) are not ported.
-- Wiring still missing: the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
+- Wiring still missing: the script adapter lacks group, team-script and kill orders (counted in `GameScripts::unported`); players, teams and AI groups are only partly connected. The frame hookup lives in the test's `FrameSeams`; there is no game loop that owns one yet.
 - The computer opponent's frame updates (`AIPlayer::update`, slice S21) are not ported.
 - Client crates: ask the owner before adding the first one (item 12).
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).

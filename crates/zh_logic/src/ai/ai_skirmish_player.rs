@@ -9,10 +9,14 @@
 //! by `tests/cpp_harness/gen_ai_new_map.py`) and `golden_game_start.rs`.
 
 use zh_common::math::{gm_cosf, gm_sinf, Coord3D, Region3D};
-use zh_common::types::{Bool, Int, Real, FALSE, TRUE};
+use std::collections::BTreeMap;
+
+use zh_common::types::{Bool, Int, Real, UnsignedInt, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
-use crate::ai::ai_player::{build_initial_structures, compute_center_and_radius_of_base};
+use crate::ai::ai_player::{
+    build_initial_structures, compute_center_and_radius_of_base, AiPlayer,
+};
 use crate::player::build_assistant::{BuildContext, PI};
 use crate::player::seams::PlayerIndex;
 use crate::rules::kind_of::KindOfType;
@@ -30,6 +34,118 @@ pub struct AiSkirmishPlayer {
     pub cur_left_flank_right_defense_angle: Real,
     pub cur_right_flank_left_defense_angle: Real,
     pub cur_right_flank_right_defense_angle: Real,
+    /// Not saved: when to look for an enemy again.
+    pub frame_to_check_enemy: UnsignedInt,
+    /// Not saved.
+    pub current_enemy: Option<PlayerIndex>,
+}
+
+/// What `acquireEnemy` reads of the players.
+pub trait EnemyView {
+    fn player_count(&self) -> Int;
+    /// `player`'s relationship to `other`'s default team is `ENEMIES`.
+    fn is_enemy(&self, player: PlayerIndex, other: PlayerIndex) -> bool;
+    fn has_any_objects(&self, player: PlayerIndex) -> bool;
+    fn has_any_units(&self, player: PlayerIndex) -> bool;
+    fn has_any_build_facility(&self, player: PlayerIndex) -> bool;
+    /// Where the player's structures stand, in `iterateObjects` order.
+    fn structure_positions(&self, player: PlayerIndex) -> Vec<Coord3D>;
+}
+
+/// `getAiEnemy`: looks again every five seconds. A player whose AI is not a
+/// skirmish one, or who has none, has no enemy.
+pub fn get_ai_enemy(
+    ai_players: &mut BTreeMap<Int, AiPlayer>,
+    view: &dyn EnemyView,
+    frame: UnsignedInt,
+    player: PlayerIndex,
+) -> Option<PlayerIndex> {
+    let skirmish = ai_players.get_mut(&player)?.skirmish.as_mut()?;
+    if frame >= skirmish.frame_to_check_enemy {
+        skirmish.frame_to_check_enemy = frame.wrapping_add(5 * 30);
+        acquire_enemy(ai_players, view, frame, player);
+    }
+    ai_players.get(&player)?.skirmish.as_ref()?.current_enemy
+}
+
+/// `PartitionManager`'s `HUGE_DIST`.
+const HUGE_DIST: Real = 1_000_000.0;
+
+/// `acquireEnemy`: the enemy kept while it has units and build facilities, else
+/// the nearest one, counting those other skirmish AIs already fight as farther.
+fn acquire_enemy(
+    ai_players: &mut BTreeMap<Int, AiPlayer>,
+    view: &dyn EnemyView,
+    frame: UnsignedInt,
+    player: PlayerIndex,
+) {
+    let Some(ai) = ai_players.get(&player) else {
+        return;
+    };
+    let base = ai.base_center;
+    let current = ai.skirmish.as_ref().and_then(|s| s.current_enemy);
+    let in_bad_shape =
+        |p: PlayerIndex| !view.has_any_units(p) || !view.has_any_build_facility(p);
+    if current.is_some_and(|enemy| !in_bad_shape(enemy)) {
+        return;
+    }
+    let mut best = None;
+    let mut best_distance = HUGE_DIST * HUGE_DIST;
+    for i in 0..view.player_count() {
+        if !view.is_enemy(player, i) || !view.has_any_objects(i) {
+            continue;
+        }
+        let bad = in_bad_shape(i);
+        // `getPlayerStructureBounds`, all zero without structures.
+        let positions = view.structure_positions(i);
+        let first = positions.first().copied().unwrap_or_default();
+        let (mut lo_x, mut lo_y, mut hi_x, mut hi_y) = (first.x, first.y, first.x, first.y);
+        for p in &positions {
+            if p.x < lo_x {
+                lo_x = p.x;
+            }
+            if p.y < lo_y {
+                lo_y = p.y;
+            }
+            if p.x > hi_x {
+                hi_x = p.x;
+            }
+            if p.y > hi_y {
+                hi_y = p.y;
+            }
+        }
+        let x = lo_x + (hi_x - lo_x) / 2.0;
+        let y = lo_y + (hi_y - lo_y) / 2.0;
+        let mut distance = (x - base.x) * (x - base.x) + (y - base.y) * (y - base.y);
+        if bad {
+            distance = HUGE_DIST * HUGE_DIST * 0.5;
+        }
+        for k in 0..view.player_count() {
+            if k == i {
+                continue;
+            }
+            // `getCurrentEnemy`, which may make that AI look again.
+            if get_ai_enemy(ai_players, view, frame, k) == Some(i) {
+                distance += (500 * 500) as Real;
+            }
+            if get_ai_enemy(ai_players, view, frame, k) == Some(player) {
+                distance -= (25 * 25) as Real;
+                if distance < 0.0 {
+                    distance = 0.0;
+                }
+            }
+        }
+        if distance < best_distance {
+            best = Some(i);
+            best_distance = distance;
+        }
+    }
+    if let (Some(best), Some(skirmish)) = (
+        best,
+        ai_players.get_mut(&player).and_then(|a| a.skirmish.as_mut()),
+    ) {
+        skirmish.current_enemy = Some(best);
+    }
 }
 
 impl AiSkirmishPlayer {

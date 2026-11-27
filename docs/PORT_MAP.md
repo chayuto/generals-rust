@@ -5,7 +5,7 @@
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`290` implemented, `37` data only, `0` seeded skeletons, `136` unported)
 - **Golden Vector Oracles:** `121` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `116` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Test Suites:** `117` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -411,6 +411,7 @@
 | `zh_logic` | `crates/zh_logic/src/rules/special_power_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/scheduler/sleepy_heap.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/scripts/script_types.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/scripts/script_world.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/sim/bridges.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/sim/pathfind_map.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/sim/production.rs` | `implemented` |
@@ -640,6 +641,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s8_ai_orders.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s9_path_follow.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_script_engine.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_script_world.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_shroud_updates.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_sleepy_heap.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_1_economy.rs` | `active` |

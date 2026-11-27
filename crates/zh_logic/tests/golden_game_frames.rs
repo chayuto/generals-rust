@@ -20,13 +20,17 @@ use std::path::PathBuf;
 
 use zh_common::io::file::OsDiskFileHost;
 use zh_common::io::recorder::ReplayReader;
-use zh_common::types::TeamId;
+use zh_common::math::Coord3D;
+use zh_common::types::{Bool, ObjectId, TeamId};
 use zh_logic::arena::FacetMask;
 use zh_logic::gamelogic::command_target::{dispatch_command, CommandState};
 use zh_logic::gamelogic::frame::{run_frame, FrameSeams};
-use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader};
+use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader, StartupStores};
 use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, ReplayGameRules};
 use zh_logic::modules::update::ai_update::AiUpdate;
+use zh_logic::player::player_list::PlayerList;
+use zh_logic::player::team::TeamFactory;
+use zh_logic::scripts::{GameScripts, ScriptGame};
 use zh_logic::sim::SimContext;
 
 // The start comparison uses all of it; this one only part.
@@ -217,11 +221,38 @@ struct Playback<'a> {
     state: CommandState,
 }
 
-impl FrameSeams for Playback<'_> {
+/// The unported parts of a frame this comparison runs: the commands and the scripts.
+struct Frame<'p, 'a, 'g> {
+    playback: &'p mut Playback<'a>,
+    scripts: &'g mut GameScripts,
+    players: &'g mut PlayerList,
+    teams: &'g mut TeamFactory,
+    stores: &'g StartupStores,
+    waypoints: &'g [(String, Coord3D)],
+    named_objects: &'g mut Vec<(String, ObjectId)>,
+}
+
+impl FrameSeams for Frame<'_, '_, '_> {
+    fn script_engine(&mut self, sim: &mut SimContext) {
+        let game = ScriptGame {
+            players: self.players,
+            teams: self.teams,
+            stores: self.stores,
+            waypoints: self.waypoints,
+            named_objects: self.named_objects,
+        };
+        self.scripts.update(sim, game);
+    }
+
+    fn is_time_frozen(&mut self, _sim: &SimContext) -> Bool {
+        Bool::from(self.scripts.is_time_frozen())
+    }
+
     fn command_list(&mut self, sim: &mut SimContext) {
-        for message in self.commands.commands_for_frame(sim.world.frame) {
+        let playback = &mut *self.playback;
+        for message in playback.commands.commands_for_frame(sim.world.frame) {
             if message.is_delivered() {
-                dispatch_command(sim, &mut self.state, &message);
+                dispatch_command(sim, &mut playback.state, &message);
             }
         }
     }
@@ -383,7 +414,16 @@ fn compare(
         field_names().into_iter().map(|f| (f, FRAMES + 1)).collect();
     let mut tags = BTreeMap::new();
     for frame in 1..=FRAMES {
-        run_frame(&mut started.sim, &mut playback);
+        let mut seams = Frame {
+            playback: &mut playback,
+            scripts: &mut started.scripts,
+            players: &mut started.players,
+            teams: &mut started.teams,
+            stores: &started.stores,
+            waypoints: &started.waypoints,
+            named_objects: &mut started.named_objects,
+        };
+        run_frame(&mut started.sim, &mut seams);
         assert_eq!(started.sim.world.frame, frame, "{game}");
         let rows = frame_rows(&started, &mut tags);
         if let Some(dir) = &dumps {
@@ -411,6 +451,12 @@ fn compare(
         eprintln!(
             "{game}: commands not carried out {:?}",
             playback.state.not_carried_out
+        );
+        eprintln!(
+            "{game}: unported conditions {:?} actions {:?} calls {:?}",
+            started.scripts.engine.unported_conditions,
+            started.scripts.engine.unported_actions,
+            started.scripts.unported
         );
     }
     Some(first)

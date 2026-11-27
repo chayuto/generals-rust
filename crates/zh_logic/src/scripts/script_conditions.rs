@@ -64,6 +64,7 @@ pub const PORTED_CONDITIONS: &[Int] = &[
     ct::SKIRMISH_PLAYER_HAS_BEEN_ATTACKED_BY_PLAYER,
     ct::START_POSITION_IS,
     ct::MISSION_ATTEMPTS,
+    ct::MUSIC_TRACK_HAS_COMPLETED,
     ct::DEFUNCT_PLAYER_SELECTED_GENERAL,
     ct::DEFUNCT_PLAYER_SELECTED_GENERAL_FROM_NAMED,
 ];
@@ -431,6 +432,9 @@ impl ScriptEngine {
                 let wanted = parm(&c.parms, 1).int_val.wrapping_sub(1);
                 self.player_from_parm(world, &mut c.parms, 0)
                     .is_some_and(|p| wanted == world.player_start_index(p))
+            }
+            ct::MUSIC_TRACK_HAS_COMPLETED => {
+                world.music_track_completed(&first.string_val, parm(&c.parms, 1).int_val)
             }
             ct::MISSION_ATTEMPTS
             | ct::DEFUNCT_PLAYER_SELECTED_GENERAL

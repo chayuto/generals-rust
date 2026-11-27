@@ -89,6 +89,8 @@ pub enum ScriptUiCommand {
     SetVictorious(bool),
     /// `rts::enableLetterBox`.
     LetterBox(bool),
+    /// An action that changes only what the client shows or plays, by type.
+    Client(Int),
 }
 
 /// What the script engine needs from the rest of the game. No method has a
@@ -211,6 +213,13 @@ pub trait ScriptWorld {
     fn do_shroud_reveal(&mut self, at: Coord3D, radius: Real, player: ScriptPlayer);
     fn undo_shroud_reveal(&mut self, at: Coord3D, radius: Real, player: ScriptPlayer);
     fn audio_length_ms(&self, event: &str) -> Real;
+    /// `AudioManager::hasMusicTrackCompleted`.
+    fn music_track_completed(&self, track: &str, times: Int) -> bool;
+    /// The rest of `updateTeamAttackPrioritySet`: names the set on the team's
+    /// prototype (`None` leaves it) and gives it to every member's AI.
+    fn set_team_attack_priority(&mut self, team: ScriptTeamId, set: Option<&str>, members: &str);
+    /// `setCashValue` of the object's `SupplyWarehouseDockUpdate`, if it has one.
+    fn set_warehouse_cash(&mut self, id: ObjectId, cash: Int);
 
     // The client and the game flow.
     fn ui(&mut self, command: ScriptUiCommand);

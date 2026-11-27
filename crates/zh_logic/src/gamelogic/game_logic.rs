@@ -51,6 +51,7 @@ use crate::rules::kind_of::KindOfType;
 use crate::rules::science::ScienceType;
 use crate::rules::upgrade::UpgradeMaskType;
 use crate::scripts::scripts::{ScriptList, ScriptTemplateRegistry};
+use crate::scripts::{script_template_registry, GameScripts, ScriptGame};
 use crate::sim::{FindPositionOptions, SimApi, SimContext, SimView};
 use crate::spatial::sides_list::{
     SidesList, SidesScriptList, WellKnownSidesKeys, PLAYERS_NAMES_FOR_SCRIPTS_VERSION_2,
@@ -61,7 +62,6 @@ use crate::terrain::TerrainLogic;
 const MAX_SLOTS: usize = 8;
 /// `MAX_MP_STARTING_UNITS` of `PlayerTemplate.h`.
 const MAX_MP_STARTING_UNITS: Int = 10;
-const LOGICFRAMES_PER_SECOND: Int = 30;
 const PLAYERTEMPLATE_OBSERVER: i32 = -2;
 const SLOT_EASY_AI: i32 = 2;
 const SLOT_MED_AI: i32 = 3;
@@ -138,9 +138,9 @@ pub struct GameStart {
     pub teams: TeamFactory,
     /// The game options after the random choices.
     pub game: Option<GameOptions>,
-    /// The script list of every side, in sides list order
-    /// (`SidesInfo::getScriptList`), as `ScriptEngine::newMap` leaves them.
-    pub scripts: Vec<Option<ScriptList>>,
+    /// The script engine; `ScriptEngine::sides` is the script list of every
+    /// side, in sides list order (`SidesInfo::getScriptList`).
+    pub scripts: GameScripts,
     /// Objects given a script name by their map properties.
     pub named_objects: Vec<(String, ObjectId)>,
     /// `(name, location)` of the terrain's waypoints.
@@ -193,6 +193,8 @@ impl ReplayRules for ReplayGameRules {
 struct SidesPass<'k> {
     sides: SidesList,
     name_keys: &'k mut NameKeyGenerator,
+    /// A script chunk names its conditions and actions by template.
+    templates: &'k ScriptTemplateRegistry,
     scripts: Vec<ScriptList>,
     error: Option<String>,
 }
@@ -216,7 +218,7 @@ fn parse_sides(
                 input,
                 &mut pass.scripts,
                 pass.name_keys,
-                &ScriptTemplateRegistry::new(),
+                pass.templates,
             )?;
         }
         input.close_data_chunk()?;
@@ -248,11 +250,13 @@ fn load_sides(
     bytes: &[u8],
     keys: &WellKnownSidesKeys,
     name_keys: &mut NameKeyGenerator,
+    templates: &ScriptTemplateRegistry,
 ) -> Result<(SidesList, SideScripts), StartError> {
     let mut stream = CachedFileInputStream::from_bytes(bytes);
     let mut pass = SidesPass {
         sides: SidesList::new(),
         name_keys,
+        templates,
         scripts: Vec::new(),
         error: None,
     };
@@ -283,6 +287,7 @@ fn load_sides(
 fn skirmish_file_scripts(
     bytes: &[u8],
     name_keys: &mut NameKeyGenerator,
+    templates: &ScriptTemplateRegistry,
 ) -> Result<SideScripts, DataChunkError> {
     let mut names = Vec::new();
     let mut lists = Vec::new();
@@ -308,30 +313,12 @@ fn skirmish_file_scripts(
                 &mut input,
                 &mut lists,
                 name_keys,
-                &ScriptTemplateRegistry::new(),
+                templates,
             )?;
         }
         input.close_data_chunk()?;
     }
     Ok(names.into_iter().zip(lists).collect())
-}
-
-/// `checkConditionsForTeamNames` over every script of the sides: a script with a
-/// delay draws the frame of its first evaluation.
-fn draw_script_delays<'a>(sim: &mut SimContext, lists: impl Iterator<Item = &'a mut ScriptList>) {
-    for list in lists {
-        let grouped = list.groups.iter_mut().flat_map(|g| g.scripts.iter_mut());
-        for script in list.scripts.iter_mut().chain(grouped) {
-            script.frame_to_evaluate_at = if script.delay_evaluation_seconds > 0 {
-                sim.world
-                    .rng
-                    .get_game_logic_random_value(0, 2 * LOGICFRAMES_PER_SECOND)
-                    as UnsignedInt
-            } else {
-                0
-            };
-        }
-    }
 }
 
 // ---- `PlayerWorld` at game start --------------------------------------------
@@ -1682,7 +1669,14 @@ pub fn start_new_game_observed(
     let mut waypoints = waypoint_list(&terrain);
 
     let keys = WellKnownSidesKeys::intern(&mut sim.rules.name_keys);
-    let (mut sides, map_scripts) = load_sides(&parms.map.bytes, &keys, &mut sim.rules.name_keys)?;
+    // `ScriptEngine::init`, which in the reference runs before any map.
+    let script_templates = script_template_registry(&mut sim.rules.name_keys);
+    let (mut sides, map_scripts) = load_sides(
+        &parms.map.bytes,
+        &keys,
+        &mut sim.rules.name_keys,
+        &script_templates,
+    )?;
     let mut skirmish_scripts = SideScripts::new();
 
     let num_colors = stores
@@ -1712,7 +1706,11 @@ pub fn start_new_game_observed(
             skirmish_scripts = map_scripts.clone();
             if !map_has_scripts {
                 if let Some(bytes) = parms.skirmish_scripts.as_deref() {
-                    let file = skirmish_file_scripts(bytes, &mut sim.rules.name_keys)
+                    let file = skirmish_file_scripts(
+                        bytes,
+                        &mut sim.rules.name_keys,
+                        &script_templates,
+                    )
                         .map_err(|e| StartError::Sides(format!("{e:?}")))?;
                     skirmish_scripts.extend(file);
                 }
@@ -1753,14 +1751,13 @@ pub fn start_new_game_observed(
     let mut scripts: Vec<Option<ScriptList>> = (0..sides.num_sides())
         .map(|i| map_scripts.get(&side_name(&sides, i, &keys)).cloned())
         .collect();
-    let provider = ScriptTemplateRegistry::new();
     for copy in copies {
         let list = skirmish_scripts.get(&copy.source).map(|l| {
             l.duplicate_and_qualify(
                 &copy.qualifier,
                 &copy.template_player_name,
                 &copy.player_name,
-                &provider,
+                &script_templates,
             )
         });
         if let Some(entry) = scripts.get_mut(copy.side as usize) {
@@ -1773,9 +1770,18 @@ pub fn start_new_game_observed(
     }
     sync_players(&mut sim, &stores, &players);
     sync_teams(&mut sim, &players, &teams);
-    // The part of `ScriptEngine::newMap` that draws; the engine itself is not run.
-    draw_script_delays(&mut sim, scripts.iter_mut().flatten());
-    report.unported("ScriptEngine");
+    let mut script_run = GameScripts::default();
+    script_run.new_map(
+        &mut sim,
+        ScriptGame {
+            players: &mut players,
+            teams: &mut teams,
+            stores: &stores,
+            waypoints: &waypoints,
+            named_objects: &mut Vec::new(),
+        },
+        scripts,
+    );
 
     // `ThePartitionManager->init` and `TheTerrainLogic->newMap`.
     let extent = terrain.extent();
@@ -1923,7 +1929,7 @@ pub fn start_new_game_observed(
         sides,
         players,
         teams,
-        scripts,
+        scripts: script_run,
         game,
         named_objects: named,
         waypoints,

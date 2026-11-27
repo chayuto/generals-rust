@@ -43,6 +43,12 @@ pub const PORTED_ACTIONS: &[Int] = &[
     at::SET_ATTACK_PRIORITY_KIND_OF,
     at::SET_DEFAULT_ATTACK_PRIORITY,
     at::NO_OP,
+    at::TEAM_APPLY_ATTACK_PRIORITY_SET,
+    at::MUSIC_SET_TRACK,
+    at::SHOW_MILITARY_CAPTION,
+    at::WAREHOUSE_SET_VALUE,
+    at::AUDIO_OVERRIDE_VOLUME_TYPE,
+    at::SHOW_WEATHER,
     // `ScriptActions::executeAction`.
     at::OBJECTLIST_ADDOBJECTTYPE,
     at::OBJECTLIST_REMOVEOBJECTTYPE,
@@ -149,6 +155,26 @@ impl ScriptEngine {
                         self.set_sequential_timer_object(unit, second.int_val);
                     }
                 }
+            }
+            at::TEAM_APPLY_ATTACK_PRIORITY_SET => {
+                if let Some(team) = self.team_named(world, &first) {
+                    // An unknown set is the default one, which has no name.
+                    let name = self.attack_info(&second.string_val).name.clone();
+                    let named = (!name.is_empty()).then_some(name.as_str());
+                    world.set_team_attack_priority(team, named, &name);
+                }
+            }
+            at::WAREHOUSE_SET_VALUE => {
+                if let Some(unit) = self.unit_named(&first) {
+                    world.set_warehouse_cash(unit, second.int_val);
+                }
+            }
+            at::MUSIC_SET_TRACK => {
+                self.current_track_name = first.clone();
+                world.ui(ScriptUiCommand::Client(a.action_type));
+            }
+            at::SHOW_MILITARY_CAPTION | at::AUDIO_OVERRIDE_VOLUME_TYPE | at::SHOW_WEATHER => {
+                world.ui(ScriptUiCommand::Client(a.action_type));
             }
             at::PLAYER_SET_MONEY => {
                 if let Some(p) = self.player_from_name(world, &first) {

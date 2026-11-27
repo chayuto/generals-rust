@@ -577,6 +577,16 @@ impl ScriptWorld for World {
     fn audio_length_ms(&self, _event: &str) -> Real {
         self.audio_ms
     }
+    fn music_track_completed(&self, _track: &str, _times: Int) -> bool {
+        false
+    }
+    fn set_team_attack_priority(&mut self, team: ScriptTeamId, set: Option<&str>, members: &str) {
+        self.calls
+            .push(format!("priority {team} {set:?} {members}"));
+    }
+    fn set_warehouse_cash(&mut self, id: ObjectId, cash: Int) {
+        self.calls.push(format!("warehouse {} {cash}", id.0));
+    }
     fn ui(&mut self, command: ScriptUiCommand) {
         self.ui.push(command);
     }
@@ -980,6 +990,7 @@ fn script_engine_matches_the_reference() {
                     *c,
                     ct::DEFUNCT_PLAYER_SELECTED_GENERAL
                         | ct::DEFUNCT_PLAYER_SELECTED_GENERAL_FROM_NAMED
+                        | ct::MUSIC_TRACK_HAS_COMPLETED
                 ),
             "condition {c} never generated"
         );
@@ -997,6 +1008,14 @@ fn script_engine_matches_the_reference() {
         at::TEAM_DELETE_LIVING,
         at::NAMED_DELETE,
         at::NAMED_KILL,
+        // Added for the first frames of the retail games and not in the
+        // recording: `client_and_object_actions_of_the_first_frames`.
+        at::TEAM_APPLY_ATTACK_PRIORITY_SET,
+        at::MUSIC_SET_TRACK,
+        at::SHOW_MILITARY_CAPTION,
+        at::WAREHOUSE_SET_VALUE,
+        at::AUDIO_OVERRIDE_VOLUME_TYPE,
+        at::SHOW_WEATHER,
     ];
     for a in PORTED_ACTIONS {
         assert!(
@@ -1166,8 +1185,8 @@ fn every_type_is_ported_or_reaches_the_host() {
             assert_eq!(world.unported - before, 1, "action {kind}");
         }
     }
-    assert_eq!(PORTED_CONDITIONS.len(), 48);
-    assert_eq!(PORTED_ACTIONS.len(), 64);
+    assert_eq!(PORTED_CONDITIONS.len(), 49);
+    assert_eq!(PORTED_ACTIONS.len(), 70);
     let distinct: BTreeSet<Int> = PORTED_ACTIONS.iter().copied().collect();
     assert_eq!(distinct.len(), PORTED_ACTIONS.len());
     // None of the ported ones goes to the host.
@@ -1178,6 +1197,45 @@ fn every_type_is_ported_or_reaches_the_host() {
     for &kind in PORTED_ACTIONS {
         engine.execute_action(&mut world, &mut action(kind, Vec::new()));
     }
+    assert_eq!(world.unported, 0);
+}
+
+#[test]
+fn client_and_object_actions_of_the_first_frames() {
+    let mut world = small_world();
+    let mut engine = ScriptEngine::new();
+    for kind in [
+        at::SHOW_MILITARY_CAPTION,
+        at::AUDIO_OVERRIDE_VOLUME_TYPE,
+        at::SHOW_WEATHER,
+        at::MUSIC_SET_TRACK,
+    ] {
+        engine.execute_action(&mut world, &mut action(kind, vec![text("Track")]));
+        assert_eq!(world.ui.pop(), Some(ScriptUiCommand::Client(kind)), "{kind}");
+    }
+    // Only the track change leaves state behind.
+    assert_eq!(engine.current_track_name, "Track");
+
+    // An unknown unit, team or priority set does what `updateTeam...` does.
+    let before = world.calls.len();
+    engine.execute_action(
+        &mut world,
+        &mut action(at::WAREHOUSE_SET_VALUE, vec![text("nobody"), number(7)]),
+    );
+    engine.execute_action(
+        &mut world,
+        &mut action(
+            at::TEAM_APPLY_ATTACK_PRIORITY_SET,
+            vec![text("no such team"), text("set")],
+        ),
+    );
+    assert_eq!(world.calls.len(), before);
+    engine.add_object_to_cache("depot", ObjectId(5));
+    engine.execute_action(
+        &mut world,
+        &mut action(at::WAREHOUSE_SET_VALUE, vec![text("depot"), number(7)]),
+    );
+    assert_eq!(world.calls.last().map(String::as_str), Some("warehouse 5 7"));
     assert_eq!(world.unported, 0);
 }
 
