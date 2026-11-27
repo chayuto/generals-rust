@@ -84,7 +84,7 @@ Pitfalls:
 ## Next
 
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
-- A unit moves: a move order alone takes a unit to its goal (S4, S5, S9, S10; `move_order_retail` on the six replay maps, starting units only, not compared with the reference). The S6 searches still need wiring into S9 (`OPEN_DECISIONS.md`). Next in `AI_PORT_PLAN.md`: S11 other non-combat states; S14 attack states and turrets, which would call the S13 weapon firing.
+- A unit moves: a move order alone takes a unit to its goal (S4, S5, S9, S10; `move_order_retail` on the six replay maps, starting units only, not compared with the reference). All searches are wired. Units fight: an attack order alone destroys a target (`attack_sim`, hand-built units, not tried with retail data or replay commands). Missing for a play test: idle units do not fight back, no turrets, missiles never detonate, terrain sight is always clear. Squad, hunt and attack-area states and the second half of S14 (turrets, weapon half of the AI update) are not ported.
 - Wiring still missing: targeting has no caller; the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
 - The computer opponent's frame updates (`AIPlayer::update`, slice S21) are not ported.
 - Client crates: ask the owner before adding the first one (item 12).
