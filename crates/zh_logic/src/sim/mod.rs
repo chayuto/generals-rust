@@ -3658,7 +3658,7 @@ impl SimContext {
         }
     }
 
-    fn search_partition(
+    pub(crate) fn search_partition(
         &self,
         center: QueryCenter<'_>,
         radius: Real,

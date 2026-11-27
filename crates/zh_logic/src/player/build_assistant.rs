@@ -1,11 +1,12 @@
 //! `PKT-403` (partial): `buildObjectNow` of `BuildAssistant.cpp`, without a
 //! constructor object (with the `Player::onStructureConstructionComplete` it ends
 //! in) and with a dozer or worker, where it ends in
-//! `DozerAIInterface::construct`.
+//! `DozerAIInterface::construct`; and placement legality
+//! (`isLocationLegalToBuild`).
 //!
-//! Not ported: building along a line, placement legality
-//! (`isLocationLegalToBuild`: a recorded order passed it on the machine that
-//! issued it), a constructor that is not a dozer, selling.
+//! Not ported: building along a line, a constructor that is not a dozer, selling.
+//! A recorded human dozer order is not checked for legality: it passed on the
+//! machine that issued it.
 //!
 //! Golden tests: `crates/zh_logic/tests/golden_ai_new_map.rs` and
 //! `golden_game_start.rs`, recorded from the running reference engine;
@@ -14,21 +15,34 @@
 use std::collections::BTreeMap;
 
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
-use zh_common::math::{gm_cosf, gm_sinf, gm_sqrt, Coord3D, Region3D};
+use zh_common::math::{
+    gm_cosf, gm_floorf, gm_sinf, gm_sqrt, gm_sqrtf, Coord3D, Matrix3D, Region3D,
+};
 use zh_common::types::{Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, FALSE, TRUE};
 
 use crate::arena::{ObjectSlot, ThingTemplateId};
 use crate::gamelogic::global_data::PlayerType;
+use crate::ai::ai_state_machine::state_id;
+use crate::ai::seams::MapTerrain;
 use crate::modules::module::{CanMakeType, CommandSourceType};
 use crate::modules::update::ai_update::{AiCommandParms, AiCommandType, AiUpdate, DerivedAi};
 use crate::modules::update::dozer_ai_update::{new_task, DOZER_TASK_BUILD};
+use crate::pathfinder::pathfind_cell::CellType;
+use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::player::player_list::PlayerList;
 use crate::player::seams::PlayerIndex;
 use crate::rules::kind_of::KindOfType;
 use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
 use crate::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
 use crate::sim::{SimApi, SimContext, SimView};
+use crate::spatial::partition_collide::{geom_collides_with_geom, CollideInfo};
+use crate::spatial::partition_query::{DistanceCalculationType, QueryCenter};
+use crate::spatial::partition_shroud::CellShroudStatus;
 use crate::terrain::terrain_logic::TerrainShape;
+
+/// `MAP_XY_FACTOR` and `PATHFIND_CELL_SIZE_F`.
+const MAP_XY_FACTOR: Real = 10.0;
+const PATHFIND_CELL_SIZE_F: Real = 10.0;
 
 /// The engine's `PI`.
 pub const PI: Real = std::f32::consts::PI;
@@ -378,4 +392,549 @@ pub fn on_structure_construction_complete(
     if cx.players.player(player).is_some_and(|p| p.ai.is_some()) {
         crate::ai::ai_player::on_structure_produced(cx, player, structure);
     }
+}
+
+/// `BuildAssistant::LocalLegalToBuildOptions`.
+pub mod legal_options {
+    use zh_common::types::UnsignedInt;
+
+    pub const TERRAIN_RESTRICTIONS: UnsignedInt = 0x01;
+    pub const CLEAR_PATH: UnsignedInt = 0x02;
+    pub const NO_OBJECT_OVERLAP: UnsignedInt = 0x04;
+    pub const USE_QUICK_PATHFIND: UnsignedInt = 0x08;
+    pub const SHROUD_REVEALED: UnsignedInt = 0x10;
+    pub const NO_ENEMY_OBJECT_OVERLAP: UnsignedInt = 0x20;
+    pub const IGNORE_STEALTHED: UnsignedInt = 0x40;
+    pub const FAIL_STEALTHED_WITHOUT_FEEDBACK: UnsignedInt = 0x80;
+}
+
+/// `LegalBuildCode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegalBuildCode {
+    Ok,
+    RestrictedTerrain,
+    NotFlatEnough,
+    ObjectsInTheWay,
+    NoClearPath,
+    Shroud,
+    TooCloseToSupplies,
+    GenericFailure,
+}
+
+/// What `isLocationLegalToBuild` is asked about.
+#[derive(Debug, Clone, Copy)]
+pub struct PlacementQuery<'a> {
+    pub pos: &'a Coord3D,
+    pub what: ThingTemplateId,
+    pub angle: Real,
+    pub options: UnsignedInt,
+    pub builder: Option<ObjectSlot>,
+    /// `Player::isSkirmishAIPlayer` of the player passed in, if any.
+    pub skirmish_ai: bool,
+    /// `TheTerrainLogic->getMaximumPathfindExtent`.
+    pub pathfind_extent: &'a Region3D,
+}
+
+/// What the queries read of the template to be built.
+struct Planned {
+    geometry: GeometryInfo,
+    factory_exit_width: Real,
+    factory_extra_bib_width: Real,
+    near_supplies_forbidden: bool,
+}
+
+/// `getShroudedStatus(player) >= OBJECTSHROUD_FOGGED`: no cell of the object is
+/// clear. The client's memory of fogged objects is not kept.
+fn is_fogged_or_shrouded(sim: &SimContext, slot: ObjectSlot, player: PlayerIndex) -> bool {
+    if sim.object_is_kind_of(slot, KindOfType::AlwaysVisible) != FALSE {
+        return false;
+    }
+    let Some(id) = sim.world.objects.id_of(slot) else {
+        return false;
+    };
+    let partition = &sim.world.partition;
+    // No `PartitionData` is clear; before the first update the status is invalid.
+    if !partition.is_registered(id) || !partition.updated_since_last_reset() {
+        return false;
+    }
+    !partition.object_cells(id).iter().any(|&cell| {
+        partition
+            .shroud_cell(cell)
+            .is_some_and(|c| c.status(player as usize) == CellShroudStatus::Clear)
+    })
+}
+
+fn builder_player(sim: &SimContext, builder: Option<ObjectSlot>) -> Option<PlayerIndex> {
+    let object = sim.world.objects.get(builder?)?;
+    sim.controlling_player(object.team_id)
+}
+
+fn resident_ai(sim: &SimContext, slot: ObjectSlot) -> Option<&AiUpdate> {
+    let module = sim.world.objects.get(slot)?.ai_slot?;
+    sim.world
+        .modules
+        .payload(module)?
+        .as_any()?
+        .downcast_ref::<AiUpdate>()
+}
+
+/// `getAI() && getAI()->isBusy()`.
+fn ai_is_busy(sim: &SimContext, slot: ObjectSlot) -> bool {
+    resident_ai(sim, slot).is_some_and(|ai| ai.machine.current_state_id() == state_id::BUSY)
+}
+
+fn is_undetected_stealth(sim: &SimContext, slot: ObjectSlot) -> bool {
+    sim.world.objects.get(slot).is_some_and(|o| {
+        let has = |s: ObjectStatusType| o.status.test(s.as_i32()) != FALSE;
+        has(ObjectStatusType::Stealthed)
+            && !has(ObjectStatusType::Detected)
+            && !has(ObjectStatusType::Disguised)
+    })
+}
+
+/// `BuildAssistant::isLocationClearOfObjects`. The client's faction bibs are left
+/// out.
+fn is_location_clear_of_objects(
+    sim: &SimContext,
+    query: &PlacementQuery<'_>,
+    build: &Planned,
+) -> LegalBuildCode {
+    use legal_options::*;
+    let PlacementQuery {
+        pos,
+        angle,
+        options,
+        builder,
+        ..
+    } = *query;
+    let only_check_enemies = options == NO_ENEMY_OBJECT_OVERLAP;
+    let kind = |slot, k| sim.object_is_kind_of(slot, k) != FALSE;
+    for them in sim.find_potential_collisions(pos, &build.geometry, angle, FALSE) {
+        let mut feedback = true;
+        let rel = builder.map_or(Relationship::Neutral, |b| sim.player_relationship(b, them));
+        if options & IGNORE_STEALTHED != 0
+            && rel != Relationship::Allies
+            && is_undetected_stealth(sim, them)
+        {
+            if options & FAIL_STEALTHED_WITHOUT_FEEDBACK != 0 {
+                feedback = false;
+            } else {
+                continue;
+            }
+        }
+        if is_removable_for_construction(sim, them)
+            || kind(them, KindOfType::Mine)
+            || kind(them, KindOfType::Inert)
+        {
+            continue;
+        }
+        let immobile = kind(them, KindOfType::Immobile);
+        if immobile && only_check_enemies && builder.is_some() && rel != Relationship::Enemies {
+            continue;
+        }
+        if !cfg!(feature = "retail-crc")
+            && builder_player(sim, builder)
+                .is_some_and(|player| is_fogged_or_shrouded(sim, them, player))
+        {
+            return LegalBuildCode::Shroud;
+        }
+        let object = sim.world.objects.get(them);
+        let using_ability = object.is_some_and(|o| {
+            o.status.test(ObjectStatusType::IsUsingAbility.as_i32()) != FALSE
+        });
+        if rel == Relationship::Allies && (using_ability || ai_is_busy(sim, them)) {
+            return LegalBuildCode::ObjectsInTheWay;
+        }
+        let disabled = object.is_some_and(|o| o.is_disabled() != FALSE);
+        if immobile || disabled || (builder.is_some() && rel == Relationship::Enemies) {
+            return if feedback {
+                LegalBuildCode::ObjectsInTheWay
+            } else {
+                LegalBuildCode::GenericFailure
+            };
+        }
+    }
+    if only_check_enemies {
+        return LegalBuildCode::Ok;
+    }
+    exit_areas_clear(sim, query, build)
+}
+
+/// Where a factory exit rectangle of width `width` lies: past the front edge of a
+/// building of major radius `major`.
+fn exit_area(
+    pos: &Coord3D,
+    angle: Real,
+    major: Real,
+    width: Real,
+    geometry: GeometryInfo,
+) -> Option<CollideInfo> {
+    (width > 0.0).then(|| {
+        let mut at = *pos;
+        let c = gm_cosf(angle);
+        let s = gm_sinf(angle);
+        let offset = major + width / 2.0;
+        at.x += c * offset;
+        at.y += s * offset;
+        CollideInfo {
+            pos: at,
+            geometry,
+            angle,
+        }
+    })
+}
+
+/// The footprint widened by the extra bib width. A box widens its minor radius by
+/// `minor_extra`, which for the other building is also the new building's width.
+fn bib_bounds(geometry: &GeometryInfo, extra: Real, minor_extra: Real) -> GeometryInfo {
+    let mut bounds = geometry.clone();
+    bounds.set_major_radius(bounds.get_major_radius() + extra);
+    if bounds.get_geom_type() != GeometryType::Box {
+        let major = bounds.get_major_radius();
+        bounds.set(GeometryType::Box, FALSE, 40.0, major, major);
+    } else {
+        bounds.set_minor_radius(bounds.get_minor_radius() + minor_extra);
+    }
+    bounds
+}
+
+/// The second half of `isLocationClearOfObjects`: no structure nearby may overlap
+/// the building, its factory exit or theirs.
+fn exit_areas_clear(
+    sim: &SimContext,
+    query: &PlacementQuery<'_>,
+    build: &Planned,
+) -> LegalBuildCode {
+    use legal_options::IGNORE_STEALTHED;
+    let PlacementQuery {
+        pos,
+        angle,
+        options,
+        builder,
+        skirmish_ai,
+        ..
+    } = *query;
+    let range = 2.0 * (build.geometry.get_major_radius() + build.geometry.get_minor_radius());
+    let mut my_exit_width = build.factory_exit_width;
+    let mut my_extra_width = build.factory_extra_bib_width;
+    // The skirmish AI keeps a gap so it does not build itself into a corner.
+    if skirmish_ai && my_extra_width < 3.0 * PATHFIND_CELL_SIZE_F {
+        my_extra_width = 3.0 * PATHFIND_CELL_SIZE_F;
+        my_exit_width -= my_extra_width;
+        if my_exit_width < 0.0 {
+            my_exit_width = 0.0;
+        }
+    }
+    let mine = CollideInfo {
+        pos: *pos,
+        geometry: bib_bounds(&build.geometry, my_extra_width, my_extra_width),
+        angle,
+    };
+    let mut my_exit_geometry = build.geometry.clone();
+    if my_exit_geometry.get_geom_type() != GeometryType::Box {
+        my_exit_geometry.set_minor_radius(my_exit_geometry.get_major_radius());
+    }
+    my_exit_geometry.set_major_radius(my_exit_width / 2.0);
+    let my_exit = exit_area(
+        pos,
+        angle,
+        build.geometry.get_major_radius(),
+        my_exit_width,
+        my_exit_geometry,
+    );
+
+    let nearby = sim.search_partition(
+        QueryCenter::Position(*pos),
+        range,
+        DistanceCalculationType::FromBoundingSphere2d,
+    );
+    for them in nearby {
+        if sim.object_is_kind_of(them, KindOfType::Structure) == FALSE {
+            continue;
+        }
+        if options & IGNORE_STEALTHED != 0
+            && builder.map_or(Relationship::Neutral, |b| sim.player_relationship(b, them))
+                != Relationship::Allies
+            && is_undetected_stealth(sim, them)
+        {
+            continue;
+        }
+        if is_removable_for_construction(sim, them) {
+            continue;
+        }
+        let Some(object) = sim.world.objects.get(them) else {
+            continue;
+        };
+        let (his_exit_width, his_extra_width) = object
+            .thing
+            .template_override()
+            .get_final(&sim.rules.thing_factory)
+            .map_or((0.0, 0.0), |t| {
+                (t.get_factory_exit_width(), t.get_factory_extra_bib_width())
+            });
+        let his_pos = *object.thing.get_position();
+        let his_angle = object.thing.get_orientation();
+        let his = CollideInfo {
+            pos: his_pos,
+            geometry: bib_bounds(&object.geometry, his_extra_width, my_extra_width),
+            angle: his_angle,
+        };
+        let mut his_exit_geometry = object.geometry.clone();
+        his_exit_geometry.set_major_radius(his_exit_width / 2.0);
+        if his_exit_geometry.get_geom_type() != GeometryType::Box {
+            his_exit_geometry.set_minor_radius(object.geometry.get_major_radius());
+        }
+        let his_exit = exit_area(
+            &his_pos,
+            his_angle,
+            object.geometry.get_major_radius(),
+            his_exit_width,
+            his_exit_geometry,
+        );
+        if geom_collides_with_geom(&his, &mine) {
+            return LegalBuildCode::ObjectsInTheWay;
+        }
+        if my_exit.is_none()
+            && his_exit.is_none()
+            && his_extra_width == 0.0
+            && my_extra_width == 0.0
+        {
+            continue;
+        }
+        if sim.object_is_kind_of(them, KindOfType::Immobile) == FALSE {
+            continue;
+        }
+        // My exit against him, his exit against me, and the two exits.
+        let overlaps = my_exit
+            .as_ref()
+            .is_some_and(|exit| geom_collides_with_geom(&his, exit))
+            || his_exit
+                .as_ref()
+                .is_some_and(|exit| geom_collides_with_geom(exit, &mine))
+            || my_exit
+                .as_ref()
+                .zip(his_exit.as_ref())
+                .is_some_and(|(my, theirs)| geom_collides_with_geom(theirs, my));
+        if overlaps {
+            let shrouded = builder_player(sim, builder)
+                .is_some_and(|player| is_fogged_or_shrouded(sim, them, player));
+            return if shrouded {
+                LegalBuildCode::Shroud
+            } else {
+                LegalBuildCode::ObjectsInTheWay
+            };
+        }
+    }
+    LegalBuildCode::Ok
+}
+
+/// The `SampleBuildData` of the footprint samples.
+struct Footprint {
+    restricted: bool,
+    hi_z: Real,
+    lo_z: Real,
+    map: Region3D,
+}
+
+impl Footprint {
+    /// `checkSampleBuildLocation`. Terrain types flagged `RestrictConstruction`
+    /// are not looked up: the shipped data has none.
+    fn sample(&mut self, sim: &SimContext, at: &Coord3D) {
+        let cell_x = gm_floorf(at.x / PATHFIND_CELL_SIZE_F) as Int;
+        let cell_y = gm_floorf(at.y / PATHFIND_CELL_SIZE_F) as Int;
+        let cell = sim
+            .world
+            .pathfinder
+            .as_deref()
+            .and_then(|p| p.cell_type(PathfindLayerEnum::Ground, cell_x, cell_y));
+        if matches!(
+            cell,
+            None | Some(CellType::Water | CellType::Cliff | CellType::Impassable)
+        ) {
+            self.restricted = true;
+        }
+        if at.z < self.lo_z {
+            self.lo_z = at.z;
+        }
+        if at.z > self.hi_z {
+            self.hi_z = at.z;
+        }
+        let border = sim.rules.global_data.min_dist_from_edge_of_map_for_build;
+        if border > 0.0
+            && (at.x < self.map.lo.x + border
+                || at.x > self.map.hi.x - border
+                || at.y < self.map.lo.y + border
+                || at.y > self.map.hi.y - border)
+        {
+            self.restricted = true;
+        }
+    }
+}
+
+/// `BuildAssistant::iterateFootprint` with `checkSampleBuildLocation`.
+fn sample_footprint(
+    sim: &SimContext,
+    geometry: &GeometryInfo,
+    angle: Real,
+    pos: &Coord3D,
+    resolution: Real,
+    data: &mut Footprint,
+) {
+    let mut transform = Matrix3D::identity();
+    transform.rows[0][3] += pos.x;
+    transform.rows[1][3] += pos.y;
+    transform.rows[2][3] += pos.z;
+    transform.rotate_z(angle);
+
+    let circular = geometry.get_geom_type() != GeometryType::Box;
+    let (half_height, half_width) = if circular {
+        let radius = geometry.get_bounding_circle_radius();
+        (radius, radius)
+    } else {
+        (geometry.get_minor_radius(), geometry.get_major_radius())
+    };
+    let mut y = -half_height;
+    while y < half_height + resolution {
+        if y > half_height {
+            y = half_height;
+        }
+        let mut x = -half_width;
+        while x < half_width + resolution {
+            if x > half_width {
+                x = half_width;
+            }
+            let local = Coord3D::new(x, y, sim.terrain.get_ground_height(x, y, None));
+            let v = Matrix3D::transform_vector(&transform, &local);
+            // A circle takes only the points within it.
+            let outside = circular && {
+                let dx = v.x - pos.x;
+                let dy = v.y - pos.y;
+                gm_sqrtf(dx * dx + dy * dy) > half_width
+            };
+            if !outside {
+                let z = sim.terrain.get_ground_height(v.x, v.y, None);
+                data.sample(sim, &Coord3D::new(v.x, v.y, z));
+            }
+            x += resolution;
+        }
+        y += resolution;
+    }
+}
+
+/// `AIUpdateInterface::isQuickPathAvailable`; no without an AI.
+pub(crate) fn quick_path_available(sim: &SimContext, slot: ObjectSlot, to: &Coord3D) -> bool {
+    let (Some(ai), Some(object)) = (resident_ai(sim, slot), sim.world.objects.get(slot)) else {
+        return false;
+    };
+    let surfaces = ai.locomotor_set.get_valid_surfaces();
+    sim.world.pathfinder.as_deref().is_some_and(|p| {
+        p.quick_path_exists(sim.terrain(), surfaces, object.thing.get_position(), to)
+    })
+}
+
+/// `BuildAssistant::isLocationLegalToBuild`.
+pub fn is_location_legal_to_build(sim: &SimContext, query: &PlacementQuery<'_>) -> LegalBuildCode {
+    use legal_options::*;
+    let PlacementQuery {
+        pos,
+        angle,
+        options,
+        builder,
+        pathfind_extent: extent,
+        ..
+    } = *query;
+    // Never off the map, whatever the options.
+    if !(extent.lo.x < pos.x && pos.x < extent.hi.x && extent.lo.y < pos.y && pos.y < extent.hi.y) {
+        return LegalBuildCode::RestrictedTerrain;
+    }
+    if options & SHROUD_REVEALED != 0 {
+        let partition = &sim.world.partition;
+        let (x, y) = partition.world_to_cell(pos.x, pos.y);
+        let player = builder_player(sim, builder).unwrap_or(-1);
+        if partition.shroud_status(player, x, y) != CellShroudStatus::Clear {
+            return LegalBuildCode::Shroud;
+        }
+    }
+    let Some(build) = sim
+        .rules
+        .thing_factory
+        .find_by_template_id_final(query.what.0 as u16)
+        .map(|t| Planned {
+            geometry: t.get_template_geometry_info().clone(),
+            factory_exit_width: t.get_factory_exit_width(),
+            factory_extra_bib_width: t.get_factory_extra_bib_width(),
+            near_supplies_forbidden: t.is_kind_of(KindOfType::CannotBuildNearSupplies) != FALSE,
+        })
+    else {
+        return LegalBuildCode::GenericFailure;
+    };
+    // Both overlap options run the same check with all the options.
+    for overlap in [NO_OBJECT_OVERLAP, NO_ENEMY_OBJECT_OVERLAP] {
+        if options & overlap != 0 {
+            let code = is_location_clear_of_objects(sim, query, &build);
+            if code != LegalBuildCode::Ok {
+                return code;
+            }
+        }
+    }
+    let border = sim.rules.global_data.supply_build_border;
+    if build.near_supplies_forbidden && border > 0.0 {
+        let range = build.geometry.get_bounding_circle_radius() + border * 2.0;
+        let supply = sim.closest_object_to_position(
+            pos,
+            range,
+            DistanceCalculationType::FromBoundingSphere2d,
+            &mut |s| sim.object_is_kind_of(s, KindOfType::SupplySource) != FALSE,
+        );
+        if let Some(object) = supply.and_then(|s| sim.world.objects.get(s)) {
+            let mut expanded = object.geometry.clone();
+            expanded.expand_footprint(border);
+            let mine = CollideInfo {
+                pos: *pos,
+                geometry: build.geometry.clone(),
+                angle,
+            };
+            let theirs = CollideInfo {
+                pos: *object.thing.get_position(),
+                geometry: expanded,
+                angle: object.thing.get_orientation(),
+            };
+            if geom_collides_with_geom(&mine, &theirs) {
+                return LegalBuildCode::TooCloseToSupplies;
+            }
+        }
+    }
+    if options & CLEAR_PATH != 0 {
+        let walker = builder.filter(|&b| sim.object_is_kind_of(b, KindOfType::Immobile) == FALSE);
+        if walker.is_some_and(|b| !quick_path_available(sim, b, pos)) {
+            return LegalBuildCode::NoClearPath;
+        }
+    }
+    if options & TERRAIN_RESTRICTIONS != 0 {
+        if sim.terrain().get_layer_for_destination(pos) != PathfindLayerEnum::Ground {
+            return LegalBuildCode::RestrictedTerrain;
+        }
+        let map = sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Region3D::default, |t| t.get_extent());
+        let mut data = Footprint {
+            restricted: false,
+            hi_z: map.lo.z,
+            lo_z: map.hi.z,
+            map,
+        };
+        let allowed = sim.rules.global_data.allowed_height_variation_for_building;
+        // A coarse pass at three times the resolution, then a full one.
+        for step in [3.0 * MAP_XY_FACTOR, MAP_XY_FACTOR] {
+            sample_footprint(sim, &build.geometry, angle, pos, step, &mut data);
+            if data.restricted {
+                return LegalBuildCode::RestrictedTerrain;
+            }
+            if data.hi_z - data.lo_z > allowed {
+                return LegalBuildCode::NotFlatEnough;
+            }
+        }
+    }
+    LegalBuildCode::Ok
 }
