@@ -1,0 +1,207 @@
+blocks AIData unported 2
+blocks Animation client_skipped 14
+blocks Armor loaded 53
+blocks AudioEvent client_skipped 1410
+blocks AudioSettings client_skipped 1
+blocks BenchProfile client_skipped 4
+blocks Bridge unported 27
+blocks Campaign client_skipped 17
+blocks ChallengeGenerals client_skipped 1
+blocks CommandButton partial 820
+blocks CommandSet loaded 472
+blocks ControlBarResizer client_skipped 86
+blocks ControlBarScheme client_skipped 15
+blocks CrateData loaded 9
+blocks DamageFX partial 11
+blocks DialogEvent client_skipped 2569
+blocks DrawGroupInfo client_skipped 1
+blocks DynamicGameLOD client_skipped 4
+blocks EvaEvent client_skipped 49
+blocks FXList name_only 431
+blocks GameData loaded 2
+blocks InGameUI client_skipped 1
+blocks LODPreset client_skipped 34
+blocks Language client_skipped 1
+blocks Locomotor partial 182
+blocks MappedImage client_skipped 1369
+blocks MiscAudio client_skipped 1
+blocks Mouse client_skipped 1
+blocks MouseCursor client_skipped 37
+blocks MultiplayerColor loaded 8
+blocks MultiplayerSettings loaded 2
+blocks MultiplayerStartingMoneyChoice loaded 4
+blocks MusicTrack client_skipped 69
+blocks Object loaded 1880
+blocks ObjectCreationList name_only 295
+blocks ObjectReskin loaded 235
+blocks OnlineChatColors client_skipped 1
+blocks ParticleSystem name_only 1091
+blocks PlayerTemplate loaded 15
+blocks Rank loaded 5
+blocks ReallyLowMHz client_skipped 1
+blocks Road unported 63
+blocks Science loaded 96
+blocks ShellMenuScheme client_skipped 1
+blocks SpecialPower loaded 80
+blocks StaticGameLOD client_skipped 3
+blocks Terrain loaded 292
+blocks Upgrade loaded 83
+blocks Video client_skipped 41
+blocks WaterSet unported 4
+blocks WaterTransparency unported 1
+blocks Weapon partial 363
+blocks Weather unported 1
+unparsed_module_data draw 2897
+unparsed_module_data client 61
+unparsed_module_data logic 915
+files 128
+ignored_fields 4779
+armor coefficients match
+command_set slots match
+locomotor accel_pitch_limit match
+locomotor acceleration match
+locomotor acceleration_damaged match
+locomotor airborne_targeting_height match
+locomotor allow_motive_force_airborne match
+locomotor appearance match
+locomotor apply_2d_friction_airborne match
+locomotor behavior_z match
+locomotor bounce_kick match
+locomotor braking match
+locomotor can_move_backward match
+locomotor circling_radius match
+locomotor close_enough_dist match
+locomotor decel_pitch_limit match
+locomotor downhill_only match
+locomotor elevator_correction_degree match
+locomotor elevator_correction_rate match
+locomotor extra_2d_friction match
+locomotor forward_accel_coef match
+locomotor forward_vel_coef match
+locomotor has_suspension match
+locomotor is_close_enough_dist3d match
+locomotor lateral_accel_coef match
+locomotor lateral_vel_coef match
+locomotor lift match
+locomotor lift_damaged match
+locomotor locomotor_works_when_dead match
+locomotor max_speed match
+locomotor max_speed_damaged match
+locomotor max_thrust_angle match
+locomotor max_turn_rate match
+locomotor max_turn_rate_damaged match
+locomotor max_wobble match
+locomotor maximum_wheel_compression match
+locomotor maximum_wheel_extension match
+locomotor min_speed match
+locomotor min_turn_speed match
+locomotor min_wobble match
+locomotor move_priority match
+locomotor pitch_by_z_vel_coef match
+locomotor pitch_damping match
+locomotor pitch_stiffness match
+locomotor preferred_height match
+locomotor preferred_height_damping match
+locomotor roll_damping match
+locomotor roll_stiffness match
+locomotor rudder_correction_degree match
+locomotor rudder_correction_rate match
+locomotor speed_limit_z match
+locomotor stick_to_ground match
+locomotor surfaces match
+locomotor thrust_roll match
+locomotor turn_pivot_offset match
+locomotor ultra_accurate_slide_factor match
+locomotor uniform_axial_damping match
+locomotor wander_about_point_radius match
+locomotor wander_length_factor match
+locomotor wander_width_factor match
+locomotor wheel_turn_angle match
+locomotor wobble_rate match
+science cost match
+science grantable match
+special_power detection_time match
+special_power id match
+special_power public_timer match
+special_power radius_cursor_radius match
+special_power reload_time match
+special_power required_science match
+special_power shared_n_sync match
+special_power type match
+special_power view_object_duration match
+special_power view_object_range match
+template asset_scale match
+template build_cost match
+template build_time match
+template command_set match
+template crushable_level match
+template crusher_level match
+template energy_bonus match
+template energy_production match
+template experience match
+template is_trainable match
+template kindof match
+template refund_value match
+template shroud_clearing_range match
+template template_id match
+template threat_value match
+template transport_slot_count match
+template vision_range match
+upgrade build_frames match
+upgrade cost match
+weapon affects_mask match
+weapon aim_delta match
+weapon allow_attack_garrisoned_buildings match
+weapon anti_mask match
+weapon attack_range match
+weapon auto_reload_when_idle_frames match
+weapon capable_of_following_waypoint match
+weapon clip_reload_time match
+weapon clip_size match
+weapon collide_mask match
+weapon continue_attack_range match
+weapon continuous_fire_coast_frames match
+weapon continuous_fire_one_shots_needed match
+weapon continuous_fire_two_shots_needed match
+weapon damage_dealt_at_self_position match
+weapon damage_status_type match
+weapon damage_type match
+weapon death_type match
+weapon historic_bonus_count match
+weapon historic_bonus_radius match
+weapon historic_bonus_time match
+weapon is_shows_ammo_pips match
+weapon laser_bone_name match
+weapon laser_name match
+weapon leech_range_weapon match
+weapon max_delay_between_shots match
+weapon max_target_pitch match
+weapon min_delay_between_shots match
+weapon min_target_pitch match
+weapon min_weapon_speed match
+weapon minimum_attack_range match
+weapon missile_calls_on_die match
+weapon play_fx_when_stealthed match
+weapon pre_attack_delay match
+weapon prefire_type match
+weapon primary_damage match
+weapon primary_damage_radius match
+weapon projectile_name match
+weapon projectile_stream_name match
+weapon radius_damage_angle match
+weapon reload_type match
+weapon request_assist_range match
+weapon scale_weapon_speed match
+weapon scatter_radius match
+weapon scatter_radius_vs_infantry match
+weapon scatter_target_scalar match
+weapon scatter_targets match
+weapon secondary_damage match
+weapon secondary_damage_radius match
+weapon shock_wave_amount match
+weapon shock_wave_radius match
+weapon shock_wave_taper_off match
+weapon shots_per_barrel match
+weapon suspend_fx_delay match
+weapon weapon_recoil match
+weapon weapon_speed match

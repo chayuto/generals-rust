@@ -242,6 +242,15 @@ impl LocomotorTemplate {
     pub fn new() -> Self { Self::default() }
 
     pub fn parse_ini_block(&mut self, text: &str) -> Result<(), IniError> {
+        self.parse_ini_block_collect(text, &mut Vec::new())
+    }
+
+    /// As [`Self::parse_ini_block`], appending the keys it does not handle.
+    pub fn parse_ini_block_collect(
+        &mut self,
+        text: &str,
+        ignored: &mut Vec<String>,
+    ) -> Result<(), IniError> {
         for line in text.lines().skip(1) {
             let line = line.trim();
             if line.eq_ignore_ascii_case("End") { break; }
@@ -324,7 +333,7 @@ impl LocomotorTemplate {
                 "RudderCorrectionRate" => self.rudder_correction_rate = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
                 "ElevatorCorrectionDegree" => self.elevator_correction_degree = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
                 "ElevatorCorrectionRate" => self.elevator_correction_rate = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                _ => {}
+                other => ignored.push(other.to_owned()),
             }
         }
         if let Some(first) = text.lines().next().and_then(|l| l.split_whitespace().nth(1)) {

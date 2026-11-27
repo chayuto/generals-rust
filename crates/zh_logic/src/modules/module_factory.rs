@@ -16,7 +16,7 @@ use crate::rules::upgrade::UpgradeCenter;
 use crate::scheduler::SleepyUpdatePhase;
 use crate::spatial::crate_system::CrateSystem;
 use zh_common::core::name_key_generator::NameKeyGenerator;
-use zh_common::ini::{IniError, IniReader};
+use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
 use zh_common::types::{Int, NameKeyType, XferVersion};
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
@@ -396,6 +396,33 @@ impl std::fmt::Debug for ModuleDescriptor {
     }
 }
 
+/// Sub-blocks of module data that close with their own `End`. `Turret` and `AltTurret`
+/// open one only when nothing follows them: draw modules use `Turret = <bone>`.
+const NESTED_MODULE_BLOCKS: [&str; 7] = [
+    "ConditionState",
+    "DefaultConditionState",
+    "ModelConditionState",
+    "TransitionState",
+    "DeliveryDecal",
+    "AttackAreaDecal",
+    "TargetingReticleDecal",
+];
+
+/// Consumes a module block that has no parser, up to its own `End`.
+fn skip_module_block(ini: &mut IniReader<'_>) -> Result<(), IniError> {
+    ini.read_block_fields(|field, ini| {
+        let nested = match field {
+            "Turret" | "AltTurret" => ini.next_token_or_null(SEPS_DEFAULT).is_none(),
+            _ => NESTED_MODULE_BLOCKS.contains(&field),
+        };
+        if nested {
+            skip_module_block(ini)
+        } else {
+            Ok(())
+        }
+    })
+}
+
 /// Deterministic registry mirroring `ModuleFactory` (`PKT-164`).
 #[derive(Debug, Clone, Default)]
 pub struct ModuleRegistry {
@@ -573,7 +600,7 @@ impl ModuleRegistry {
                 let data = parse_fn(ini, tag_key, mod_name_key, parse_ctx)?;
                 return Ok(store.insert_for_template(template_id, tag_key, data));
             }
-            ini.skip_block()?;
+            skip_module_block(ini)?;
             let stub = Box::new(StubModuleData {
                 module_name: desc.name.clone(),
                 tag_key,
@@ -585,7 +612,7 @@ impl ModuleRegistry {
             return Ok(store.insert_for_template(template_id, tag_key, stub));
         }
 
-        ini.skip_block()?;
+        skip_module_block(ini)?;
         let stub = Box::new(StubModuleData {
             module_name: name.to_owned(),
             tag_key,

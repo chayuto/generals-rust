@@ -235,6 +235,15 @@ impl WeaponTemplate {
     pub fn new() -> Self { Self::default() }
 
     pub fn parse_ini_block(&mut self, text: &str) -> Result<(), IniError> {
+        self.parse_ini_block_collect(text, &mut Vec::new())
+    }
+
+    /// As [`Self::parse_ini_block`], appending the keys it does not handle.
+    pub fn parse_ini_block_collect(
+        &mut self,
+        text: &str,
+        ignored: &mut Vec<String>,
+    ) -> Result<(), IniError> {
         let mut lines = text.lines();
         let first = lines.next().unwrap_or("");
         let mut parts = first.split_whitespace();
@@ -320,11 +329,16 @@ impl WeaponTemplate {
                 "AntiBallisticMissile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_BALLISTIC_MISSILE, value),
                 "AntiParachute" => set_anti(&mut self.anti_mask, WEAPON_ANTI_PARACHUTE, value),
                 "ScatterTarget" => {
-                    let mut x = 0.0_f32; let mut y = 0.0_f32;
-                    for token in value.split_whitespace() {
-                        if let Some(v) = token.strip_prefix("X:") { x = IniReader::scan_real(v).map_err(|_| IniError::InvalidData)?; }
-                        if let Some(v) = token.strip_prefix("Y:") { y = IniReader::scan_real(v).map_err(|_| IniError::InvalidData)?; }
-                    }
+                    // `INI::parseCoord2D`: `X` and `Y` sub-tokens, separated by colon or space.
+                    let mut tokens = value
+                        .split(|c: char| c == ':' || c.is_ascii_whitespace())
+                        .filter(|t| !t.is_empty());
+                    let mut sub = |key: &str| match (tokens.next(), tokens.next()) {
+                        (Some(k), Some(v)) if k.eq_ignore_ascii_case(key) => IniReader::scan_real(v),
+                        _ => Err(IniError::InvalidData),
+                    };
+                    let x = sub("X")?;
+                    let y = sub("Y")?;
                     self.scatter_targets.push(Coord2D { x, y });
                 }
                 "WeaponBonus" => {
@@ -339,7 +353,7 @@ impl WeaponTemplate {
                         self.extra_bonus.entries[ci].set_field(crate::gamelogic::global_data::WeaponBonusField::from_i32(fi as i32).unwrap(), pct / 100.0_f32);
                     }
                 }
-                _ => {}
+                other => ignored.push(other.to_owned()),
             }
         }
         Ok(())
