@@ -7,7 +7,8 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
 - Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
 - The Rust random generator, experience tracker, money, energy, the sleepy-update heap and seven behavior modules (`LifetimeUpdate`, `SupplyWarehouseCreate`, `ArmorUpgrade`, `ModelConditionUpgrade`, `RadarUpdate`, `PowerPlantUpdate`, `DefaultProductionExitUpdate`) run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline. The replays verify only part of that: see `BASELINE.md` before treating a swapped module as checked. Windowed play is untested.
-- Packets: 258 of 463 implemented, 205 unported (Phase 2: 102, Phase 4: 4, Phase 5: 53, Phase 6: 26, Phase 7: 20). See `PORT_MAP.md`.
+- Packets: 283 of 463 marked implemented, 40 data only, 140 unported (`PORT_MAP.md`). "Implemented" includes partial ones (`PKT-431` to `PKT-433`, `PKT-440`).
+- A Rust game starts from a retail map and runs 300 frames (`gamelogic/game_logic.rs`, `start_new_game`). It is not playable: no unit moves and there is no client.
 
 ## Recently done
 
@@ -40,25 +41,39 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 | after `575ade7` | `SWAP_CANDIDATES.md` count; six more modules swapped into the engine; value accessors for `object()` reads; money, upgrades and energy keyed by player (`golden_player_state`) |
+| up to `2e28a9b` | Script engine, unit AI shell (S8), targeting (S12), pathfind map (S2), path queries (S3), players and teams, AI groups and squads, retail rule data loading |
+| `1801249`, `f2c51a8` | Weapon, locomotor, AI, creation list and road data in full; data parsers for the unported logic modules in the retail rules |
+| `4fe15f5` to `10fc0fc` | Map script lists, game start from a map, comparison with the reference (`golden_game_start`) |
 
 ## Not verified
 
-- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the swapped parts (`BASELINE.md`); the Rust sim has a frame step (`gamelogic/frame.rs`) that only its test calls, and no game-wide CRC.
+- Game start against the reference (24 games: 6 baseline replays and 18 option variants; `GameStart.json`):
+  - before the starting units, seed, players, teams and object fields match on 20 games; the 4 with bridges are compared only on players and non-bridge objects (bridges are skipped);
+  - before the AI player's map setup, the seed also differs (no Dozer or Worker AI) and 38 mobile starting units are placed differently (no `adjustDestination`);
+  - at the end, `AIPlayer::newMap` is unported too;
+  - scripts affect only delay draws (no `ScriptWorld` adapter), wall height is 0, frames are not CRC-checked;
+  - its mutation check is weak (17 of 60 caught before targeted rechecks): script status, shroud and observer paths are not exercised;
+  - the retail tests skip without game data, so CI does not run them.
+- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the swapped parts (`BASELINE.md`); the Rust sim has no game-wide CRC.
 - `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
 - No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
 
 ## Next
 
-- **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10). Simulation first: weapons doing damage (done), then unit movement, then the unit AI (`AI_PORT_PLAN.md`). Client work waits on item 12.
+- **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
+- Toward a moving unit (`AI_PORT_PLAN.md`): S4 goal reservations, then S5 and S6 searches, S9 path following, S10 movement states. These build on each other. S13 weapon firing is separate.
+- Wiring still missing: targeting has no caller; the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
+- From the game start comparison: bridge objects, Dozer and Worker AI, `adjustDestination`, `AIPlayer::newMap`.
+- Client crates: ask the owner before adding the first one (item 12).
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
-- Packet counts overstate completeness (see the known gaps): `Locomotor` has no movement code. Weapons now do damage (`golden_pkt399_weapon_effects`); gaps are in `OPEN_DECISIONS.md`.
+- Packet counts overstate completeness (see the known gaps). Weapons now do damage (`golden_pkt399_weapon_effects`); gaps are in `OPEN_DECISIONS.md`.
 - Next faithfulness gap of the same kind as the per-player fix: sciences, radar, cost modifiers and handicaps are still keyed by team.
 - Cheap further engine swaps: the byte CRC and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.
 
 ## Waiting on the owner
 
-- `OPEN_DECISIONS.md` item 12, and the other unanswered items there.
+- The unanswered items in `OPEN_DECISIONS.md`. Item 12 (client crates) is to be asked when it is needed.
 
 ## Cost of module ports
 

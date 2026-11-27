@@ -112,3 +112,4 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 
 - `PKT-266 CountermeasuresBehavior`: the `Vector2` normalise and rotate math (`PhysicsBehavior` is now ported and exposes what it needs). Its constructor also leaves `m_reloadFrame` unset.
 - `PKT-325 EnemyNearUpdate`, `PKT-311 CheckpointUpdate`: `AI::findClosestEnemy` / `findClosestAlly` are ported (`ai/ai.rs`); a module still needs a `TargetingSeams` and the world's `AiData`.
+- Game start (`gamelogic/game_logic.rs`, `golden_game_start`): bridges, the AI player and some map properties are skipped and counted; wall height is 0; the `SidesScriptList` placeholder parser is unchanged; scripts affect only delay draws. Differences from the reference are listed in `HANDOFF.md` under "Not verified".
