@@ -132,6 +132,11 @@ impl Path {
         self.nodes[idx].can_optimize = can_optimize;
     }
 
+    /// `PathNode::setLayer`.
+    pub fn set_layer(&mut self, idx: PathNodeIdx, layer: PathfindLayerEnum) {
+        self.nodes[idx].layer = layer;
+    }
+
     pub fn set_position(&mut self, idx: PathNodeIdx, pos: &Coord3D) {
         self.nodes[idx].pos = *pos;
     }

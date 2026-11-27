@@ -757,7 +757,6 @@ impl PathfindCellGrid {
             info.closed = false;
         }
         if !self.mode.use_fixed_pathfinding {
-            list.tail = None;
             let Some(info_idx) = self.cells[idx.0].info_idx else { return };
             if list.head.is_none() {
                 if let Some(info) = self.pool.get_mut(info_idx) {
@@ -779,6 +778,26 @@ impl PathfindCellGrid {
                 let cost = current_info_idx.and_then(|ii| self.pool.get(ii)).map_or(0, |i| i.total_cost);
                 if cost > current_cost {
                     break;
+                }
+                // A link to a cell that has lost its record is cut, and the
+                // record forgets its cell.
+                let next = current_info_idx
+                    .and_then(|ii| self.pool.get(ii))
+                    .and_then(|i| i.next_open);
+                if let Some(next) = next {
+                    let orphan = self
+                        .pool
+                        .get(next)
+                        .and_then(|n| n.cell)
+                        .is_none_or(|c| self.cells[c.0].info_idx.is_none());
+                    if orphan {
+                        if let Some(slot) = self.pool.get_mut(next) {
+                            slot.cell = None;
+                        }
+                        if let Some(slot) = current_info_idx.and_then(|ii| self.pool.get_mut(ii)) {
+                            slot.next_open = None;
+                        }
+                    }
                 }
                 cell_count += 1;
                 previous = Some(current_idx);
@@ -1023,10 +1042,18 @@ impl PathfindCellGrid {
         while let Some(cur) = list.head {
             count = count.wrapping_add(1);
             let Some(info_idx) = self.cells[cur.0].info_idx else {
+                // The retail layout would crash here: switch to the fixed code
+                // and have `cleanOpenAndClosedLists` clean every cell.
+                if !self.mode.use_fixed_pathfinding {
+                    self.mode.use_fixed_pathfinding = true;
+                    self.mode.force_clean_cells = true;
+                    return count;
+                }
                 list.reset(None);
                 break;
             };
-            let next = self.pool.get(info_idx).and_then(|info| info.next_open)
+            let linked = self.pool.get(info_idx).and_then(|info| info.next_open);
+            let next = linked
                 .and_then(|ni| self.pool.get(ni))
                 .and_then(|info| info.cell);
             if let Some(info) = self.pool.get_mut(info_idx) {
@@ -1035,9 +1062,13 @@ impl PathfindCellGrid {
                 info.open = false;
             }
             self.release_info(cur);
-            list.head = next;
+            // Only a record without a link resets the list, tail included.
+            if linked.is_some() {
+                list.head = next;
+            } else {
+                list.reset(None);
+            }
         }
-        list.tail = None;
         count
     }
 
@@ -1046,10 +1077,18 @@ impl PathfindCellGrid {
         while let Some(cur) = list.head {
             count = count.wrapping_add(1);
             let Some(info_idx) = self.cells[cur.0].info_idx else {
+                // The retail layout would crash here: switch to the fixed code
+                // and have `cleanOpenAndClosedLists` clean every cell.
+                if !self.mode.use_fixed_pathfinding {
+                    self.mode.use_fixed_pathfinding = true;
+                    self.mode.force_clean_cells = true;
+                    return count;
+                }
                 list.reset(None);
                 break;
             };
-            let next = self.pool.get(info_idx).and_then(|info| info.next_open)
+            let linked = self.pool.get(info_idx).and_then(|info| info.next_open);
+            let next = linked
                 .and_then(|ni| self.pool.get(ni))
                 .and_then(|info| info.cell);
             if let Some(info) = self.pool.get_mut(info_idx) {
@@ -1058,9 +1097,13 @@ impl PathfindCellGrid {
                 info.closed = false;
             }
             self.release_info(cur);
-            list.head = next;
+            // Only a record without a link resets the list, tail included.
+            if linked.is_some() {
+                list.head = next;
+            } else {
+                list.reset(None);
+            }
         }
-        list.reset(None);
         count
     }
 
@@ -1120,10 +1163,22 @@ impl PathfindCellGrid {
             cost = cost.wrapping_add(COST_DIAGONAL as u32);
         }
 
-        let grand_info = self.pool.get(parent_info)
-            .and_then(|i| i.path_parent);
-        if let Some(grand_info) = grand_info {
-            let grand_pos = self.pool.get(grand_info).map_or(ICoord2D::default(), |i| i.pos);
+        // `getParentCell` is the cell the parent's record names. Retail links
+        // can outlive their record, so that cell may have none or a newer one.
+        let grand = self
+            .pool
+            .get(parent_info)
+            .and_then(|i| i.path_parent)
+            .and_then(|g| self.pool.get(g))
+            .and_then(|g| g.cell);
+        if let Some(grand) = grand {
+            let Some(grand_info) = self.cells[grand.0].info_idx else {
+                return cost;
+            };
+            let grand_pos = self
+                .pool
+                .get(grand_info)
+                .map_or(ICoord2D::default(), |i| i.pos);
             let dir = ICoord2D {
                 x: grand_pos.x.wrapping_sub(parent_pos.x),
                 y: grand_pos.y.wrapping_sub(parent_pos.y),

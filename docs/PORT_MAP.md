@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`284` implemented, `39` data only, `0` seeded skeletons, `140` unported)
-- **Golden Vector Oracles:** `112` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `107` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `113` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `108` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -388,6 +388,7 @@
 | `zh_logic` | `crates/zh_logic/src/object/weapon_queries.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/goals.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/queries.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/search.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/player/seams.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/command_button.rs` | `implemented` |
@@ -486,6 +487,7 @@
 | `docs/golden_vectors/S2_PathfindMap.json` | - | no |
 | `docs/golden_vectors/S3_Path.json` | - | no |
 | `docs/golden_vectors/S4_Reservations.json` | - | no |
+| `docs/golden_vectors/S5_Search.json` | - | no |
 | `docs/golden_vectors/S7_LocomotorMovement.json` | 1200 | no |
 | `docs/golden_vectors/S8_AiOrders.json` | 220 | no |
 | `docs/golden_vectors/SCRIPT_ENGINE.json` | - | no |
@@ -603,6 +605,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s2_pathfind_map.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s3_path.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s4_reservations.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s5_search.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s7_locomotor_movement.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s8_ai_orders.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_script_engine.rs` | `active` |

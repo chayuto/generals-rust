@@ -84,6 +84,8 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Direct, comparing path nodes, cells examined and cell state afterwards. Stubbed: `doPathfind` and unit queries from tape.
 - Risks: open-list tie order; 5,000 cells per frame budget and a 512-entry ring queue decide **which frame** a unit gets its path; the retail path switches to a fixed path at runtime when the old code would crash. The cell code must match that too.
 - Seen: a requested path matches node for node.
+- **First part done.** `pathfinder/ai_pathfind/search.rs`: the open and closed lists with `forceCleanCells` and the fixed switch, `examineNeighboringCells`, `internalFindPath`, `prependCells`, `clip` and `checkPathCost`. Direct and Dump: `golden_s5_search` (every cell info record, the free list, every cell and the passable flags after each call).
+  - Found: cell info records are allocated once for the whole process and a released record keeps its fields, which retail list links can still read; in the compiled reference a parent chain ending in a bare cell takes the crash exit even after the fixed switch (undefined behaviour in the source, not vectored).
 
 ### S6. Other searches
 - C++: closest, attack, safe, ground-group, patch and move-away searches (about 1,500). One worker, split by search if the bundle is too large.

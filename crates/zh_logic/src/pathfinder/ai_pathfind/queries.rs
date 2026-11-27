@@ -51,6 +51,11 @@ pub trait PathUnits {
     fn is_ally(&self, agent: ObjectId, other: ObjectId) -> bool;
     /// `agent->canCrushOrSquish(other, TEST_CRUSH_OR_SQUISH)`.
     fn can_crush_or_squish(&self, agent: ObjectId, other: ObjectId) -> bool;
+    /// `findObjectByID(other)` finds an object and `agent->getRelationship` to
+    /// it is not `ENEMIES`: a dozer's search goes through such obstacles.
+    fn is_non_enemy_object(&self, _agent: ObjectId, _other: ObjectId) -> bool {
+        false
+    }
 }
 
 /// A world without units.
@@ -258,7 +263,7 @@ impl Pathfinder {
     }
 
     /// `getClippedCell`.
-    fn clipped_cell(&self, layer: PathfindLayerEnum, pos: &Coord3D) -> Option<CellIdx> {
+    pub(super) fn clipped_cell(&self, layer: PathfindLayerEnum, pos: &Coord3D) -> Option<CellIdx> {
         let (cell, _) = clip_to_cell(&self.extent, pos);
         self.get_cell(layer, cell.x, cell.y)
     }

@@ -1,7 +1,8 @@
 //! `PKT-411`, map half: building and maintaining the pathfind map
 //! (`Core/GameEngine/Source/GameLogic/AI/AIPathfind.cpp`): cell classification,
 //! object footprints, fences, wall pieces, bridge layers, zones and
-//! `Pathfinder::crc`. Searches, paths and unit reservations are not here yet.
+//! `Pathfinder::crc`. Searches, queries and unit reservations are in the
+//! submodules.
 //!
 //! Golden test: `crates/zh_logic/tests/golden_s2_pathfind_map.rs`.
 //!
@@ -17,6 +18,7 @@ use zh_common::xfer::{Xfer, XferError};
 use crate::object::thing::ThingTerrainAccess;
 use crate::pathfinder::pathfind_cell::{CellType, ObstacleDescriptor};
 use crate::pathfinder::pathfind_cell_info::CellIdx;
+use crate::pathfinder::pathfind_cell_list::PathfindCellList;
 use crate::pathfinder::pathfind_constants::{
     PathfindLayerEnum, MAX_WALL_PIECES, PATHFIND_CELL_SIZE_F, PATHFIND_QUEUE_LEN,
 };
@@ -29,8 +31,10 @@ use crate::terrain::{ElevatedLayers, TerrainEffects, TerrainLogic};
 
 mod goals;
 mod queries;
+mod search;
 pub use goals::*;
 pub use queries::*;
+pub use search::*;
 
 /// What the pathfinder reads from an object.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -164,6 +168,9 @@ pub struct Pathfinder {
     queue_head: Int,
     queue_tail: Int,
     pub cumulative_cells_allocated: Int,
+    /// `m_openList` and `m_closedList`, empty between searches.
+    pub open_list: PathfindCellList,
+    pub closed_list: PathfindCellList,
     /// `m_moveAlliesDepth`: how deep [`Pathfinder::move_allies`] is nested.
     move_allies_depth: Int,
     /// Set by `GameLogic::processDestroyList`; read under `retail-crc` only.
@@ -196,6 +203,8 @@ impl Pathfinder {
             queue_head: 0,
             queue_tail: 0,
             cumulative_cells_allocated: 0,
+            open_list: PathfindCellList::new(),
+            closed_list: PathfindCellList::new(),
             move_allies_depth: 0,
             classify_fence_zero_init: false,
         };
@@ -216,6 +225,8 @@ impl Pathfinder {
         self.is_tunneling = false;
         self.is_map_ready = false;
         self.cumulative_cells_allocated = 0;
+        self.open_list = PathfindCellList::new();
+        self.closed_list = PathfindCellList::new();
         self.move_allies_depth = 0;
         self.queued_requests = [ObjectId::INVALID; PATHFIND_QUEUE_LEN as usize];
         self.queue_head = 0;
@@ -253,6 +264,10 @@ impl Pathfinder {
 
     pub fn zones(&self) -> &PathfindZoneManager {
         &self.zones
+    }
+
+    pub fn zones_mut(&mut self) -> &mut PathfindZoneManager {
+        &mut self.zones
     }
 
     pub fn layer(&self, layer: PathfindLayerEnum) -> &PathfindLayer {

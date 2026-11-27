@@ -148,32 +148,25 @@ impl PathfindCellInfoPool {
     }
 
     /// Returns an entry to the free list head (`releaseACellInfo`).
+    /// `releaseACellInfo` only pushes the record on the free list. Everything
+    /// else stays: retail list links that dangle read it.
     pub fn release_a_cell_info(&mut self, info: InfoIdx) {
         if let Some(slot) = self.infos.get_mut(info.0) {
             if slot.is_free {
                 return;
             }
             slot.is_free = true;
-            slot.next_open = None;
-            slot.prev_open = None;
             slot.path_parent = None;
             slot.next_free = self.first_free;
-            slot.cell = None;
-            slot.total_cost = 0;
-            slot.cost_so_far = 0;
-            slot.pos = ICoord2D { x: 0, y: 0 };
-            slot.goal_unit_id = ObjectId::INVALID;
-            slot.pos_unit_id = ObjectId::INVALID;
-            slot.goal_aircraft_id = ObjectId::INVALID;
-            slot.obstacle_id = ObjectId::INVALID;
-            slot.blocked_by_ally = false;
-            slot.obstacle_is_fence = false;
-            slot.obstacle_is_transparent = false;
-            slot.open = false;
-            slot.closed = false;
             self.first_free = Some(info);
             self.free_count = self.free_count.wrapping_add(1);
         }
+    }
+
+    /// The head of the free list, `s_firstFree`.
+    #[inline]
+    pub const fn first_free(&self) -> Option<InfoIdx> {
+        self.first_free
     }
 
     #[inline]
