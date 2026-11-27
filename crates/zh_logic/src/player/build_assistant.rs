@@ -20,8 +20,8 @@ use zh_common::types::{Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, F
 use crate::arena::{ObjectSlot, ThingTemplateId};
 use crate::gamelogic::global_data::PlayerType;
 use crate::modules::module::{CanMakeType, CommandSourceType};
+use crate::modules::update::ai_update::{AiCommandParms, AiCommandType, AiUpdate, DerivedAi};
 use crate::modules::update::dozer_ai_update::{new_task, DOZER_TASK_BUILD};
-use crate::modules::update::ai_update::{AiCommandParms, AiCommandType};
 use crate::player::player_list::PlayerList;
 use crate::player::seams::PlayerIndex;
 use crate::rules::kind_of::KindOfType;
@@ -208,14 +208,8 @@ pub fn build_object_now(
             .player(player)
             .map(|p| p.relationship(Some(team), owner))
     };
-    let moved = move_objects_for_construction(
-        cx.sim,
-        cx.unported,
-        &geometry,
-        pos,
-        angle,
-        relationship,
-    );
+    let moved =
+        move_objects_for_construction(cx.sim, cx.unported, &geometry, pos, angle, relationship);
     if !moved && human {
         return None;
     }
@@ -302,12 +296,23 @@ fn dozer_construct(
     angle: Real,
     team: TeamId,
 ) -> Option<ObjectSlot> {
+    // `m_isRebuild` is set before anything is checked.
+    let module = sim.world.objects.get(dozer)?.ai_slot?;
+    if let Some(ai) = sim
+        .resident_state_mut(module)
+        .and_then(|state| state.downcast_mut::<AiUpdate>())
+    {
+        match &mut ai.derived {
+            DerivedAi::Dozer(d) => d.brain.is_rebuild = FALSE,
+            DerivedAi::Worker(w) => w.brain.is_rebuild = FALSE,
+            DerivedAi::Base => return None,
+        }
+    }
     let human = sim.player_is_human(team) != FALSE;
     // The computer's worker skips the check; its orders do not come this way.
     if human && sim.production_can_make_unit(dozer, what, None) != CanMakeType::Ok {
         return None;
     }
-    let module = sim.world.objects.get(dozer)?.ai_slot?;
     let ctx = sim.world.modules.meta(module).context(module);
     let dozer_id = sim.world.objects.get(dozer)?.id;
 
