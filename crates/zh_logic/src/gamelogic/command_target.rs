@@ -16,6 +16,7 @@ use crate::arena::{ObjectSlot, ThingTemplateId};
 use crate::modules::module::CommandSourceType;
 use crate::modules::update::ai_update::{AiCommandParms, AiCommandType};
 use crate::object::weapon_set::{WeaponLockType, WeaponSlotType};
+use crate::player::build_assistant::build_object_with_dozer;
 use crate::player::squad::{self, PlayerSquads};
 use crate::rules::kind_of::KindOfType;
 use crate::sim::{SimApi, SimContext, SimView};
@@ -30,6 +31,7 @@ use zh_common::types::{Int, NameKeyType, ObjectId, UnsignedShort};
 pub const MSG_DO_WEAPON: Int = 1037;
 pub const MSG_DO_WEAPON_AT_LOCATION: Int = 1038;
 pub const MSG_DO_WEAPON_AT_OBJECT: Int = 1039;
+pub const MSG_DOZER_CONSTRUCT: Int = 1049;
 pub const MSG_EXIT: Int = 1053;
 pub const MSG_EVACUATE: Int = 1054;
 pub const MSG_EXECUTE_RAILED_TRANSPORT: Int = 1055;
@@ -75,6 +77,8 @@ pub struct CommandState {
     /// ignores such an order, which in a replay of the same data means the
     /// port's numbering differs.
     pub unknown_names: Vec<(Int, Int)>,
+    /// Calls a carried out order made into code that is not ported, by name.
+    pub unported: BTreeMap<&'static str, u32>,
 }
 
 impl Default for CommandState {
@@ -84,6 +88,7 @@ impl Default for CommandState {
             squads: BTreeMap::new(),
             not_carried_out: Vec::new(),
             unknown_names: Vec::new(),
+            unported: BTreeMap::new(),
         }
     }
 }
@@ -203,6 +208,24 @@ impl SimCommands<'_> {
         } else if let Some(group) = self.group {
             ai_group::group_do_special_power(self.sim, group, power, target, options);
         }
+    }
+
+    /// `onDozerConstruct`: the first object of the selection builds.
+    fn dozer_construct(&mut self, msg: &ReplayCommand) {
+        let Some(template) = self.template_id(msg, msg.arg(0).as_int()) else {
+            return;
+        };
+        let Some(dozer) = self
+            .group
+            .and_then(|g| ai_group::member_ids(self.sim, g).first().copied())
+            .and_then(|id| self.sim.find_object(id))
+        else {
+            return;
+        };
+        let location = coord(msg.arg(1).as_location());
+        let angle = msg.arg(2).as_real();
+        let unported = &mut self.state.unported;
+        build_object_with_dozer(self.sim, unported, dozer, template, &location, angle);
     }
 
     /// The orders that act on the selection.
@@ -513,6 +536,7 @@ impl CommandTarget for SimCommands<'_> {
     fn unhandled(&mut self, msg: &ReplayCommand, _group: Option<&[u32]>) {
         let source = CommandSourceType::FromPlayer;
         match msg.msg_type {
+            MSG_DOZER_CONSTRUCT => self.dozer_construct(msg),
             MSG_EXIT => {
                 // The selected container puts out the object the command names.
                 let rider = self.target(msg, 0);

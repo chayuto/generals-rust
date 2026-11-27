@@ -264,7 +264,8 @@ pub fn dump(sim: &SimContext, players: &PlayerList, teams: &TeamFactory) -> Vec<
             bits(health),
             bits(max_health),
             bits(o.vision_range),
-            bits(o.shroud_clearing_range),
+            // `getShroudClearingRange`: a structure under construction sees only itself.
+            bits(sim.object_shroud_clearing_range(slot)),
         ));
     }
     dump_bridges(sim, &mut out);

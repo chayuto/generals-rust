@@ -264,6 +264,30 @@ impl SimContext {
         self.rules.command_sets.find(name)
     }
 
+    /// `BuildAssistant::isPossibleToMakeUnit`: the last matching button of the
+    /// builder's command set wins, and it is the button's template that the
+    /// player must be able to build.
+    pub(crate) fn is_possible_to_make_unit(
+        &self,
+        builder: ObjectSlot,
+        what: ThingTemplateId,
+        own: Option<&dyn ProductionFacet>,
+    ) -> bool {
+        let (Some(obj), Some(tmpl)) = (self.world.objects.get(builder), self.template_by_id(what))
+        else {
+            return false;
+        };
+        let button_template = self.command_set_of(builder).and_then(|buttons| {
+            buttons
+                .iter()
+                .filter(|b| b.command != CommandButtonType::Other)
+                .filter_map(|b| self.rules.thing_factory.find_template(&b.object))
+                .filter(|t| t.is_equivalent_to(tmpl) != FALSE)
+                .last()
+        });
+        button_template.is_some_and(|t| self.player_can_build(obj.team_id, t, builder, own))
+    }
+
     /// `BuildAssistant::canMakeUnit`. `own` is the builder's production module when the
     /// caller already holds it.
     pub(super) fn can_make_unit_for(
@@ -288,17 +312,7 @@ impl SimContext {
         if !self.can_build_more_of_type(team, tmpl, builder, own) {
             return CanMakeType::MaxedOutForPlayer;
         }
-        // `isPossibleToMakeUnit`: the last matching button wins, and it is the button's
-        // template that the player must be able to build.
-        let button_template = self.command_set_of(builder).and_then(|buttons| {
-            buttons
-                .iter()
-                .filter(|b| b.command != CommandButtonType::Other)
-                .filter_map(|b| self.rules.thing_factory.find_template(&b.object))
-                .filter(|t| t.is_equivalent_to(tmpl) != FALSE)
-                .last()
-        });
-        if !button_template.is_some_and(|t| self.player_can_build(team, t, builder, own)) {
+        if !self.is_possible_to_make_unit(builder, what, own) {
             return CanMakeType::NoPrereq;
         }
         if let (Some(queue), Some(ms)) = (own, self.production_slot(builder)) {
