@@ -747,11 +747,16 @@ fn movement_states_match_the_reference() {
         .filter(|l| l.starts_with("{\"s\":"))
         .collect();
     let cells = get_u32(VECTORS, "cells").expect("cells") as Int;
-    let per_scene = get_u32(VECTORS, "frames").expect("frames") as usize;
     let scenes = get_u32(VECTORS, "vector_count").expect("count") as usize;
-    assert!(scenes >= 56);
-    assert_eq!(rows.len(), scenes * (per_scene + 1));
-    for scene in rows.chunks(per_scene + 1) {
-        run(scene[0], &scene[1..], cells);
+    // A scene's first row has its spawns; the rows of its frames follow.
+    let starts: Vec<usize> = (0..rows.len())
+        .filter(|&i| get_str(rows[i], "spawns").is_some())
+        .collect();
+    assert!(scenes >= 60);
+    assert_eq!(starts.len(), scenes);
+    for (n, &start) in starts.iter().enumerate() {
+        let end = starts.get(n + 1).copied().unwrap_or(rows.len());
+        assert!(end - start > 100, "scene {n} is cut short");
+        run(rows[start], &rows[start + 1..end], cells);
     }
 }

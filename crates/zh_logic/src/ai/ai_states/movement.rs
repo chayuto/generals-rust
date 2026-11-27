@@ -169,9 +169,9 @@ impl SubMachine {
         self.current == INVALID_STATE_ID || self.current == state_id::IDLE
     }
 
-    /// `isInAttackState`.
+    /// `isInAttackState`: a machine without a state says yes.
     pub fn is_in_attack_state(&self) -> bool {
-        self.current == state_id::ATTACK_OBJECT
+        self.current == INVALID_STATE_ID || self.current == state_id::ATTACK_OBJECT
     }
 }
 

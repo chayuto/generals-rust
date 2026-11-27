@@ -160,6 +160,12 @@ static Path* closest_answer(Object* obj, const Coord3D* from, Coord3D* to, Bool 
     end.x = to->x + between(-12.0f, 12.0f);
     end.y = to->y + between(-12.0f, 12.0f);
     end.z = to->z;
+    if (chance(40)) {
+        // Stops well short, so that the states try again.
+        const float part = between(0.1f, 0.7f);
+        end.x = from->x + (to->x - from->x) * part;
+        end.y = from->y + (to->y - from->y) * part;
+    }
     std::string answer;
     Path* path = synthetic_path(*from, end, answer);
     std::string asked = "C," + who(obj) + "," + c3(*from) + "," + c3(*to) + "," + num(blocked) + "," + fx(pathCostFactor);
@@ -262,6 +268,11 @@ class TapeState : public State {
     MEMORY_POOL_GLUE_WITH_EXPLICIT_CREATE(TapeState, "TapeState", 512, 512)
 public:
     TapeState(StateMachine* machine, StateID id, bool sub) : State(machine, "TapeState"), m_tapeId(id), m_sub(sub) {}
+    // As the attack states it stands for answer.
+    Bool isAttack() const override {
+        return m_tapeId == AI_ATTACK_POSITION || m_tapeId == AI_ATTACK_OBJECT || m_tapeId == AI_FORCE_ATTACK_OBJECT ||
+               m_tapeId == AI_ATTACK_AND_FOLLOW_OBJECT;
+    }
     StateReturnType onEnter() override {
         tape("E," + who(getMachineOwner()) + "," + num(m_tapeId));
         return STATE_CONTINUE;
@@ -547,8 +558,14 @@ static void op_order(int u, const char* name, AICommandType type, bool player, i
     command(o, type, player ? CMD_FROM_PLAYER : CMD_FROM_AI, target >= 0 ? unit(target) : nullptr, points);
 }
 
+// A scene may fence in an area no ground path reaches.
+static bool g_pen = false;
+
+static void fence_pen(std::string& cliff);
+
 // A point near the unit most of the time, so that moves arrive.
 static Coord3D some_point(const Object* o) {
+    if (g_pen && chance(35)) return at(between(215.0f, 235.0f), between(215.0f, 235.0f));
     if (chance(35)) return at(between(15.0f, 305.0f), between(15.0f, 305.0f));
     const float reach = chance(30) ? 25.0f : 90.0f;
     return at(inside(o->getPosition()->x + between(-reach, reach)),
@@ -565,6 +582,7 @@ static std::vector<Coord3D> some_path(const Object* o) {
             continue;
         }
         p = at(inside(p.x + between(-70.0f, 70.0f)), inside(p.y + between(-70.0f, 70.0f)));
+        if (g_pen && chance(25)) p = at(between(215.0f, 235.0f), between(215.0f, 235.0f));
         points.push_back(p);
     }
     return points;
@@ -705,6 +723,14 @@ static int mover_kind() {
     return K_AIR;
 }
 
+static void fence_pen(std::string& cliff) {
+    blob(cliff, 18, 18, 9, 2);
+    blob(cliff, 18, 25, 9, 2);
+    blob(cliff, 18, 18, 2, 9);
+    blob(cliff, 25, 18, 2, 9);
+    g_pen = true;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr, "usage: gen_s10_movement_states <out.json>\n");
@@ -740,20 +766,25 @@ int main(int argc, char** argv) {
         return escaped;
     };
 
-    const int kScenarios = 56;
+    const int kScenarios = 60;
     const int kFrames = 110;
+    // The last scenes run long with few orders, for the retries seconds apart.
+    const int kLongFrom = 56;
+    const int kLongFrames = 330;
     std::fprintf(out, "{\"vector_count\":%d,\"frames\":%d,\"cells\":%d,\"locomotors\":\"%s\",\"objects\":\"%s\",\"vectors\":[\n",
                  kScenarios, kFrames, kCells, escape(locomotors_ini()).c_str(), escape(objects_ini()).c_str());
 
     bool first_row = true;
     for (int scenario = 0; scenario < kScenarios; ++scenario) {
-        const int layout = scenario % 8;
+        const bool quiet = scenario >= kLongFrom;
+        const int layout = quiet ? 4 : scenario % 8;
         const UnsignedInt frame = scenario % 9 == 0 ? 1 : 100 + pick(3000);
         const UnsignedInt seed = 1 + pick(1000000000);
         std::string& cliff = g_terrain->cliff;
         cliff.assign(kCells * kCells, '0');
         std::vector<Spawn> spawns;
         Favour favour = F_ANY;
+        g_pen = false;
         if (layout == 0) {
             // Few units in the open.
             for (int i = 0; i < 3; ++i)
@@ -779,6 +810,7 @@ int main(int argc, char** argv) {
         } else if (layout == 3) {
             // Paths around blocks and buildings.
             favour = F_PATH;
+            if (scenario % 16 == 3) fence_pen(cliff);
             for (int n = 0; n < 4; ++n)
                 blob(cliff, 4 + static_cast<int>(pick(24)), 4 + static_cast<int>(pick(24)), 1 + pick(4), 1 + pick(4));
             for (int i = 0; i < 4; ++i)
@@ -789,6 +821,7 @@ int main(int argc, char** argv) {
         } else if (layout == 4) {
             // Attack moves, with enemies about.
             favour = F_ATTACK_MOVE;
+            if (scenario % 16 == 4 || quiet) fence_pen(cliff);
             for (int i = 0; i < 5; ++i)
                 spawns.push_back({mover_kind() % K_AIR, i % 2, between(60.0f, 260.0f), between(60.0f, 260.0f),
                                   between(-3.14f, 3.14f)});
@@ -858,13 +891,22 @@ int main(int argc, char** argv) {
         first_row = false;
 
         std::vector<std::string> last(units);
-        for (int f = 0; f < kFrames; ++f) {
+        const int frames = quiet ? kLongFrames : kFrames;
+        for (int f = 0; f < frames; ++f) {
             g_ops.clear();
             g_tape.clear();
-            if (f == 1) {
+            if (f == 1 && quiet) {
+                // Into the fenced area, which no path reaches.
+                for (int u = 0; u < units; ++u) {
+                    const bool follow = u == 4;
+                    op_order(u, follow ? "follow" : "amove",
+                             follow ? AICMD_FOLLOW_PATH : AICMD_ATTACKMOVE_TO_POSITION, true, -1,
+                             {at(between(215.0f, 235.0f), between(215.0f, 235.0f))});
+                }
+            } else if (f == 1) {
                 for (int u = 0; u < units; ++u)
                     if (chance(85)) give_order(u, units, favour);
-            } else if (f > 1) {
+            } else if (f > 1 && !quiet) {
                 const int rate = layout == 4 || layout == 5 || layout == 2 ? 20 : 12;
                 const int count = chance(rate) ? 1 + static_cast<int>(pick(2)) : 0;
                 for (int n = 0; n < count; ++n) random_op(units, favour);

@@ -491,7 +491,7 @@
 | `docs/golden_vectors/PlayersTeams.json` | - | no |
 | `docs/golden_vectors/PlayersTeamsRetail.json` | - | no |
 | `docs/golden_vectors/S0_FrameDriver.json` | 3200 | no |
-| `docs/golden_vectors/S10_MovementStates.json` | 56 | no |
+| `docs/golden_vectors/S10_MovementStates.json` | 60 | no |
 | `docs/golden_vectors/S12_Targeting.json` | - | no |
 | `docs/golden_vectors/S13_WeaponFiring.json` | 3000 | no |
 | `docs/golden_vectors/S16_DozerWorker.json` | 160 | no |
