@@ -1526,6 +1526,8 @@ pub trait SimView {
 pub trait SimApi: SimView {
     fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool);
     fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType);
+    /// `Object::reactToTurretChange`: tell the contain module that a turret turned.
+    fn contain_react_to_turret_change(&mut self, owner: ObjectSlot);
     /// `BodyModuleInterface::applyDamageScalar`.
     fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real);
     fn player_battle_plans_mut(&mut self, player: Int) -> &mut PlayerBattlePlans;
@@ -5030,12 +5032,15 @@ impl SimView for SimContext {
     }
 
     fn ai_turret_in_natural_position(&self, owner: ObjectSlot, turret: WhichTurretType) -> Bool {
+        let under_construction = self.world.objects.get(owner).is_some_and(|o| {
+            o.status.test(ObjectStatusType::UnderConstruction as i32) != FALSE
+        });
         self.world
             .objects
             .get(owner)
             .and_then(|o| o.ai_slot)
             .and_then(|ms| self.world.modules.payload(ms)?.as_ai())
-            .map_or(FALSE, |ai| ai.is_turret_in_natural_position(turret))
+            .map_or(FALSE, |ai| ai.turret_natural_position(turret, under_construction))
     }
 
     fn player_battle_plans(&self, player: Int) -> Option<&PlayerBattlePlans> {
@@ -11168,7 +11173,23 @@ impl SimApi for SimContext {
         self.update_goal_on_map(owner, pos, layer);
     }
 
+    fn contain_react_to_turret_change(&mut self, owner: ObjectSlot) {
+        let Some(cs) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        if !self.world.modules.is_executing(cs) {
+            let _ = self.dispatch_module(cs, |m, sim, ctx| {
+                if let Some(c) = m.as_contain_mut() {
+                    c.contain_react_to_transform_change(sim, ctx);
+                }
+            });
+        }
+    }
+
     fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {
+        if self.call_ai(owner, &AiCall::SetTurretEnabled(turret, enabled)) {
+            return;
+        }
         let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
             return;
         };
@@ -11180,6 +11201,9 @@ impl SimApi for SimContext {
     }
 
     fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType) {
+        if self.call_ai(owner, &AiCall::RecenterTurret(turret)) {
+            return;
+        }
         let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
             return;
         };
@@ -12525,6 +12549,10 @@ impl SimApi for MockSimApi {
 
     fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType) {
         self.ctx.ai_recenter_turret(owner, turret);
+    }
+
+    fn contain_react_to_turret_change(&mut self, owner: ObjectSlot) {
+        self.ctx.contain_react_to_turret_change(owner);
     }
 
     fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real) {

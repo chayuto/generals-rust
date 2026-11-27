@@ -740,6 +740,9 @@ impl SimApi for EngineSim<'_> {
     fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType) {
         not_wired("ai_recenter_turret")
     }
+    fn contain_react_to_turret_change(&mut self, owner: ObjectSlot) {
+        not_wired("contain_react_to_turret_change")
+    }
     fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real) {
         not_wired("apply_damage_scalar")
     }

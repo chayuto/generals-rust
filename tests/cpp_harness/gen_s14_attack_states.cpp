@@ -52,6 +52,7 @@
 #include "GameLogic/Pathfinder/PathfindCellInfo.h"
 #include "GameLogic/Pathfinder/Path.h"
 #include "GameLogic/Pathfinder/PathNode.h"
+#include "GameLogic/TurretAI.h"
 
 #include <cmath>
 #include <cstdio>
@@ -85,6 +86,17 @@ S10_TAG(IgnoreTag, UnsignedInt, AIUpdateInterface, m_ignoreCollisionsUntil)
 S10_TAG(VelTag, Coord3D, PhysicsBehavior, m_vel)
 
 S10_TAG(WeaponSetTag, WeaponSet, Object, m_weaponSet)
+
+#ifdef S14_TURRETS
+using TurretArray = TurretAI* [MAX_TURRETS];
+S10_TAG(TurretsTag, TurretArray, AIUpdateInterface, m_turretAI)
+S10_TAG(TurretMachineTag, TurretStateMachine*, TurretAI, m_turretStateMachine)
+S10_TAG(TurretAngleTag, Real, TurretAI, m_angle)
+S10_TAG(TurretPitchTag, Real, TurretAI, m_pitch)
+S10_TAG(SleepTillTag, UnsignedInt, StateMachine, m_sleepTill)
+S10_TAG(GoalIdTag, ObjectID, StateMachine, m_goalObjectID)
+S10_TAG(GoalPosTag, Coord3D, StateMachine, m_goalPosition)
+#endif
 
 // --- text -------------------------------------------------------------------
 
@@ -308,7 +320,16 @@ static Object* some_enemy(const Object* me) {
     return nullptr;
 }
 
+#ifdef S14_TURRETS
+Object* real_next_mood_target(AIUpdateInterface*, Bool, Bool)
+    __asm__("_oracle_real__ZN17AIUpdateInterface17getNextMoodTargetEbb");
+#endif
+
 Object* AIUpdateInterface::getNextMoodTarget(Bool calledByAI, Bool calledDuringIdle) {
+#ifdef S14_TURRETS
+    // Idle scanning is the reference's own.
+    if (calledDuringIdle) return real_next_mood_target(this, calledByAI, calledDuringIdle);
+#endif
     if (calledDuringIdle) return nullptr;
     Object* target = chance(8) ? some_enemy(getObject()) : nullptr;
     tape("T," + who(getObject()) + "," + num(calledByAI ? 1 : 0) + "=" + who(target));
@@ -409,6 +430,7 @@ struct Kind {
     float radius;
     const char* weapons;
     int health;
+    const char* turrets;
 };
 
 #define GUN(slot, name) "    Weapon = " slot " " name "\n"
@@ -430,10 +452,59 @@ static const Kind kKinds[] = {
     {"A_Bunker", "STRUCTURE IMMOBILE", "", 14, "", 150},
     {"A_Turretless", "STRUCTURE IMMOBILE CAN_ATTACK", "-", 10, GUN("PRIMARY", "W_Cannon"), 160},
     {"A_Portable", "PORTABLE_STRUCTURE CAN_ATTACK VEHICLE", "S14_Treads", 6, GUN("PRIMARY", "W_Weak"), 120},
+#ifdef S14_TURRETS
+    {"T_Tank", "SELECTABLE VEHICLE CAN_ATTACK ATTACK_NEEDS_LINE_OF_SIGHT", "S14_Treads", 8,
+     GUN("PRIMARY", "W_Cannon") GUN("SECONDARY", "W_Rifle") "    PreferredAgainst = SECONDARY INFANTRY\n", 200,
+     "    Turret\n      TurretTurnRate = 120\n      ControlledWeaponSlots = PRIMARY\n      RecenterTime = 400\n"
+     "      MinIdleScanInterval = 200\n      MaxIdleScanInterval = 900\n      MinIdleScanAngle = 10\n"
+     "      MaxIdleScanAngle = 70\n    End\n"},
+    {"T_Twin", "SELECTABLE VEHICLE CAN_ATTACK", "S14_Wheels", 6,
+     GUN("PRIMARY", "W_Splash") GUN("SECONDARY", "W_Rifle"), 160,
+     "    Turret\n      TurretTurnRate = 200\n      ControlledWeaponSlots = PRIMARY\n      AllowsPitch = Yes\n"
+     "      TurretPitchRate = 90\n      GroundUnitPitch = 25\n      MinPhysicalPitch = -10\n    End\n"
+     "    AltTurret\n      TurretTurnRate = 90\n      ControlledWeaponSlots = SECONDARY\n"
+     "      NaturalTurretAngle = 180\n      AllowsPitch = Yes\n      FirePitch = 30\n"
+     "      NaturalTurretPitch = 5\n      MinIdleScanInterval = 300\n      MaxIdleScanInterval = 600\n"
+     "      MaxIdleScanAngle = 45\n    End\n"},
+    {"T_Base", "STRUCTURE IMMOBILE CAN_ATTACK", "-", 10, GUN("PRIMARY", "W_Long"), 220,
+     "    Turret\n      TurretTurnRate = 60\n      ControlledWeaponSlots = PRIMARY\n      NaturalTurretAngle = 45\n"
+     "      RecenterTime = 100\n      MinIdleScanInterval = 100\n      MaxIdleScanInterval = 400\n"
+     "      MinIdleScanAngle = 20\n      MaxIdleScanAngle = 180\n    End\n"},
+    {"T_Sweep", "SELECTABLE VEHICLE CAN_ATTACK", "S14_Treads", 7, GUN("PRIMARY", "W_Rifle"), 140,
+     "    Turret\n      TurretTurnRate = 150\n      ControlledWeaponSlots = PRIMARY\n"
+     "      TurretFireAngleSweep = PRIMARY 12\n      TurretSweepSpeedModifier = PRIMARY 0.5\n"
+     "      FiresWhileTurning = Yes\n      RecenterTime = 1000\n    End\n"},
+    {"T_Fixed", "SELECTABLE VEHICLE CAN_ATTACK", "S14_Creep", 6, GUN("PRIMARY", "W_Slow"), 150,
+     "    Turret\n      TurretTurnRate = 0\n      ControlledWeaponSlots = PRIMARY\n    End\n"},
+    {"T_Linked", "SELECTABLE VEHICLE CAN_ATTACK", "S14_Treads", 8,
+     GUN("PRIMARY", "W_Cannon") GUN("SECONDARY", "W_Rifle"), 180,
+     "    TurretsLinked = Yes\n    Turret\n      TurretTurnRate = 100\n      ControlledWeaponSlots = PRIMARY\n"
+     "      RecenterTime = 600\n    End\n    AltTurret\n      TurretTurnRate = 250\n"
+     "      ControlledWeaponSlots = SECONDARY\n    End\n"},
+    {"T_Off", "SELECTABLE VEHICLE CAN_ATTACK", "S14_Wheels", 5, GUN("PRIMARY", "W_Weak"), 130,
+     "    Turret\n      TurretTurnRate = 180\n      ControlledWeaponSlots = PRIMARY\n      InitiallyDisabled = Yes\n"
+     "      MinIdleScanInterval = 100\n      MaxIdleScanInterval = 200\n      MaxIdleScanAngle = 30\n    End\n"},
+#endif
 };
 static const int kKindCount = static_cast<int>(sizeof(kKinds) / sizeof(kKinds[0]));
 enum { K_RIFLE, K_TANK, K_KNIFE, K_SPLASH, K_LONG, K_LEECH, K_SPENT, K_CREEP, K_FLAK, K_HOVER, K_DUMMY, K_BUNKER,
-       K_TURRETLESS, K_PORTABLE };
+       K_TURRETLESS, K_PORTABLE, K_T_TANK, K_T_TWIN, K_T_BASE, K_T_SWEEP, K_T_FIXED, K_T_LINKED, K_T_OFF };
+
+#ifdef S14_TURRETS
+// The turreted kind a spawn of the turretless trace stands for.
+static int turreted(int kind) {
+    switch (kind) {
+        case K_TANK: return K_T_TANK;
+        case K_SPLASH: return K_T_TWIN;
+        case K_TURRETLESS: return K_T_BASE;
+        case K_LEECH: return K_T_SWEEP;
+        case K_CREEP: return K_T_FIXED;
+        case K_LONG: return K_T_LINKED;
+        case K_SPENT: return K_T_OFF;
+        default: return kind;
+    }
+}
+#endif
 
 static std::string objects_ini() {
     std::string s;
@@ -442,15 +513,18 @@ static std::string objects_ini() {
         std::ostringstream o;
         o << "Object " << k.name << "\n  KindOf = PRELOAD " << k.kind_of << "\n  Geometry = CYLINDER\n"
           << "  GeometryMajorRadius = " << k.radius << "\n  GeometryHeight = 8\n  GeometryIsSmall = No\n"
-          << "  VisionRange = 120\n  ShroudClearingRange = 0\n"
+          << "  VisionRange = 120\n  ShroudClearingRange = " << (k.turrets ? 200 : 0) << "\n"
           << "  Body = ActiveBody ModuleTag_Body\n    MaxHealth = " << k.health << "\n    InitialHealth = "
           << k.health << "\n  End\n"
           << "  Behavior = DestroyDie ModuleTag_Die\n  End\n";
+        const std::string ai_data =
+            k.turrets ? std::string("    AutoAcquireEnemiesWhenIdle = Yes\n    MoodAttackCheckRate = 500\n") + k.turrets
+                      : std::string();
         if (k.locomotor[0] == '-') {
-            o << "  Behavior = AIUpdateInterface ModuleTag_AI\n  End\n";
+            o << "  Behavior = AIUpdateInterface ModuleTag_AI\n" << ai_data << "  End\n";
         } else if (k.locomotor[0]) {
             o << "  Behavior = PhysicsBehavior ModuleTag_Phys\n    Mass = 5\n  End\n"
-              << "  Behavior = AIUpdateInterface ModuleTag_AI\n  End\n"
+              << "  Behavior = AIUpdateInterface ModuleTag_AI\n" << ai_data << "  End\n"
               << "  Locomotor = SET_NORMAL " << k.locomotor << "\n";
         }
         if (k.weapons[0]) o << "  WeaponSet\n    Conditions = None\n" << k.weapons << "  End\n";
@@ -498,6 +572,44 @@ static std::string combat_text(Object* o) {
     return s;
 }
 
+#ifdef S14_TURRETS
+// Each turret's angle, pitch and machine.
+static std::string turrets_text(AIUpdateInterface* ai) {
+    std::string s;
+    TurretArray& turrets = ai->*access_member(TurretsTag());
+    for (int t = 0; t < MAX_TURRETS; ++t) {
+        TurretAI* turret = turrets[t];
+        if (!turret) continue;
+        TurretStateMachine* machine = turret->*access_member(TurretMachineTag());
+        s += "/" + num(t) + "," + fx(turret->*access_member(TurretAngleTag())) + "," +
+             fx(turret->*access_member(TurretPitchTag())) + "," + num(machine->getCurrentStateID()) + "," +
+             num(static_cast<int>(machine->*access_member(GoalIdTag()))) + "," +
+             c3(machine->*access_member(GoalPosTag())) + "," + num(machine->*access_member(SleepTillTag()));
+    }
+    return s;
+}
+
+// Where each turret weapon's projectile would start, as the twelve matrix words.
+static std::string launch_text(const std::vector<ObjectID>& ids) {
+    std::string s;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        Object* o = TheGameLogic->findObjectByID(ids[i]);
+        if (!o || !o->getAI()) continue;
+        TurretArray& turrets = o->getAI()->*access_member(TurretsTag());
+        if (!turrets[0]) continue;
+        for (int slot = 0; slot < 2; ++slot) {
+            Matrix3D mtx(true);
+            Coord3D pos;
+            Weapon::calcProjectileLaunchPosition(o, static_cast<WeaponSlotType>(slot), 0, mtx, pos);
+            s += (s.empty() ? "" : ";") + num(static_cast<long long>(i)) + "," + num(slot) + ",";
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c) s += fx(mtx[r][c]);
+        }
+    }
+    return s;
+}
+#endif
+
 // Fields are separated by '|' so a mismatch names the one that differs.
 static std::string observe(int i) {
     Object* o = unit(i);
@@ -542,6 +654,10 @@ static std::string observe(int i) {
     s += "|" + combat_text(o);
     s += "|" + hex32(crc);
     s += "|" + hex64(fnv(save));
+#ifdef S14_TURRETS
+    const std::string turrets = turrets_text(ai);
+    if (!turrets.empty()) s += "|" + turrets;
+#endif
     return s;
 }
 
@@ -642,6 +758,20 @@ static void random_op(int units) {
     Object* o = unit(u);
     if (!o) return;
     AIUpdateInterface* ai = o->getAI();
+#ifdef S14_TURRETS
+    if (ai && (ai->*access_member(TurretsTag()))[0] && chance(14)) {
+        const int t = (ai->*access_member(TurretsTag()))[1] && chance(50) ? 1 : 0;
+        if (chance(45)) {
+            g_ops.push_back("recenter " + num(u) + " " + num(t));
+            ai->recenterTurret(static_cast<WhichTurretType>(t));
+        } else {
+            const int on = chance(60) ? 1 : 0;
+            g_ops.push_back("turret " + num(u) + " " + num(t) + " " + num(on));
+            ai->setTurretEnabled(static_cast<WhichTurretType>(t), on != 0);
+        }
+        return;
+    }
+#endif
     const uint32_t r = pick(100);
     if (r < 56) {
         give_order(u);
@@ -766,7 +896,11 @@ int main(int argc, char** argv) {
     std::string names;
     for (int i = 0; i < kKindCount; ++i) names += (i ? "," : "") + std::string(kKinds[i].name);
 
+#ifdef S14_TURRETS
+    const int kScenarios = 64;
+#else
     const int kScenarios = 80;
+#endif
     const int kFrames = 150;
     std::fprintf(out,
                  "{\"vector_count\":%d,\"frames\":%d,\"cells\":%d,\"names\":\"%s\",\"locomotors\":\"%s\","
@@ -840,6 +974,11 @@ int main(int argc, char** argv) {
                                   between(-3.14f, 3.14f)});
         }
 
+#ifdef S14_TURRETS
+        if (layout == 0) spawns[0].kind = K_T_TANK + (scenario / 8) % 7;
+        for (size_t i = layout == 0 ? 1 : 0; i < spawns.size(); ++i) spawns[i].kind = turreted(spawns[i].kind);
+#endif
+
         TheGameLogic->*access_member(Wp51GLFrameTag()) = frame;
         InitRandom(seed);
         TheGameLogic->setObjectIDCounter(static_cast<ObjectID>(1000));
@@ -866,7 +1005,7 @@ int main(int argc, char** argv) {
             if (s.kind == K_HOVER) p.z = 30.0f;
             o->setOrientation(s.angle);
             o->setPosition(&p);
-            if (s.kind == K_BUNKER || s.kind == K_TURRETLESS) pf->addObjectToPathfindMap(o);
+            if (s.kind == K_BUNKER || s.kind == K_TURRETLESS || s.kind == K_T_BASE) pf->addObjectToPathfindMap(o);
             if (s.kind == K_HOVER) set_status_bit(o, OBJECT_STATUS_AIRBORNE_TARGET, true);
             g_ids.push_back(o->getID());
             g_teams.push_back(s.team);
@@ -913,7 +1052,11 @@ int main(int argc, char** argv) {
                 row << (i ? "~" : "") << (now == last[i] ? std::string("=") : now);
                 last[i] = now;
             }
-            row << "\"}";
+            row << "\"";
+#ifdef S14_TURRETS
+            if (f == kFrames - 1) row << ",\"launch\":\"" << launch_text(g_ids) << "\"";
+#endif
+            row << "}";
             std::fprintf(out, ",\n%s", row.str().c_str());
         }
         std::fflush(out);

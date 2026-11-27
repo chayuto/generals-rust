@@ -9,6 +9,7 @@ use super::weapon_queries;
 use crate::ai::seams::ai_seams;
 use crate::arena::ObjectSlot;
 use crate::modules::module::CommandSourceType;
+use crate::modules::update::ai_update::turrets;
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_TARGETABLE;
 use crate::rules::combat_types::{
     DamageType, DamageTypeFlags, WeaponSetFlags, WeaponSetType, WeaponStatus, WEAPON_SET_NAMES,
@@ -783,7 +784,18 @@ pub fn choose_best_weapon_for_target(
         if sources & (1 << command_source as u32) == 0 && sources & DEFAULT_SWITCH_WEAPON_BIT == 0 {
             continue;
         }
-        let usable = judge_weapon(sim, owner, victim, &mut weapon, i);
+        let mut usable = judge_weapon(sim, owner, victim, &mut weapon);
+        // A weapon whose turret is already aiming there does not count as ready,
+        // and one that would do nothing is passed over.
+        if let Some((damage, _, ready)) = &mut usable {
+            let victim_id = sim.object(victim).map_or(ObjectId::INVALID, |o| o.id);
+            if turrets::weapon_slot_aiming_at(sim, owner, slot, victim_id) {
+                *ready = false;
+            }
+            if *damage <= 0.0 && weapon.template.damage_type != DamageType::Unresistable {
+                usable = None;
+            }
+        }
         // A weapon preferred against the victim's kind beats the others.
         let preferred_here = usable.is_some()
             && preferred.any() != FALSE
@@ -864,7 +876,6 @@ fn judge_weapon(
     owner: ObjectSlot,
     victim: ObjectSlot,
     weapon: &mut Weapon,
-    index: usize,
 ) -> Option<(Real, Real, bool)> {
     let now = sim.frame();
     if weapon.get_status(now) == WeaponStatus::OutOfAmmo
@@ -880,14 +891,7 @@ fn judge_weapon(
     }
     let damage = weapon_queries::estimate_weapon_damage(weapon, sim, owner, Some(victim));
     let range = weapon_queries::attack_range(weapon, sim, owner);
-    let mut ready = weapon.get_status(now) == WeaponStatus::ReadyToFire;
-    let id = |slot| sim.object(slot).map_or(ObjectId::INVALID, |o| o.id);
-    if ai_seams(sim).weapon_slot_on_turret_aiming_at(id(owner), index, id(victim)) != FALSE {
-        ready = false;
-    }
-    if damage <= 0.0 && weapon.template.damage_type != DamageType::Unresistable {
-        return None;
-    }
+    let ready = weapon.get_status(now) == WeaponStatus::ReadyToFire;
     Some((damage, range, ready))
 }
 

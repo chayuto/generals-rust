@@ -23,6 +23,8 @@ use zh_common::math::{Coord3D, Matrix3D, Region3D};
 use zh_common::types::{Bool, Int, ObjectId, Real, Relationship, TeamId, FALSE, TRUE};
 use zh_common::xfer::{Snapshot, XferCrc, XferSave};
 use zh_logic::ai::seams::{shared, AiSeams};
+use zh_logic::combat::turret_ai::WhichTurretType;
+use zh_logic::object::weapon_fire::launch_transform;
 use zh_logic::arena::{ModuleContext, ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::DamageInfo;
 use zh_logic::combat::locomotor::LocomotorTemplate;
@@ -44,6 +46,9 @@ use zh_logic::rules::object_status_types::ObjectStatusType;
 use zh_logic::sim::{SimApi, SimContext, SimView};
 
 const VECTORS: &str = include_str!("../../../docs/golden_vectors/S14_AttackStates.json");
+/// The same with turreted units (`tests/cpp_harness/gen_s14_turrets.cpp`), where
+/// idle units also look for targets as the reference does.
+const TURRET_VECTORS: &str = include_str!("../../../docs/golden_vectors/S14_Turrets.json");
 
 const BUNKER: usize = 11;
 const TURRETLESS: usize = 12;
@@ -95,16 +100,19 @@ struct Tape {
 
 type SharedTape = Arc<Mutex<Tape>>; // determinism-ok: single-threaded harness log
 
-struct Seams(SharedTape);
+struct Seams {
+    tape: SharedTape,
+    real_idle_targets: bool,
+}
 
 impl Seams {
     fn call(&self, call: String) {
-        self.0.lock().expect("tape").made.push(call);
+        self.tape.lock().expect("tape").made.push(call);
     }
 
     /// A call the reference answered: `asked=answer` on its tape.
     fn answer(&self, asked: String) -> Option<String> {
-        let mut tape = self.0.lock().expect("tape");
+        let mut tape = self.tape.lock().expect("tape");
         let at = tape.made.len();
         let answer = tape
             .expected
@@ -159,9 +167,10 @@ impl AiSeams for Seams {
         called_by_ai: Bool,
         during_idle: Bool,
     ) -> Option<Option<ObjectId>> {
-        // The reference's stand-in answers nothing, unrecorded, for an idle unit.
+        // The turretless reference's stand-in answers nothing, unrecorded, for an
+        // idle unit.
         if during_idle != FALSE {
-            return Some(None);
+            return (!self.real_idle_targets).then_some(None);
         }
         let answer = self.answer(format!("T,{},{called_by_ai}", owner.0));
         let id = answer.map(|a| number(&a) as i32);
@@ -185,8 +194,8 @@ impl AiSeams for Seams {
             victim.map_or(0, |id| id.0),
             c3(victim_pos)
         );
-        let answered = self.0.lock().expect("tape").expected.clone();
-        let at = self.0.lock().expect("tape").made.len();
+        let answered = self.tape.lock().expect("tape").expected.clone();
+        let at = self.tape.lock().expect("tape").made.len();
         if answered.get(at) == Some(&format!("{asked}=F")) {
             self.call(format!("{asked}=F"));
             return None;
@@ -318,24 +327,24 @@ fn extent(cells: Int) -> Region3D {
     }
 }
 
-fn text(key: &str) -> String {
-    get_str(VECTORS, key).expect("text").replace("\\n", "\n")
+fn text(vectors: &str, key: &str) -> String {
+    get_str(vectors, key).expect("text").replace("\\n", "\n")
 }
 
-fn world(tape: &SharedTape, cells: Int, cliff: &str) -> SimContext {
+fn world(vectors: &str, tape: &SharedTape, cells: Int, cliff: &str) -> SimContext {
     let mut sim = SimContext::new();
-    for block in text("locomotors").split_inclusive("End\n") {
+    for block in text(vectors, "locomotors").split_inclusive("End\n") {
         let mut t = LocomotorTemplate::new();
         t.parse_ini_block(block).expect("locomotor");
         t.name = block.split_whitespace().nth(1).expect("name").to_owned();
         sim.rules.locomotor_store.add_template(t);
     }
-    for block in text("weapons").split_inclusive("End\n") {
+    for block in text(vectors, "weapons").split_inclusive("End\n") {
         let mut weapon = WeaponTemplate::new();
         weapon.parse_ini_block(block).expect("weapon");
         sim.rules.weapon_store.add_template(weapon);
     }
-    let ini = text("objects");
+    let ini = text(vectors, "objects");
     let mut reader = IniReader::new("object.ini", ini.as_bytes(), IniLoadType::Overwrite);
     sim.rules
         .load_thing_templates_from_ini(&mut reader)
@@ -347,7 +356,10 @@ fn world(tape: &SharedTape, cells: Int, cliff: &str) -> SimContext {
     sim.rules.global_data.unit_really_damaged_thresh = 0.35;
     sim.rules.ai_data.force_idle_frames_count = 45;
     sim.rules.ai_data.repulsed_distance = 50.0;
-    sim.ai_seams = shared(Seams(tape.clone()));
+    sim.ai_seams = shared(Seams {
+        tape: tape.clone(),
+        real_idle_targets: vectors.len() == TURRET_VECTORS.len(),
+    });
     sim.terrain = Box::new(Terrain {
         cells,
         cliff: cliff.as_bytes().to_vec(),
@@ -524,7 +536,55 @@ fn observe(sim: &mut SimContext, id: ObjectId) -> (String, String) {
         ai.pathfind_cur_cell.y,
         fnv(&save)
     );
-    (seen, save)
+    let turrets = turrets_text(ai);
+    if turrets.is_empty() {
+        return (seen, save);
+    }
+    (format!("{seen}|{turrets}"), save)
+}
+
+/// Each turret's angle, pitch and machine.
+fn turrets_text(ai: &AiUpdate) -> String {
+    let mut text = String::new();
+    for (index, turret) in ai.turrets.iter().enumerate() {
+        let Some(turret) = turret else { continue };
+        let _ = write!(
+            text,
+            "/{index},{},{},{},{},{},{}",
+            bits(turret.angle),
+            bits(turret.pitch),
+            turret.sm.get_current_state_id(),
+            turret.sm.get_goal_object_id().0,
+            c3(turret.sm.get_goal_position()),
+            turret.sm.peek_sleep_till()
+        );
+    }
+    text
+}
+
+/// The twelve words of each turreted unit's projectile launch transforms.
+fn launch_text(sim: &mut SimContext, ids: &[ObjectId]) -> String {
+    let mut rows = Vec::new();
+    for (unit, &id) in ids.iter().enumerate() {
+        let Some(slot) = sim.find_object(id) else {
+            continue;
+        };
+        let Some(ms) = sim.object(slot).and_then(|o| o.ai_slot) else {
+            continue;
+        };
+        if state(sim, ms).turrets[0].is_none() {
+            continue;
+        }
+        for (index, weapon_slot) in [WeaponSlotType::Primary, WeaponSlotType::Secondary]
+            .into_iter()
+            .enumerate()
+        {
+            let matrix = launch_transform(sim, slot, weapon_slot);
+            let words: String = matrix.rows.iter().flatten().map(|&v| bits(v)).collect();
+            rows.push(format!("{unit},{index},{words}"));
+        }
+    }
+    rows.join(";")
 }
 
 const FIELDS: [&str; 15] = [
@@ -550,10 +610,9 @@ fn check(context: &str, unit: usize, want: &str, got: &str, save: &str) {
         return;
     }
     for (i, (w, g)) in want.split('|').zip(got.split('|')).enumerate() {
-        let name = if want.split('|').count() == FIELDS.len() {
-            FIELDS[i]
-        } else {
-            "?"
+        let name = match want.split('|').count() {
+            count if count >= FIELDS.len() => FIELDS.get(i).copied().unwrap_or("turrets"),
+            _ => "?",
         };
         assert_eq!(g, w, "{context}: unit {unit}, {name}; AI save {save}");
     }
@@ -608,6 +667,10 @@ fn order(
     ai_update::execute(sim, ctx, &AiCall::Command(parms));
 }
 
+fn turret_of(f: &[&str]) -> WhichTurretType {
+    WhichTurretType::from_i32(number(f[2]) as Int)
+}
+
 fn apply(sim: &mut SimContext, ids: &[ObjectId], op: &str, context_text: &str) {
     use AiCommandType as C;
     let f: Vec<&str> = op.split(' ').collect();
@@ -629,6 +692,8 @@ fn apply(sim: &mut SimContext, ids: &[ObjectId], op: &str, context_text: &str) {
         return;
     }
     match f[0] {
+        "recenter" => sim.ai_recenter_turret(slot, turret_of(&f)),
+        "turret" => sim.ai_set_turret_enabled(slot, turret_of(&f), Bool::from(f[3] == "1")),
         "pos" => {
             sim.set_object_position(slot, &coord(&f[2].split(',').collect::<Vec<_>>()));
             sim.set_object_orientation(slot, real(f[3]));
@@ -700,10 +765,11 @@ fn check_tape(tape: &SharedTape, context_text: &str) {
     assert_eq!(t.made, t.expected, "{context_text}: calls");
 }
 
-fn run(scene: &str, frames: &[&str], names: &[&str], cells: Int) {
+fn run(vectors: &str, scene: &str, frames: &[&str], names: &[&str], cells: Int) {
     let index = get_u32(scene, "s").expect("scene");
     let tape: SharedTape = Arc::default();
-    let mut sim = world(&tape, cells, get_str(scene, "cliff").expect("cliff"));
+    let cliff = get_str(scene, "cliff").expect("cliff");
+    let mut sim = world(vectors, &tape, cells, cliff);
     sim.world.frame = get_u32(scene, "frame").expect("frame");
     sim.world
         .rng
@@ -729,7 +795,7 @@ fn run(scene: &str, frames: &[&str], names: &[&str], cells: Int) {
         let slot = sim.spawn_object(template, team, Coord3D::default(), 0.0);
         sim.set_object_orientation(slot, real(f[5]));
         sim.set_object_position(slot, &coord(&f[2..5]));
-        if kind == BUNKER || kind == TURRETLESS {
+        if kind == BUNKER || kind == TURRETLESS || names[kind] == "T_Base" {
             sim.add_object_to_pathfind_map(slot);
         }
         if kind == HOVER {
@@ -768,17 +834,33 @@ fn run(scene: &str, frames: &[&str], names: &[&str], cells: Int) {
             let (got, save) = observe(&mut sim, ids[i]);
             check(&context_text, i, &seen[i], &got, &save);
         }
+        if let Some(want) = get_str(row, "launch") {
+            assert_eq!(
+                launch_text(&mut sim, &ids),
+                want,
+                "{context_text}: launch transforms"
+            );
+        }
     }
 }
 
 #[test]
 fn attack_states_match_the_reference() {
-    let cells = get_u32(VECTORS, "cells").expect("cells") as Int;
-    let count = get_u32(VECTORS, "vector_count").expect("count");
-    let frames = get_u32(VECTORS, "frames").expect("frames");
-    let names_text = get_str(VECTORS, "names").expect("names");
+    check_trace(VECTORS);
+}
+
+#[test]
+fn turrets_match_the_reference() {
+    check_trace(TURRET_VECTORS);
+}
+
+fn check_trace(vectors: &str) {
+    let cells = get_u32(vectors, "cells").expect("cells") as Int;
+    let count = get_u32(vectors, "vector_count").expect("count");
+    let frames = get_u32(vectors, "frames").expect("frames");
+    let names_text = get_str(vectors, "names").expect("names");
     let names: Vec<&str> = names_text.split(',').collect();
-    let mut lines = VECTORS.lines().skip(1).filter(|l| l.starts_with('{'));
+    let mut lines = vectors.lines().skip(1).filter(|l| l.starts_with('{'));
     let mut scenes = 0;
     while let Some(scene) = lines.next() {
         let scene = scene.trim_end_matches(',');
@@ -788,7 +870,7 @@ fn attack_states_match_the_reference() {
             .map(|l| l.trim_end_matches(','))
             .collect();
         assert_eq!(rows.len(), frames as usize);
-        run(scene, &rows, &names, cells);
+        run(vectors, scene, &rows, &names, cells);
         scenes += 1;
     }
     assert_eq!(scenes, count);

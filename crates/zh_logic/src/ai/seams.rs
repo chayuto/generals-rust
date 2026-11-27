@@ -16,7 +16,7 @@ use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use zh_common::core::state_machine::{StateExitType, StateId, StateReturnType};
 use zh_common::math::{Coord3D, ICoord2D, Region3D};
-use zh_common::types::{Bool, Int, ObjectId, Real, UnsignedInt, UpdateSleepTime, FALSE};
+use zh_common::types::{Bool, Int, ObjectId, Real, UnsignedInt, FALSE};
 use zh_common::xfer::{Xfer, XferError};
 
 /// `TheAI->pathfinder()` as far as the frame step and the AI orders use it. The
@@ -251,19 +251,6 @@ pub trait AiSeams: Send {
         Err(XferError::InvalidData)
     }
 
-    /// `TurretAI::updateTurretAI` (S14).
-    fn turret_update(&mut self, _owner: ObjectId, _turret: usize) -> UpdateSleepTime {
-        UpdateSleepTime::FOREVER
-    }
-    /// `TurretAI::xfer` (S14).
-    fn turret_xfer(
-        &mut self,
-        _owner: ObjectId,
-        _turret: usize,
-        _xfer: &mut dyn Xfer,
-    ) -> Result<(), XferError> {
-        Err(XferError::InvalidData)
-    }
 
     /// Replaces `AIUpdateInterface::getNextMoodTarget`
     /// (`ai_update::next_mood_target`) with a recorded answer; `None` leaves the
@@ -384,34 +371,6 @@ pub trait AiSeams: Send {
     /// with an AI; only an assault transport acts on it.
     fn begin_assault(&mut self, _owner: ObjectId, _victim: Option<ObjectId>) {}
 
-    // What the attack states ask of the turrets (`TurretAI`, wired by the second
-    // half of S14). They are asked only of a module whose data has a turret.
-    /// `getWhichTurretForCurWeapon`.
-    fn which_turret_for_cur_weapon(&mut self, _owner: ObjectId) -> Option<usize> {
-        None
-    }
-    fn set_turret_target_object(
-        &mut self,
-        _owner: ObjectId,
-        _turret: usize,
-        _victim: Option<ObjectId>,
-        _force: Bool,
-    ) {
-    }
-    fn set_turret_target_position(&mut self, _owner: ObjectId, _turret: usize, _pos: &Coord3D) {}
-    fn turret_turn_rate(&mut self, _owner: ObjectId, _turret: usize) -> Real {
-        0.0
-    }
-    /// `isWeaponSlotOnTurretAndAimingAtTarget`; asked of every unit choosing a
-    /// weapon.
-    fn weapon_slot_on_turret_aiming_at(
-        &mut self,
-        _owner: ObjectId,
-        _slot: usize,
-        _victim: ObjectId,
-    ) -> Bool {
-        FALSE
-    }
 
     // Garrisons (S11) and teams.
     /// `ContainModuleInterface::calcBestGarrisonPosition`.
@@ -498,8 +457,6 @@ forward! {
     state_update(owner: ObjectId, state: StateId) -> StateReturnType;
     state_exit(owner: ObjectId, state: StateId, status: StateExitType);
     state_xfer(owner: ObjectId, state: StateId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
-    turret_update(owner: ObjectId, turret: usize) -> UpdateSleepTime;
-    turret_xfer(owner: ObjectId, turret: usize, xfer: &mut dyn Xfer) -> Result<(), XferError>;
     next_mood_target(owner: ObjectId, called_by_ai: Bool, during_idle: Bool) -> Option<Option<ObjectId>>;
     closest_repulsor(owner: ObjectId, range: Real) -> Option<ObjectId>;
     can_act_on(query: AiActionQuery, owner: ObjectId, target: ObjectId, source: CommandSourceType) -> Bool;
@@ -515,11 +472,6 @@ forward! {
     is_aircraft_that_adjusts_destination(owner: ObjectId) -> Bool;
     adjust_target_destination(owner: ObjectId, target: Option<ObjectId>, target_pos: &Coord3D, weapon: &str, approach: Coord3D) -> Coord3D;
     begin_assault(owner: ObjectId, victim: Option<ObjectId>);
-    which_turret_for_cur_weapon(owner: ObjectId) -> Option<usize>;
-    set_turret_target_object(owner: ObjectId, turret: usize, victim: Option<ObjectId>, force: Bool);
-    set_turret_target_position(owner: ObjectId, turret: usize, pos: &Coord3D);
-    turret_turn_rate(owner: ObjectId, turret: usize) -> Real;
-    weapon_slot_on_turret_aiming_at(owner: ObjectId, slot: usize, victim: ObjectId) -> Bool;
     garrison_fire_position(container: ObjectId, target_pos: &Coord3D) -> Option<Coord3D>;
     attempt_best_fire_point(owner: ObjectId, victim: Option<ObjectId>, target_pos: &Coord3D) -> Bool;
     offer_team_target(owner: ObjectId, victim: ObjectId);

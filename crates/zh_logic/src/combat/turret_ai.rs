@@ -14,7 +14,6 @@ use zh_common::ini::{
     FieldParseEntry, FieldUserData, IniError, IniLoadType, IniReader, LOGICFRAMES_PER_SECOND,
 };
 use zh_common::math::{gm_asinf, gm_fabsf, Coord3D, PI};
-use zh_common::random_value::PrngState;
 use zh_common::types::{
     Bool, Int, ObjectId, Real, TeamId, UnsignedInt, UpdateSleepTime, XferVersion, FALSE, TRUE,
 };
@@ -162,7 +161,10 @@ impl Default for FireStateStep {
 /// Phase 3 Gate V2 differential harnesses and Phase 5–6 `SimContext`/`AIUpdateInterface`.
 pub trait TurretWorldAccess {
     fn current_frame(&self) -> UnsignedInt;
-    fn rng_mut(&mut self) -> &mut PrngState;
+    /// `GameLogicRandomValue`.
+    fn random_int(&mut self, lo: Int, hi: Int) -> Int;
+    /// `GameLogicRandomValueReal`.
+    fn random_real(&mut self, lo: Real, hi: Real) -> Real;
     fn object_exists(&self, id: ObjectId) -> bool;
     fn is_object_effectively_dead(&self, id: ObjectId) -> bool;
     fn get_object_team(&self, id: ObjectId) -> Option<TeamId>;
@@ -192,10 +194,10 @@ pub trait TurretWorldAccess {
         pos: &Coord3D,
     ) -> Bool;
     fn are_turrets_linked(&self, owner: ObjectId) -> Bool;
-    fn get_owner_ai_goal_object(&self, owner: ObjectId) -> ObjectId;
-    fn is_owner_able_to_attack(&self, owner: ObjectId) -> Bool;
+    fn get_owner_ai_goal_object(&mut self, owner: ObjectId) -> ObjectId;
+    fn is_owner_able_to_attack(&mut self, owner: ObjectId) -> Bool;
     fn can_owner_attack_specific_object(
-        &self,
+        &mut self,
         owner: ObjectId,
         target: ObjectId,
         force_attacking: Bool,
@@ -206,14 +208,14 @@ pub trait TurretWorldAccess {
     fn get_relative_angle_2d(&self, owner: ObjectId, pos: &Coord3D) -> Real;
     fn get_vector_to_center_3d(&self, owner: ObjectId, pos: &Coord3D) -> Coord3D;
     fn get_owner_max_height_above_position(&self, owner: ObjectId) -> Real;
-    fn get_next_idle_mood_target_frame(&self, owner: ObjectId) -> UnsignedInt;
+    fn get_next_idle_mood_target_frame(&mut self, owner: ObjectId) -> UnsignedInt;
     fn reset_next_mood_check_time(&mut self, owner: ObjectId);
-    fn get_turret_sync(&self, owner: ObjectId) -> WhichTurretType;
+    fn get_turret_sync(&mut self, owner: ObjectId) -> WhichTurretType;
     fn set_turret_sync(&mut self, owner: ObjectId, tur: WhichTurretType);
-    fn is_idle_mood_ignored(&self, owner: ObjectId) -> Bool;
+    fn is_idle_mood_ignored(&mut self, owner: ObjectId) -> Bool;
     fn acquire_idle_mood_target(&mut self, owner: ObjectId) -> ObjectId;
     fn choose_best_weapon_for_target(&mut self, owner: ObjectId, target: ObjectId);
-    fn out_of_weapon_range_object(&self, owner: ObjectId, victim: ObjectId) -> Bool;
+    fn out_of_weapon_range_object(&mut self, owner: ObjectId, victim: ObjectId) -> Bool;
     fn on_enter_fire_state(&mut self, owner: ObjectId, victim: ObjectId) -> StateReturnType;
     fn on_update_fire_state(
         &mut self,
@@ -225,6 +227,11 @@ pub trait TurretWorldAccess {
         is_slot_ok_to_fire: Bool,
     ) -> FireStateStep;
     fn on_exit_fire_state(&mut self, owner: ObjectId);
+    /// Called before a question or action that can come back to this turret,
+    /// and [`Self::reclaim_turret`] after it: a world whose owner holds the
+    /// turret swaps the running one in and out.
+    fn lend_turret(&mut self, _turret: &mut TurretAI) {}
+    fn reclaim_turret(&mut self, _turret: &mut TurretAI) {}
 
     fn on_start_rot_or_pitch_sound(&mut self, _owner: ObjectId, _turret: WhichTurretType) {}
     fn on_stop_rot_or_pitch_sound(&mut self, _owner: ObjectId, _turret: WhichTurretType) {}
@@ -761,15 +768,19 @@ impl TurretStateMachine {
     }
 }
 
-impl Snapshot for TurretStateMachine {
-    fn crc(&self, _xfer: &mut dyn Xfer) {}
+/// The machine version this build saves.
+const MACHINE_VERSION: XferVersion = if cfg!(feature = "retail-xfer-save") {
+    1
+} else {
+    2
+};
 
-    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
-        #[cfg(feature = "retail-xfer-save")]
-        let current_version: XferVersion = 1;
-        #[cfg(not(feature = "retail-xfer-save"))]
-        let current_version: XferVersion = 2;
-
+impl TurretStateMachine {
+    fn xfer_as_version(
+        &mut self,
+        xfer: &mut dyn Xfer,
+        current_version: XferVersion,
+    ) -> Result<(), XferError> {
         let mut version = current_version;
         xfer.xfer_version(&mut version, current_version)?;
 
@@ -777,6 +788,14 @@ impl Snapshot for TurretStateMachine {
             self.xfer_base_state_machine(xfer)?;
         }
         Ok(())
+    }
+}
+
+impl Snapshot for TurretStateMachine {
+    fn crc(&self, _xfer: &mut dyn Xfer) {}
+
+    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        self.xfer_as_version(xfer, MACHINE_VERSION)
     }
 
     fn load_post_process(&mut self) {}
@@ -1041,6 +1060,15 @@ impl TurretAI {
         }
     }
 
+    /// What `friend_getTurretTarget` does on finding its object target dead.
+    pub fn drop_dead_target(&mut self) {
+        if self.sm.locked == FALSE {
+            self.sm.goal_object_id = ObjectId::INVALID;
+        }
+        self.target = TurretTargetType::None;
+        self.target_was_set_by_idle_mood = FALSE;
+    }
+
     pub fn friend_get_turret_target(
         &mut self,
         clear_dead_targets: bool,
@@ -1303,7 +1331,10 @@ impl TurretAI {
     }
 
     #[inline]
-    pub fn friend_get_next_idle_mood_target_frame(&self, world: &dyn TurretWorldAccess) -> UnsignedInt {
+    pub fn friend_get_next_idle_mood_target_frame(
+        &self,
+        world: &mut dyn TurretWorldAccess,
+    ) -> UnsignedInt {
         world.get_next_idle_mood_target_frame(self.owner_id)
     }
 
@@ -1311,10 +1342,14 @@ impl TurretAI {
         if world.is_idle_mood_ignored(self.owner_id) == TRUE {
             return;
         }
+        world.lend_turret(self);
         let enemy = world.acquire_idle_mood_target(self.owner_id);
+        world.reclaim_turret(self);
         if enemy != ObjectId::INVALID {
             self.set_turret_target_object(enemy, FALSE, world);
+            world.lend_turret(self);
             world.choose_best_weapon_for_target(self.owner_id, enemy);
+            world.reclaim_turret(self);
             self.target_was_set_by_idle_mood = TRUE;
         }
     }
@@ -1661,7 +1696,7 @@ impl TurretAI {
                     world.set_turret_sync(self.owner_id, WhichTurretType::Invalid);
                 }
                 let now = world.current_frame();
-                let delay = world.rng_mut().get_game_logic_random_value(
+                let delay = world.random_int(
                     self.data.min_idle_scan_interval as Int,
                     self.data.max_idle_scan_interval as Int,
                 ) as UnsignedInt;
@@ -1679,10 +1714,8 @@ impl TurretAI {
                     return StateReturnType::Success;
                 }
                 self.sm.states.desired_angle = min_a
-                    + world
-                        .rng_mut()
-                        .get_game_logic_random_value_real(0.0_f32, max_a - min_a);
-                if world.rng_mut().get_game_logic_random_value(0, 1) == 0 {
+                    + world.random_real(0.0_f32, max_a - min_a);
+                if world.random_int(0, 1) == 0 {
                     self.sm.states.desired_angle = -self.sm.states.desired_angle;
                 }
                 StateReturnType::Continue
@@ -1693,7 +1726,13 @@ impl TurretAI {
                 }
                 StateReturnType::Continue
             }
-            TurretStateType::Fire => world.on_enter_fire_state(self.owner_id, self.sm.goal_object_id),
+            TurretStateType::Fire => {
+                let victim = self.sm.goal_object_id;
+                world.lend_turret(self);
+                let status = world.on_enter_fire_state(self.owner_id, victim);
+                world.reclaim_turret(self);
+                status
+            }
             TurretStateType::Recenter => StateReturnType::Continue,
             TurretStateType::Hold => {
                 let now = world.current_frame();
@@ -1749,14 +1788,21 @@ impl TurretAI {
                     Some(slot) => self.is_weapon_slot_ok_to_fire(slot, world),
                     None => FALSE,
                 };
+                let (object, victim, position) = (
+                    self.is_attacking_object(),
+                    self.sm.goal_object_id,
+                    self.sm.goal_position,
+                );
+                world.lend_turret(self);
                 let step = world.on_update_fire_state(
                     self.owner_id,
                     self.which_turret,
-                    self.is_attacking_object(),
-                    self.sm.goal_object_id,
-                    &self.sm.goal_position,
+                    object,
+                    victim,
+                    &position,
                     is_ok,
                 );
+                world.reclaim_turret(self);
                 if let Some(new_victim) = step.transfer_victim {
                     self.sm.set_goal_object(new_victim, world);
                     if step.did_fire == FALSE && new_victim != ObjectId::INVALID {
@@ -1808,7 +1854,9 @@ impl TurretAI {
         world: &mut dyn TurretWorldAccess,
     ) {
         if state == TurretStateType::Fire {
+            world.lend_turret(self);
             world.on_exit_fire_state(self.owner_id);
+            world.reclaim_turret(self);
         }
     }
 
@@ -1824,6 +1872,7 @@ impl TurretAI {
             TurretTargetType::Object => {
                 let is_primary_enemy = enemy_obj != ObjectId::INVALID
                     && enemy_obj == world.get_owner_ai_goal_object(self.owner_id);
+                world.lend_turret(self);
                 let mut able_to_attack_target = world.is_owner_able_to_attack(self.owner_id) == TRUE;
                 if able_to_attack_target {
                     let result = world.can_owner_attack_specific_object(
@@ -1836,6 +1885,7 @@ impl TurretAI {
                         CanAttackResult::Possible | CanAttackResult::PossibleAfterMoving
                     );
                 }
+                world.reclaim_turret(self);
 
                 nothing_in_range =
                     self.friend_is_any_weapon_in_range_of(enemy_obj, world) == FALSE;
@@ -1935,6 +1985,9 @@ impl TurretAI {
             pitch_aligned_to_nemesis = self.friend_turn_towards_pitch(desired_pitch, 1.0_f32);
         }
 
+        if turn_aligned_to_nemesis != TRUE || pitch_aligned_to_nemesis != TRUE {
+            return StateReturnType::Continue;
+        }
         let in_range = if enemy_for_distance_check_only != ObjectId::INVALID {
             world.is_weapon_in_range_of_object(self.owner_id, slot, enemy_for_distance_check_only)
                 == TRUE
@@ -1942,7 +1995,7 @@ impl TurretAI {
             world.is_weapon_in_range_of_pos(self.owner_id, slot, &enemy_position) == TRUE
         };
 
-        if turn_aligned_to_nemesis == TRUE && pitch_aligned_to_nemesis == TRUE && in_range {
+        if in_range {
             if INTER_TURRET_DELAY_ENABLED {
                 if self.sm.states.aim_extra_delay > 0 {
                     self.sm.states.aim_extra_delay -= 1;
@@ -1967,15 +2020,19 @@ impl TurretAI {
     }
 }
 
-impl Snapshot for TurretAI {
-    fn crc(&self, _xfer: &mut dyn Xfer) {}
-
-    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+impl TurretAI {
+    /// `xfer` with the state machine saved as version 1 (the reference build's,
+    /// which keeps nothing of it) or 2.
+    pub fn xfer_with_machine_version(
+        &mut self,
+        xfer: &mut dyn Xfer,
+        machine_version: XferVersion,
+    ) -> Result<(), XferError> {
         let current_version: XferVersion = 2;
         let mut version = current_version;
         xfer.xfer_version(&mut version, current_version)?;
 
-        xfer.xfer_snapshot(&mut self.sm)?;
+        self.sm.xfer_as_version(xfer, machine_version)?;
 
         xfer.xfer_real(&mut self.angle)?;
         xfer.xfer_real(&mut self.pitch)?;
@@ -2002,6 +2059,14 @@ impl Snapshot for TurretAI {
         }
 
         Ok(())
+    }
+}
+
+impl Snapshot for TurretAI {
+    fn crc(&self, _xfer: &mut dyn Xfer) {}
+
+    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        self.xfer_with_machine_version(xfer, MACHINE_VERSION)
     }
 
     fn load_post_process(&mut self) {}

@@ -15,11 +15,12 @@
 //! `ai_update/path_follow.rs`, asking allies aside in `allies.rs`, blocking and
 //! collisions in `collision.rs` (S9; golden test `tests/golden_s9_path_follow.rs`).
 //!
-//! Not here: turrets (S14); mood targets (S12); the derived AI classes (S15, S17,
+//! Turrets: [`turrets`]. Not here: mood targets (S12); the derived AI classes (S15, S17,
 //! S18; the dozer and worker are in `dozer_ai_update.rs` and
 //! `worker_ai_update.rs`, see [`DerivedAi`]); groups and command buttons.
 
 use crate::object::weapon_queries;
+use crate::object::weapon_set::WeaponSlotType;
 use crate::ai::ai_state_machine::{self as machine, state_id, AiStateMachine};
 use crate::ai::ai_states;
 use crate::ai::seams::{ai_seams, AiActionQuery};
@@ -29,7 +30,7 @@ use crate::combat::locomotor::{Locomotor, LocomotorWorld};
 use crate::combat::locomotor_set::{LocomotorSet, LocomotorSetType};
 use crate::ai::ai::{MM_CONTROLLER_AI, MM_MOOD_SLEEP};
 use crate::ai::mood;
-use crate::combat::turret_ai::{TurretAIData, TURRET_AI_DATA_FIELD_PARSE};
+use crate::combat::turret_ai::{TurretAIData, WhichTurretType, TURRET_AI_DATA_FIELD_PARSE};
 use crate::modules::update::dozer_ai_update::{self, DozerAi};
 use crate::modules::update::worker_ai_update::{self, WorkerAi};
 use crate::modules::behavior::behavior_module::UpdateScheduleTracker;
@@ -60,6 +61,7 @@ mod attack_path;
 mod collision;
 mod mood_target;
 mod path_follow;
+pub mod turrets;
 
 use allies::{move_allies, move_allies_away_from_destination, private_move_away_from_unit};
 pub use collision::process_collision;
@@ -297,6 +299,10 @@ impl AiCommandParms {
 pub enum AiCall {
     /// `aiDoCommand`.
     Command(AiCommandParms),
+    /// `setTurretEnabled`.
+    SetTurretEnabled(WhichTurretType, Bool),
+    /// `recenterTurret`.
+    RecenterTurret(WhichTurretType),
     /// `onObjectCreated`.
     ObjectCreated,
     /// `loadPostProcess`.
@@ -391,6 +397,8 @@ pub struct AiUpdate {
     pub cur_locomotor_set: LocomotorSetType,
     pub locomotor_goal_type: LocoGoalType,
     pub locomotor_goal_data: Coord3D,
+    /// `m_turretAI`.
+    pub turrets: turrets::Turrets,
     pub turret_sync_flag: Int,
     pub attitude: AttitudeType,
     pub next_mood_check_time: UnsignedInt,
@@ -482,6 +490,7 @@ impl AiUpdate {
             cur_locomotor_set: LocomotorSetType::Invalid,
             locomotor_goal_type: LocoGoalType::None,
             locomotor_goal_data: zero,
+            turrets: [None, None],
             turret_sync_flag: -1,
             attitude: AttitudeType::Normal,
             next_mood_check_time: 0,
@@ -805,9 +814,11 @@ impl AiUpdate {
         let mut goal_type = self.locomotor_goal_type as Int;
         xfer.xfer_int(&mut goal_type)?;
         xfer.xfer_coord3d(&mut self.locomotor_goal_data)?;
-        for turret in 0..MAX_TURRETS {
-            if self.data.turrets[turret].is_some() && !crc {
-                seams.turret_xfer(owner, turret, xfer)?;
+        if !crc {
+            // The turret machine's version follows the same switch as the base's.
+            let machine: XferVersion = if version < 5 { 1 } else { 2 };
+            for turret in self.turrets.iter_mut().flatten() {
+                turret.xfer_with_machine_version(xfer, machine)?;
             }
         }
         xfer.xfer_int(&mut self.turret_sync_flag)?;
@@ -1322,10 +1333,9 @@ pub fn update(sim: &mut dyn SimApi, ctx: ModuleContext) -> UpdateSleepTime {
     });
     if turrets_run {
         for turret in 0..MAX_TURRETS {
-            if ai(sim, ctx).data.turrets[turret].is_some() {
-                let wanted = ai_seams(sim).turret_update(ctx.owner_id, turret);
-                if wanted.0 < sleep.0 {
-                    sleep = wanted;
+            if let Some(wanted) = turrets::update(sim, ctx, turret) {
+                if wanted < sleep.0 {
+                    sleep = UpdateSleepTime(wanted);
                 }
             }
         }
@@ -2194,6 +2204,16 @@ pub fn execute(sim: &mut dyn SimApi, ctx: ModuleContext, call: &AiCall) {
         AiCall::SetLocomotorUpgrade(upgraded) => set_locomotor_upgrade(sim, ctx, *upgraded),
         AiCall::SetLocomotorGoalNone => set_locomotor_goal_none(sim, ctx),
         AiCall::SetGoalObject(id) => friend_set_goal_object(sim, ctx, *id),
+        AiCall::SetTurretEnabled(turret, enabled) => {
+            if let Ok(turret) = usize::try_from(turret.as_i32()) {
+                turrets::set_enabled(sim, ctx, turret, *enabled);
+            }
+        }
+        AiCall::RecenterTurret(turret) => {
+            if let Ok(turret) = usize::try_from(turret.as_i32()) {
+                turrets::recenter(sim, ctx, turret);
+            }
+        }
         AiCall::WakeUpAndAttemptToTarget => {
             if ai(sim, ctx).is_idle() != FALSE {
                 let now = sim.frame();
@@ -2261,9 +2281,10 @@ impl BehaviorModule for AiUpdate {
         Some(process_collision)
     }
 
-    /// The constructor: the normal locomotor set, then the next frame.
+    /// The constructor: the turrets, the normal locomotor set, then the next frame.
     fn on_construct(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         self.schedule.bind(ctx);
+        turrets::construct(self, sim, ctx);
         choose_locomotor_set_on(self, sim, ctx, LocomotorSetType::Normal);
         sim.set_wake_frame(ctx.mod_slot, UpdateSleepTime::NONE);
         self.construct_derived(sim, ctx);
@@ -2308,6 +2329,27 @@ impl BehaviorModule for AiUpdate {
 /// The queries, and the setters that only touch the module. What acts goes
 /// through [`execute`].
 impl AiUpdateFacet for AiUpdate {
+    fn which_turret_for_cur_weapon(&self, sim: &dyn SimView, ctx: ModuleContext) -> WhichTurretType {
+        turrets::which_for_cur_weapon(sim, self, ctx.owner_slot)
+            .map_or(WhichTurretType::Invalid, |t| WhichTurretType::from_i32(t as Int))
+    }
+
+    fn is_weapon_slot_enabled(&self, slot: WeaponSlotType) -> Bool {
+        turrets::which_for_weapon_slot(self, slot)
+            .and_then(|t| self.turrets[t].as_deref())
+            .map_or(TRUE, |t| t.is_turret_enabled())
+    }
+
+    fn is_turret_in_natural_position(&self, turret: WhichTurretType) -> Bool {
+        self.turret_natural_position(turret, false)
+    }
+
+    fn turret_natural_position(&self, turret: WhichTurretType, under_construction: bool) -> Bool {
+        usize::try_from(turret.as_i32()).map_or(FALSE, |t| {
+            turrets::is_in_natural_position(self, t, under_construction)
+        })
+    }
+
     fn is_moving(&self) -> Bool {
         AiUpdate::is_moving(self)
     }

@@ -1943,6 +1943,10 @@ pub trait AiUpdateFacet {
     fn is_turret_in_natural_position(&self, _turret: WhichTurretType) -> Bool {
         FALSE
     }
+    /// The same for an owner under construction or not, which counts as natural.
+    fn turret_natural_position(&self, turret: WhichTurretType, _under_construction: bool) -> Bool {
+        self.is_turret_in_natural_position(turret)
+    }
     /// `AIUpdateInterface::isClearingMines`: attacking with an anti-mine weapon.
     fn is_clearing_mines(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool {
         let Some(obj) = sim.object(ctx.owner_slot) else {

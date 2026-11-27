@@ -384,31 +384,6 @@ struct Rows {
     built: Vec<String>,
 }
 
-/// The draws the port does not make yet: a new turret's idle state picks its first
-/// scan time in the constructor (`TurretAIIdleState::resetIdleScan`, turrets are
-/// `AI_PORT_PLAN.md` S14). Only `built` raises turrets; the real map start does not.
-fn draw_for_new_turrets(game: &mut GameStart, first_new: i32) {
-    let world = &mut game.sim.world;
-    let intervals: Vec<(i32, i32)> = world
-        .objects
-        .world_iter()
-        .filter_map(|slot| world.objects.get(slot))
-        .filter(|o| o.id.0 >= first_new)
-        .filter_map(|o| world.modules.payload(o.ai_slot?)?.as_any())
-        .filter_map(|a| a.downcast_ref::<AiUpdate>())
-        .flat_map(|ai| ai.data.turrets.iter().flatten())
-        .map(|t| {
-            (
-                t.min_idle_scan_interval as i32,
-                t.max_idle_scan_interval as i32,
-            )
-        })
-        .collect();
-    for (min, max) in intervals {
-        world.rng.get_game_logic_random_value(min, max);
-    }
-}
-
 /// The first structure by name of `side` which docks supply trucks.
 fn supply_center_of(game: &GameStart, side: &str) -> Option<String> {
     let factory = &game.sim.rules.thing_factory;
@@ -474,7 +449,6 @@ fn build_whole_base(game: &mut GameStart) {
         let player = game.players.player_mut(player).expect("player");
         player.build_list.push(info);
     }
-    let first_new = game.sim.world.next_object_id;
     let mut unported = BTreeMap::new();
     new_map(
         &mut BuildContext {
@@ -488,7 +462,6 @@ fn build_whole_base(game: &mut GameStart) {
         player,
     );
     assert!(unported.is_empty(), "{unported:?}");
-    draw_for_new_turrets(game, first_new);
 }
 
 fn start(name: &str, options: Option<&str>) -> Option<Rows> {

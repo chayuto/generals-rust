@@ -4,9 +4,9 @@
 //! `tests/golden_s14_attack_states.rs`.
 //!
 //! `AIAttackState` sits in the AI's own machine and in the attack-move sub
-//! machine ([`Host`]). Turret questions go to [`crate::ai::seams::AiSeams`] and
-//! are asked only of a module whose data has a turret. Squad, hunt and attack
-//! area are not ported.
+//! machine ([`Host`]). The turrets are `ai_update::turrets`, which also runs
+//! the fire state inside a turret's machine. Squad, hunt and attack area are not
+//! ported.
 //!
 //! The reference deletes the attack machine from the attack state's `onExit`,
 //! even while one of its states is running (an order given by what a shot set
@@ -19,7 +19,7 @@ use crate::ai::seams::ai_seams;
 use crate::arena::{ModuleContext, ObjectSlot};
 use crate::modules::module::CommandSourceType;
 use crate::modules::update::ai_update::{
-    self, ai, MoodMatrixAction, FAST_AS_POSSIBLE, MAX_TURRETS,
+    self, ai, turrets, MoodMatrixAction, FAST_AS_POSSIBLE, MAX_TURRETS,
 };
 use crate::modules::update::physics_update;
 use crate::object::weapon::{Weapon, NO_MAX_SHOTS_LIMIT};
@@ -462,20 +462,9 @@ fn can_crush_or_squish(sim: &dyn SimApi, owner: ObjectSlot, other: ObjectSlot) -
 // The turrets
 // -----------------------------------------------------------------------------
 
-fn has_turret(sim: &mut dyn SimApi, ctx: ModuleContext, turret: usize) -> bool {
-    ai(sim, ctx)
-        .data
-        .turrets
-        .get(turret)
-        .is_some_and(Option::is_some)
-}
-
 /// `getWhichTurretForCurWeapon`.
 fn cur_turret(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<usize> {
-    if !(0..MAX_TURRETS).any(|t| has_turret(sim, ctx, t)) {
-        return None;
-    }
-    ai_seams(sim).which_turret_for_cur_weapon(ctx.owner_id)
+    turrets::cur_turret(sim, ctx)
 }
 
 fn turret_target_object(
@@ -485,16 +474,19 @@ fn turret_target_object(
     victim: Option<ObjectSlot>,
     force: Bool,
 ) {
-    if has_turret(sim, ctx, turret) {
-        let victim = victim.map(|slot| id_of(sim, slot));
-        ai_seams(sim).set_turret_target_object(ctx.owner_id, turret, victim, force);
-    }
+    let victim = victim.map(|slot| id_of(sim, slot));
+    turrets::set_target_object(sim, ctx, turret, victim, force);
 }
 
 fn turret_target_position(sim: &mut dyn SimApi, ctx: ModuleContext, turret: usize, pos: &Coord3D) {
-    if has_turret(sim, ctx, turret) {
-        ai_seams(sim).set_turret_target_position(ctx.owner_id, turret, pos);
-    }
+    turrets::set_target_position(sim, ctx, turret, Some(pos));
+}
+
+/// `getTurretTurnRate`.
+fn turret_turn_rate(sim: &mut dyn SimApi, ctx: ModuleContext, turret: usize) -> Real {
+    ai(sim, ctx).turrets[turret]
+        .as_ref()
+        .map_or(0.0, |t| t.get_turn_rate())
 }
 
 /// While first closing in, a turret may shoot at whatever the mood suggests.
@@ -583,9 +575,16 @@ fn set_host_goal_object(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host, vi
 
 /// Whether something in the way, or the range, keeps the weapon from the victim.
 fn out_of_weapon_range_object(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> bool {
+    match goal_object(sim, ctx, host) {
+        Some(victim) => out_of_range_of(sim, ctx, victim),
+        None => false,
+    }
+}
+
+/// `outOfWeaponRangeObject` for a machine aiming at `victim`.
+pub(crate) fn out_of_range_of(sim: &mut dyn SimApi, ctx: ModuleContext, victim: ObjectSlot) -> bool {
     let owner = ctx.owner_slot;
-    let (Some(victim), Some(weapon)) = (goal_object(sim, ctx, host), current_weapon(sim, owner))
-    else {
+    let Some(weapon) = current_weapon(sim, owner) else {
         return false;
     };
     let ground = line_of_sight_matters(sim, ctx);
@@ -1324,7 +1323,7 @@ fn aim_update(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateRetu
         } else {
             turret_target_position(sim, ctx, turret, &target);
         }
-        if ai_seams(sim).turret_turn_rate(ctx.owner_id, turret) != 0.0 {
+        if turret_turn_rate(sim, ctx, turret) != 0.0 {
             return StateReturnType::Continue;
         }
     }
@@ -1382,12 +1381,21 @@ fn aim_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) {
 // -----------------------------------------------------------------------------
 
 fn fire_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateReturnType {
+    let victim = goal_object(sim, ctx, host);
+    enter_fire(sim, ctx, victim)
+}
+
+/// `onEnter` of the fire state, whichever machine holds it.
+pub(crate) fn enter_fire(
+    sim: &mut dyn SimApi,
+    ctx: ModuleContext,
+    victim: Option<ObjectSlot>,
+) -> StateReturnType {
     let owner = ctx.owner_slot;
     let adjust = ai_update::mood_matrix_action_adjustment(sim, ctx, MoodMatrixAction::Attack);
     if adjust & MAA_ACTION_OK == 0 {
         return StateReturnType::Failure;
     }
-    let victim = goal_object(sim, ctx, host);
     if let Some(victim) = victim {
         let id = id_of(sim, victim);
         ai_update::offer_team_target(sim, owner, victim);
@@ -1414,38 +1422,71 @@ fn set_firing_condition(sim: &mut dyn SimApi, owner: ObjectSlot) {
 fn fire_update(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateReturnType {
     let owner = ctx.owner_slot;
     let victim = goal_object(sim, ctx, host);
-    let object = machine(sim, ctx, host).attacking_object != FALSE;
-    if object && victim.map_or(true, |v| is_effectively_dead(sim, v)) {
-        return StateReturnType::Failure;
-    }
-    let now = sim.frame();
-    let Some(weapon) = current_weapon_mut(sim, owner) else {
-        return StateReturnType::Failure;
-    };
-    match weapon.get_status(now) {
-        WeaponStatus::PreAttack => return StateReturnType::Continue,
-        WeaponStatus::ReadyToFire => {}
-        _ => return StateReturnType::Failure,
-    }
+    let m = machine(sim, ctx, host);
+    let (object, target) = (m.attacking_object != FALSE, m.goal_position);
     // Every slot is fine for an `AIAttackState`.
-    let continue_range = weapon.template.continue_attack_range;
-
-    set_firing_condition(sim, owner);
-    let target = machine(sim, ctx, host).goal_position;
-    if object {
-        if let Some(victim) = victim {
-            weapon_actions::fire_current_weapon_at_object(sim, owner, victim);
-        }
+    let shot = shoot(sim, ctx, object, victim, &target, true);
+    if shot.fired && object {
         let current = ai(sim, ctx).current_victim_id;
         let current = sim.find_object(current);
         if victim != current {
             set_goal_object(sim, ctx, host, current);
         }
         sim.clear_status(owner, ObjectStatusType::IgnoringStealth);
-        if continue_range > 0.0 {
+        if shot.continue_range > 0.0 {
             if let Some(victim) = victim.filter(|&v| is_finished_off(sim, v)) {
-                take_next_victim(sim, ctx, host, victim, continue_range);
+                take_next_victim(sim, ctx, host, victim, shot.continue_range);
             }
+        }
+    }
+    shot.status
+}
+
+/// What one update of a fire state did.
+pub(crate) struct Shot {
+    pub status: StateReturnType,
+    pub fired: bool,
+    continue_range: Real,
+}
+
+/// The `update` of the fire state up to the shot. After a shot at a position
+/// the unit is also done ignoring stealth; after one at an object the caller
+/// first moves on to the current victim.
+pub(crate) fn shoot(
+    sim: &mut dyn SimApi,
+    ctx: ModuleContext,
+    object: bool,
+    victim: Option<ObjectSlot>,
+    target: &Coord3D,
+    slot_ok: bool,
+) -> Shot {
+    let owner = ctx.owner_slot;
+    let not_fired = |status| Shot {
+        status,
+        fired: false,
+        continue_range: 0.0,
+    };
+    if object && victim.map_or(true, |v| is_effectively_dead(sim, v)) {
+        return not_fired(StateReturnType::Failure);
+    }
+    let now = sim.frame();
+    let Some(weapon) = current_weapon_mut(sim, owner) else {
+        return not_fired(StateReturnType::Failure);
+    };
+    match weapon.get_status(now) {
+        WeaponStatus::PreAttack => return not_fired(StateReturnType::Continue),
+        WeaponStatus::ReadyToFire => {}
+        _ => return not_fired(StateReturnType::Failure),
+    }
+    let continue_range = weapon.template.continue_attack_range;
+    if !slot_ok {
+        return not_fired(StateReturnType::Failure);
+    }
+
+    set_firing_condition(sim, owner);
+    if object {
+        if let Some(victim) = victim {
+            weapon_actions::fire_current_weapon_at_object(sim, owner, victim);
         }
     } else {
         if ai(sim, ctx).data.turrets_linked != FALSE {
@@ -1454,14 +1495,18 @@ fn fire_update(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateRet
                 WeaponSlotType::Secondary,
                 WeaponSlotType::Tertiary,
             ] {
-                weapon_actions::fire_linked_weapon_at_position(sim, owner, slot, &target);
+                weapon_actions::fire_linked_weapon_at_position(sim, owner, slot, target);
             }
         } else {
-            weapon_actions::fire_current_weapon_at_position(sim, owner, &target);
+            weapon_actions::fire_current_weapon_at_position(sim, owner, target);
         }
         sim.clear_status(owner, ObjectStatusType::IgnoringStealth);
     }
-    StateReturnType::Success
+    Shot {
+        status: StateReturnType::Success,
+        fired: true,
+        continue_range,
+    }
 }
 
 /// Whether the victim is done with, so a continuing weapon looks for the next.
@@ -1529,7 +1574,7 @@ pub(crate) fn closest_possible_victim(
     )
 }
 
-fn fire_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext) {
+pub(crate) fn exit_fire(sim: &mut dyn SimApi, ctx: ModuleContext) {
     let owner = ctx.owner_slot;
     sim.clear_status(owner, ObjectStatusType::IsFiringWeapon);
     sim.clear_status(owner, ObjectStatusType::IgnoringStealth);
@@ -1586,7 +1631,7 @@ fn sub_update(
 fn sub_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host, state: StateId) {
     match state {
         AIM_AT_TARGET => aim_on_exit(sim, ctx, host),
-        FIRE_WEAPON => fire_on_exit(sim, ctx),
+        FIRE_WEAPON => exit_fire(sim, ctx),
         APPROACH_TARGET => approach_on_exit(sim, ctx, host, state),
         _ => match machine(sim, ctx, host).chase {
             Chase::Pursue => pursue_on_exit(sim, ctx, host, state),

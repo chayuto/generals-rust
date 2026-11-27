@@ -5,7 +5,7 @@ A plan only; nothing here is ported yet. Reference: `vendor/GeneralsX` at the pi
 ## What the plan rests on
 
 - No Rust module implements `AiUpdateFacet` or `SupplyTruckAiFacet`. The AI is imitated in `sim/mod.rs` (`ai_construct`, `ai_init_state_machine`, `ai_idle`), and orders are only recorded (`ai_commands`, `exit_path_orders`).
-- Some "implemented" packets are only partly there. `PKT-143 Locomotor` has templates and setters, no movement. `PKT-399 Weapon` had no `fireWeaponTemplate` when this was written; it has since been ported, so the weapons slice below is largely done. `PKT-145 TurretAI` is not connected to the sim.
+- Some "implemented" packets are only partly there. `PKT-143 Locomotor` has templates and setters, no movement. `PKT-399 Weapon` had no `fireWeaponTemplate` when this was written; it has since been ported, so the weapons slice below is largely done.
 - Already usable: pathfind cell, cell info, cell list and zone manager (`PKT-413..418`), partition grid, physics, the sleepy-update heap, `zh_common::core::state_machine`.
 - Ground height is computed in device code that is **not in the manifest**: `W3DTerrainLogic.cpp`, `BaseHeightMap.cpp`, `WorldHeightMap.cpp`. Rust has only `FlatTerrain`, and no map loader.
 - The Rust sim has no frame driver and no game-wide CRC.
@@ -168,7 +168,7 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Risks: aim angle math, hunt, squad, area and turret draws.
 - Seen: **units fight and die**.
 - **First half done.** `ai/ai_states/attack.rs` has the attack state and its pursue, approach, aim and fire states, in the AI's machine and in the attack-move sub machine; `object/weapon_set.rs` has the weapon choice and the able-to-attack questions. `golden_s14_attack_states` traces 80 scenes of duels frame by frame (position, state, weapons, health, AI save bytes, CRC, RNG seed); `attack_sim` has an attack order alone destroy a target. Squad, hunt and attack area are not ported.
-- Left for the second half: turrets (every turret question is an `AiSeams` method that answers nothing, so a turreted unit turns its body to aim) and the weapon half of the AI update. Gaps: `OPEN_DECISIONS.md`.
+- **Second half done.** `modules/update/ai_update/turrets.rs` wires `TurretAI`: construction (with its first-scan draw), update, save, idle scanning and mood targets, the fire state inside the turret machine, and every turret question of the attack states and weapon code. Direct: the turret scenes (`tests/cpp_harness/gen_s14_turrets.cpp`) trace turreted units frame by frame. Gaps: `OPEN_DECISIONS.md`.
 
 ### S15. Supply, dock, transport and hacker AI
 - C++: SupplyTruck (580), `AIDock.cpp` (460), Transport (130), HackInternet (370). About 1,500: one worker, or move HackInternet and Transport out.

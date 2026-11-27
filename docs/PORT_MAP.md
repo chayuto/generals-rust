@@ -4,7 +4,7 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`290` implemented, `37` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `122` JSON suites (`docs/golden_vectors/`)
+- **Golden Vector Oracles:** `123` JSON suites (`docs/golden_vectors/`)
 - **Golden Test Suites:** `118` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
@@ -394,6 +394,7 @@
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/collision.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/mood_target.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/path_follow.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/turrets.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_actions.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_effects.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
@@ -503,6 +504,7 @@
 | `docs/golden_vectors/S12_Targeting.json` | - | no |
 | `docs/golden_vectors/S13_WeaponFiring.json` | 3000 | no |
 | `docs/golden_vectors/S14_AttackStates.json` | 80 | no |
+| `docs/golden_vectors/S14_Turrets.json` | 64 | no |
 | `docs/golden_vectors/S16_DozerWorker.json` | 160 | no |
 | `docs/golden_vectors/S16_DozerWorkerFrames.json` | 48 | yes |
 | `docs/golden_vectors/S1_Terrain.json` | - | no |

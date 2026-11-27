@@ -208,8 +208,11 @@ impl TurretWorldAccess for MockTurretWorld {
         self.frame
     }
 
-    fn rng_mut(&mut self) -> &mut PrngState {
-        &mut self.rng
+    fn random_int(&mut self, lo: Int, hi: Int) -> Int {
+        self.rng.get_game_logic_random_value(lo, hi)
+    }
+    fn random_real(&mut self, lo: Real, hi: Real) -> Real {
+        self.rng.get_game_logic_random_value_real(lo, hi)
     }
 
     fn object_exists(&self, id: ObjectId) -> bool {
@@ -302,16 +305,16 @@ impl TurretWorldAccess for MockTurretWorld {
         self.turrets_linked
     }
 
-    fn get_owner_ai_goal_object(&self, _owner: ObjectId) -> ObjectId {
+    fn get_owner_ai_goal_object(&mut self, _owner: ObjectId) -> ObjectId {
         ObjectId::INVALID
     }
 
-    fn is_owner_able_to_attack(&self, _owner: ObjectId) -> Bool {
+    fn is_owner_able_to_attack(&mut self, _owner: ObjectId) -> Bool {
         TRUE
     }
 
     fn can_owner_attack_specific_object(
-        &self,
+        &mut self,
         _owner: ObjectId,
         target: ObjectId,
         force_attacking: Bool,
@@ -375,7 +378,7 @@ impl TurretWorldAccess for MockTurretWorld {
         self.owner_geom.get_max_height_above_position()
     }
 
-    fn get_next_idle_mood_target_frame(&self, _owner: ObjectId) -> UnsignedInt {
+    fn get_next_idle_mood_target_frame(&mut self, _owner: ObjectId) -> UnsignedInt {
         self.next_mood_check_frame
     }
 
@@ -383,7 +386,7 @@ impl TurretWorldAccess for MockTurretWorld {
         self.next_mood_check_frame = self.frame.wrapping_add(1);
     }
 
-    fn get_turret_sync(&self, _owner: ObjectId) -> WhichTurretType {
+    fn get_turret_sync(&mut self, _owner: ObjectId) -> WhichTurretType {
         self.turret_sync
     }
 
@@ -391,7 +394,7 @@ impl TurretWorldAccess for MockTurretWorld {
         self.turret_sync = tur;
     }
 
-    fn is_idle_mood_ignored(&self, _owner: ObjectId) -> Bool {
+    fn is_idle_mood_ignored(&mut self, _owner: ObjectId) -> Bool {
         FALSE
     }
 
@@ -401,7 +404,7 @@ impl TurretWorldAccess for MockTurretWorld {
 
     fn choose_best_weapon_for_target(&mut self, _owner: ObjectId, _target: ObjectId) {}
 
-    fn out_of_weapon_range_object(&self, _owner: ObjectId, victim: ObjectId) -> Bool {
+    fn out_of_weapon_range_object(&mut self, _owner: ObjectId, victim: ObjectId) -> Bool {
         if victim == VICTIM_ID && self.victim_alive {
             if self.weapon_in_range(WeaponSlotType::Primary, &self.victim_pos, Some(&self.victim_geom))
                 == FALSE

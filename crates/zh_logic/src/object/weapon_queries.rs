@@ -90,6 +90,31 @@ fn bridge_attack_points(sim: &dyn SimView, bridge: ObjectSlot) -> [Coord3D; 2] {
     ai_seams(sim).bridge_attack_points(id, &pos)
 }
 
+/// The attack point of a bridge that is nearer to `source`'s bounding sphere.
+pub(crate) fn closest_bridge_attack_point(
+    sim: &dyn SimView,
+    source: ObjectSlot,
+    bridge: ObjectSlot,
+) -> Coord3D {
+    let [first, second] = bridge_attack_points(sim, bridge);
+    let distance = |p: &Coord3D| {
+        let from = distance_end(sim, Some(source), p);
+        let to = distance_end(sim, None, p);
+        measure(
+            DistanceCalculationType::FromBoundingSphere3d,
+            &from.pos,
+            Some(&from),
+            &to,
+        )
+        .0
+    };
+    if distance(&first) > distance(&second) {
+        second
+    } else {
+        first
+    }
+}
+
 /// The distance to a bridge: its first attack point, or the second when the first is out of
 /// `range_sqr`.
 fn bridge_distance_squared(
