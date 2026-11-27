@@ -1,5 +1,7 @@
 # Architectural & Execution Plan: Zero Hour Engine Port to Rust (`generals-rust`)
 
+> **Goal (owner, 2026-11-27):** the whole game in Rust, with no C++. This plan stops at a headless simulator; the client it does not cover is sized in `docs/OPEN_DECISIONS.md` item 10.
+
 ## 1. Objective & Milestones
 
 Port the game engine of *Zero Hour* (~330k lines of C++ across `GameLogic` and `Common` in 871 files) to Rust as a clean, idiomatic, GPL-3.0-or-later public portfolio project, verified bit-exact against real game replays via the engine's built-in per-frame state checksums (`XferCRC`).

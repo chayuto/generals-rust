@@ -49,7 +49,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Next
 
-- **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game), then item 11 (whether to port the unit AI beyond slice S0, `AI_PORT_PLAN.md`). The AI classes are the only behavior modules the replays create that are not ported.
+- **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10). Simulation first: weapons doing damage, then unit movement, then the unit AI (`AI_PORT_PLAN.md`). Client work waits on item 12.
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
 - Packet counts overstate completeness (see the known gaps): `Locomotor` has no movement code and weapons do no damage.
 - Next faithfulness gap of the same kind as the per-player fix: sciences, radar, cost modifiers and handicaps are still keyed by team.
@@ -58,7 +58,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Waiting on the owner
 
-- `OPEN_DECISIONS.md` items 10 and 11, and the other unanswered items there.
+- `OPEN_DECISIONS.md` item 12, and the other unanswered items there.
 
 ## Cost of module ports
 
