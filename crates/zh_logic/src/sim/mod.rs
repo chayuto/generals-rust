@@ -1307,6 +1307,11 @@ pub trait SimView {
     ) -> PathfindCellType;
     fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum;
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real;
+    /// Value reads of one object field, which an engine adapter can answer
+    /// (`object()` returns a Rust record). `None` when there is no such object.
+    fn object_transform(&self, owner: ObjectSlot) -> Option<Matrix3D>;
+    fn object_orientation(&self, owner: ObjectSlot) -> Option<Real>;
+    fn object_layer(&self, owner: ObjectSlot) -> Option<PathfindLayerEnum>;
     /// `Pathfinder::snapPosition`: moves `pos` onto the owner's footprint grid.
     fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D);
     /// `AIUpdateInterface::isDoingGroundMovement`.
@@ -5850,6 +5855,18 @@ impl SimView for SimContext {
 
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
         self.terrain.get_layer_height(x, y, layer, None, TRUE)
+    }
+
+    fn object_transform(&self, owner: ObjectSlot) -> Option<Matrix3D> {
+        self.world.objects.get(owner).map(|o| *o.thing.get_transform_matrix())
+    }
+
+    fn object_orientation(&self, owner: ObjectSlot) -> Option<Real> {
+        self.world.objects.get(owner).map(|o| o.thing.get_orientation())
+    }
+
+    fn object_layer(&self, owner: ObjectSlot) -> Option<PathfindLayerEnum> {
+        self.world.objects.get(owner).map(|o| o.layer)
     }
 
     fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {
@@ -11123,6 +11140,18 @@ impl SimView for MockSimApi {
 
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
         self.ctx.get_layer_height(x, y, layer)
+    }
+
+    fn object_transform(&self, owner: ObjectSlot) -> Option<Matrix3D> {
+        self.ctx.object_transform(owner)
+    }
+
+    fn object_orientation(&self, owner: ObjectSlot) -> Option<Real> {
+        self.ctx.object_orientation(owner)
+    }
+
+    fn object_layer(&self, owner: ObjectSlot) -> Option<PathfindLayerEnum> {
+        self.ctx.object_layer(owner)
     }
 
     fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {

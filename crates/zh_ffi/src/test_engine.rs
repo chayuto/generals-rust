@@ -16,6 +16,11 @@ pub(crate) struct Engine {
     pub conditions: Vec<(i32, bool)>,
     pub armor: Vec<(i32, u8)>,
     pub warehouses: u32,
+    pub ai: bool,
+    pub ground: bool,
+    /// Changes to the second object, in call order.
+    pub exit_log: Vec<String>,
+    pub paths: Vec<Vec<f32>>,
 }
 
 unsafe fn engine<'a>(ctx: *mut c_void) -> &'a mut Engine {
@@ -62,6 +67,49 @@ extern "C" fn warehouse(ctx: *mut c_void) {
     unsafe { engine(ctx) }.warehouses += 1;
 }
 
+extern "C" fn transform(_: *mut c_void, rows: *mut f32) {
+    let unrotated: [f32; 12] = [1.0, 0.0, 0.0, 100.0, 0.0, 1.0, 0.0, 200.0, 0.0, 0.0, 1.0, 10.0];
+    unsafe { core::ptr::copy_nonoverlapping(unrotated.as_ptr(), rows, 12) };
+}
+extern "C" fn orientation(_: *mut c_void) -> f32 {
+    1.5
+}
+extern "C" fn layer(_: *mut c_void) -> i32 {
+    2
+}
+extern "C" fn layer_height(_: *mut c_void, _: f32, _: f32, layer: i32) -> f32 {
+    50.0 + layer as f32
+}
+unsafe fn log(ctx: *mut c_void, line: String) {
+    unsafe { engine(ctx) }.exit_log.push(line);
+}
+extern "C" fn set_position(ctx: *mut c_void, x: f32, y: f32, z: f32) {
+    unsafe { log(ctx, format!("position {x} {y} {z}")) };
+}
+extern "C" fn set_orientation(ctx: *mut c_void, angle: f32) {
+    unsafe { log(ctx, format!("orientation {angle}")) };
+}
+extern "C" fn set_layer(ctx: *mut c_void, layer: i32) {
+    unsafe { log(ctx, format!("layer {layer}")) };
+}
+extern "C" fn pathfinder_add(ctx: *mut c_void) {
+    unsafe { log(ctx, "pathfinder".to_string()) };
+}
+extern "C" fn has_ai(ctx: *mut c_void) -> u8 {
+    u8::from(unsafe { engine(ctx) }.ai)
+}
+extern "C" fn ground(ctx: *mut c_void) -> u8 {
+    u8::from(unsafe { engine(ctx) }.ground)
+}
+extern "C" fn adjust(_: *mut c_void, xyz: *mut f32) -> u8 {
+    unsafe { *xyz += 1.0 };
+    1
+}
+extern "C" fn follow(ctx: *mut c_void, xyz: *const f32, count: i32) {
+    let points = unsafe { core::slice::from_raw_parts(xyz, count as usize * 3) };
+    unsafe { engine(ctx) }.paths.push(points.to_vec());
+}
+
 pub(crate) fn callbacks(engine: &mut Engine) -> ZhEngineSimCallbacks {
     ZhEngineSimCallbacks {
         ctx: (engine as *mut Engine).cast(),
@@ -77,6 +125,18 @@ pub(crate) fn callbacks(engine: &mut Engine) -> ZhEngineSimCallbacks {
         clear_model_condition_state: clear_condition,
         set_armor_set_flag: armor,
         register_supply_warehouse: warehouse,
+        object_transform: transform,
+        object_orientation: orientation,
+        object_layer: layer,
+        get_layer_height: layer_height,
+        set_object_position: set_position,
+        set_object_orientation: set_orientation,
+        set_object_layer: set_layer,
+        pathfinder_add_object: pathfinder_add,
+        has_ai,
+        ai_is_doing_ground_movement: ground,
+        pathfinder_adjust_destination: adjust,
+        ai_follow_exit_production_path: follow,
     }
 }
 

@@ -292,6 +292,7 @@
 | `zh_common` | `crates/zh_common/src/math/gamemath.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/types.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/armor_upgrade.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/default_production_exit.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/economy.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim_generated.rs` | `implemented` |

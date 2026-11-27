@@ -37,6 +37,18 @@ WIRED = (
     "clear_model_condition_state",
     "set_armor_set_flag",
     "register_supply_warehouse",
+    "object_transform",
+    "object_orientation",
+    "object_layer",
+    "get_layer_height",
+    "set_object_position",
+    "set_object_orientation",
+    "set_object_layer",
+    "pathfinder_add_object",
+    "has_ai",
+    "ai_is_doing_ground_movement",
+    "pathfinder_adjust_destination",
+    "ai_follow_exit_production_path",
 )
 
 

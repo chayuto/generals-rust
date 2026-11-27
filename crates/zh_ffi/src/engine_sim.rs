@@ -5,9 +5,12 @@
 //! reach the engine, and any other method aborts the game with its name.
 
 use core::ffi::c_void;
+use zh_common::math::{Coord3D, Matrix3D};
 use zh_common::types::{Bool, Int, Real, UnsignedInt, UpdateSleepTime};
 use zh_logic::arena::{ModuleContext, ModuleDataId, ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::{DamageInfo, DamageInfoInput};
+use zh_logic::modules::module::CommandSourceType;
+use zh_logic::pathfinder::pathfind_constants::PathfindLayerEnum;
 use zh_logic::rules::combat_types::ArmorSetType;
 use zh_logic::rules::kind_of::KindOfType;
 use zh_logic::rules::model_state::ModelConditionFlagType;
@@ -29,6 +32,22 @@ pub struct ZhEngineSimCallbacks {
     pub clear_model_condition_state: extern "C" fn(*mut c_void, i32),
     pub set_armor_set_flag: extern "C" fn(*mut c_void, i32, u8),
     pub register_supply_warehouse: extern "C" fn(*mut c_void),
+    /// Writes the owner's transform as 12 floats, row by row.
+    pub object_transform: extern "C" fn(*mut c_void, *mut f32),
+    pub object_orientation: extern "C" fn(*mut c_void) -> f32,
+    pub object_layer: extern "C" fn(*mut c_void) -> i32,
+    pub get_layer_height: extern "C" fn(*mut c_void, f32, f32, i32) -> f32,
+    // The rest act on the second object of the call (`GUEST`).
+    pub set_object_position: extern "C" fn(*mut c_void, f32, f32, f32),
+    pub set_object_orientation: extern "C" fn(*mut c_void, f32),
+    pub set_object_layer: extern "C" fn(*mut c_void, i32),
+    pub pathfinder_add_object: extern "C" fn(*mut c_void),
+    pub has_ai: extern "C" fn(*mut c_void) -> u8,
+    pub ai_is_doing_ground_movement: extern "C" fn(*mut c_void) -> u8,
+    /// Reads and rewrites three floats.
+    pub pathfinder_adjust_destination: extern "C" fn(*mut c_void, *mut f32) -> u8,
+    /// `count` points of three floats; the owner is the producer, the command is from the AI.
+    pub ai_follow_exit_production_path: extern "C" fn(*mut c_void, *const f32, i32),
 }
 
 /// Called by every method the adapter does not answer.
@@ -40,6 +59,8 @@ pub(crate) fn not_wired(method: &str) -> ! {
 /// The stand-in handles for "the one object and module this call is about".
 const OWNER: ObjectSlot = ObjectSlot(0);
 const MODULE: ModuleSlot = ModuleSlot(0);
+/// The second object of a call, such as a unit leaving a factory.
+pub(crate) const GUEST: ObjectSlot = ObjectSlot(1);
 
 pub struct EngineSim<'a> {
     callbacks: &'a ZhEngineSimCallbacks,
@@ -148,5 +169,98 @@ impl<'a> EngineSim<'a> {
             input.amount,
             input.kill,
         );
+    }
+
+    pub(crate) fn engine_object_transform(&self, owner: ObjectSlot) -> Option<Matrix3D> {
+        assert_eq!(owner, OWNER, "only the owning object can be queried");
+        let mut flat = [0.0f32; 12];
+        (self.callbacks.object_transform)(self.callbacks.ctx, flat.as_mut_ptr());
+        let mut rows = [[0.0f32; 4]; 3];
+        for (row, values) in rows.iter_mut().zip(flat.chunks_exact(4)) {
+            row.copy_from_slice(values);
+        }
+        Some(Matrix3D { rows })
+    }
+
+    pub(crate) fn engine_object_orientation(&self, owner: ObjectSlot) -> Option<Real> {
+        assert_eq!(owner, OWNER, "only the owning object can be queried");
+        Some((self.callbacks.object_orientation)(self.callbacks.ctx))
+    }
+
+    pub(crate) fn engine_object_layer(&self, owner: ObjectSlot) -> Option<PathfindLayerEnum> {
+        assert_eq!(owner, OWNER, "only the owning object can be queried");
+        let layer = (self.callbacks.object_layer)(self.callbacks.ctx);
+        Some(PathfindLayerEnum::from_i32(layer).expect("unknown path layer"))
+    }
+
+    pub(crate) fn engine_get_layer_height(
+        &self,
+        x: Real,
+        y: Real,
+        layer: PathfindLayerEnum,
+    ) -> Real {
+        (self.callbacks.get_layer_height)(self.callbacks.ctx, x, y, layer as i32)
+    }
+
+    pub(crate) fn engine_set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D) {
+        assert_eq!(owner, GUEST, "only the second object can be moved");
+        (self.callbacks.set_object_position)(self.callbacks.ctx, pos.x, pos.y, pos.z);
+    }
+
+    pub(crate) fn engine_set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
+        assert_eq!(owner, GUEST, "only the second object can be turned");
+        (self.callbacks.set_object_orientation)(self.callbacks.ctx, angle);
+    }
+
+    pub(crate) fn engine_set_object_layer(
+        &mut self,
+        owner: ObjectSlot,
+        layer: PathfindLayerEnum,
+    ) {
+        assert_eq!(owner, GUEST, "only the second object can change layer");
+        (self.callbacks.set_object_layer)(self.callbacks.ctx, layer as i32);
+    }
+
+    pub(crate) fn engine_pathfinder_add_object(&mut self, owner: ObjectSlot) {
+        assert_eq!(owner, GUEST, "only the second object can be added");
+        (self.callbacks.pathfinder_add_object)(self.callbacks.ctx);
+    }
+
+    pub(crate) fn engine_has_ai(&self, owner: ObjectSlot) -> Bool {
+        assert_eq!(owner, GUEST, "only the second object's AI can be queried");
+        (self.callbacks.has_ai)(self.callbacks.ctx)
+    }
+
+    pub(crate) fn engine_ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
+        assert_eq!(owner, GUEST, "only the second object's AI can be queried");
+        (self.callbacks.ai_is_doing_ground_movement)(self.callbacks.ctx)
+    }
+
+    pub(crate) fn engine_pathfinder_adjust_destination(
+        &mut self,
+        owner: ObjectSlot,
+        dest: &mut Coord3D,
+    ) -> Bool {
+        assert_eq!(owner, GUEST, "only the second object's path can be adjusted");
+        let mut xyz = [dest.x, dest.y, dest.z];
+        let found =
+            (self.callbacks.pathfinder_adjust_destination)(self.callbacks.ctx, xyz.as_mut_ptr());
+        [dest.x, dest.y, dest.z] = xyz;
+        found
+    }
+
+    pub(crate) fn engine_ai_follow_exit_production_path(
+        &mut self,
+        owner: ObjectSlot,
+        path: &[Coord3D],
+        ignore_obj: Option<ObjectSlot>,
+        cmd_source: CommandSourceType,
+    ) {
+        assert_eq!(owner, GUEST, "only the second object can be ordered");
+        assert_eq!(ignore_obj, Some(OWNER), "only the owner can be the producer");
+        assert_eq!(cmd_source, CommandSourceType::FromAi, "command source not carried");
+        let flat: Vec<f32> = path.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
+        let count = i32::try_from(path.len()).expect("exit path too long");
+        (self.callbacks.ai_follow_exit_production_path)(self.callbacks.ctx, flat.as_ptr(), count);
     }
 }

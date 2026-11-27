@@ -1,6 +1,7 @@
 //! C-ABI Strangler FFI bridge (`libzh_ffi.a`) matching `crates/zh_ffi/include/zh_ffi.h`.
 
 pub mod armor_upgrade;
+pub mod default_production_exit;
 pub mod economy;
 pub mod engine_sim;
 mod engine_sim_generated;

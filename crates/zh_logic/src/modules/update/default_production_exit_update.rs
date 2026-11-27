@@ -28,10 +28,10 @@ pub struct Producer {
 }
 
 pub fn producer(sim: &dyn SimView, owner: ObjectSlot) -> Option<Producer> {
-    sim.object(owner).map(|o| Producer {
-        transform: *o.thing.get_transform_matrix(),
-        angle: o.thing.get_orientation(),
-        layer: o.layer,
+    Some(Producer {
+        transform: sim.object_transform(owner)?,
+        angle: sim.object_orientation(owner)?,
+        layer: sim.object_layer(owner)?,
     })
 }
 

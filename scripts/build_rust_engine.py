@@ -14,9 +14,10 @@ link line, so the linker never pulls the original member.
 
 Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002),
 experience and veterancy (`ExperienceTracker.cpp`, PKT-003), money and energy
-(`Money.cpp`, `Energy.cpp`), six behavior modules through `scripts/gen_engine_sim.py`'s
+(`Money.cpp`, `Energy.cpp`), seven behavior modules through `scripts/gen_engine_sim.py`'s
 adapter (`LifetimeUpdate`, `SupplyWarehouseCreate`, `ArmorUpgrade`,
-`ModelConditionUpgrade`, `RadarUpdate`, `PowerPlantUpdate`) and the sleepy-update heap (part of
+`ModelConditionUpgrade`, `RadarUpdate`, `PowerPlantUpdate`,
+`DefaultProductionExitUpdate`) and the sleepy-update heap (part of
 `GameLogic.cpp`, WP-7.1).
 `--mutate <swap>` builds a deliberately wrong variant to prove the replay check fails.
 
@@ -152,6 +153,18 @@ SWAPS = (
                 "void ModelConditionUpgrade::upgradeImplementation()",
                 "void ModelConditionUpgrade::crc(",
                 '#include "zh_ffi_model_condition_upgrade.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "exit",
+        VENDOR
+        / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/ProductionExitUpdate/DefaultProductionExitUpdate.cpp",
+        (
+            (
+                "void DefaultProductionExitUpdate::exitObjectViaDoor(",
+                "void DefaultProductionExitUpdate::crc(",
+                '#include "zh_ffi_default_production_exit.inc"',
             ),
         ),
     ),

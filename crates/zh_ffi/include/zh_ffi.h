@@ -177,6 +177,19 @@ typedef struct ZhEngineSimCallbacks {
     void     (*clear_model_condition_state)(void* ctx, int32_t flag);
     void     (*set_armor_set_flag)(void* ctx, int32_t flag, uint8_t set);
     void     (*register_supply_warehouse)(void* ctx);
+    void     (*object_transform)(void* ctx, float* rows12);
+    float    (*object_orientation)(void* ctx);
+    int32_t  (*object_layer)(void* ctx);
+    float    (*get_layer_height)(void* ctx, float x, float y, int32_t layer);
+    /* The rest act on the second object of the call. */
+    void     (*set_object_position)(void* ctx, float x, float y, float z);
+    void     (*set_object_orientation)(void* ctx, float angle);
+    void     (*set_object_layer)(void* ctx, int32_t layer);
+    void     (*pathfinder_add_object)(void* ctx);
+    uint8_t  (*has_ai)(void* ctx);
+    uint8_t  (*ai_is_doing_ground_movement)(void* ctx);
+    uint8_t  (*pathfinder_adjust_destination)(void* ctx, float* xyz);
+    void     (*ai_follow_exit_production_path)(void* ctx, const float* xyz, int32_t count);
 } ZhEngineSimCallbacks;
 
 /* PKT-339 LifetimeUpdate. Construct and set_range return the die frame. */
@@ -193,6 +206,20 @@ void zh_supply_warehouse_on_create(const ZhEngineSimCallbacks* callbacks);
 void zh_armor_upgrade_implementation(const ZhEngineSimCallbacks* callbacks);
 void zh_model_condition_upgrade_implementation(const ZhEngineSimCallbacks* callbacks,
                                                int32_t condition_flag);
+
+/* PKT-315 DefaultProductionExitUpdate: C++ keeps the rally point. Points are x, y, z.
+   `rally_point` is null when none is set. */
+typedef struct ZhExitData {
+    float unit_create_point[3];
+    float natural_rally_point[3];
+} ZhExitData;
+
+void    zh_exit_object_via_door(const ZhEngineSimCallbacks* callbacks, const ZhExitData* data,
+                                const float* rally_point);
+uint8_t zh_exit_position(const ZhEngineSimCallbacks* callbacks, const ZhExitData* data,
+                         float* position);
+uint8_t zh_exit_natural_rally_point(const ZhEngineSimCallbacks* callbacks, const ZhExitData* data,
+                                    uint8_t offset, float* point);
 
 /* PKT-358 RadarUpdate: C++ keeps the members. */
 typedef struct ZhRadarState {

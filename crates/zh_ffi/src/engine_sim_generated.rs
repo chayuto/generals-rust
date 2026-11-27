@@ -501,7 +501,7 @@ impl SimView for EngineSim<'_> {
         not_wired("carrier_deck_height")
     }
     fn has_ai(&self, owner: ObjectSlot) -> Bool {
-        not_wired("has_ai")
+        self.engine_has_ai(owner)
     }
     fn ai_free_to_exit(&self, owner: ObjectSlot) -> Bool {
         not_wired("ai_free_to_exit")
@@ -525,13 +525,22 @@ impl SimView for EngineSim<'_> {
         not_wired("get_layer_for_destination")
     }
     fn get_layer_height(&self, x: Real, y: Real, layer: PathfindLayerEnum) -> Real {
-        not_wired("get_layer_height")
+        self.engine_get_layer_height(x, y, layer)
+    }
+    fn object_transform(&self, owner: ObjectSlot) -> Option<Matrix3D> {
+        self.engine_object_transform(owner)
+    }
+    fn object_orientation(&self, owner: ObjectSlot) -> Option<Real> {
+        self.engine_object_orientation(owner)
+    }
+    fn object_layer(&self, owner: ObjectSlot) -> Option<PathfindLayerEnum> {
+        self.engine_object_layer(owner)
     }
     fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {
         not_wired("pathfinder_snap_position")
     }
     fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
-        not_wired("ai_is_doing_ground_movement")
+        self.engine_ai_is_doing_ground_movement(owner)
     }
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
         not_wired("pristine_bone_transforms")
@@ -1173,10 +1182,10 @@ impl SimApi for EngineSim<'_> {
         not_wired("set_body_damage_state")
     }
     fn set_object_position(&mut self, owner: ObjectSlot, pos: &Coord3D) {
-        not_wired("set_object_position")
+        self.engine_set_object_position(owner, pos)
     }
     fn set_object_orientation(&mut self, owner: ObjectSlot, angle: Real) {
-        not_wired("set_object_orientation")
+        self.engine_set_object_orientation(owner, angle)
     }
     fn set_object_transform_matrix(&mut self, owner: ObjectSlot, mtx: &Matrix3D) {
         not_wired("set_object_transform_matrix")
@@ -1188,7 +1197,7 @@ impl SimApi for EngineSim<'_> {
         not_wired("projectile_handle_collision")
     }
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
-        not_wired("set_object_layer")
+        self.engine_set_object_layer(owner, layer)
     }
     fn tunnel_tracker_mut(&mut self, player_index: Int) -> &mut TunnelTrackerState {
         not_wired("tunnel_tracker_mut")
@@ -1422,13 +1431,13 @@ impl SimApi for EngineSim<'_> {
         not_wired("find_position_around")
     }
     fn pathfinder_add_object(&mut self, owner: ObjectSlot) {
-        not_wired("pathfinder_add_object")
+        self.engine_pathfinder_add_object(owner)
     }
     fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool {
-        not_wired("pathfinder_adjust_destination")
+        self.engine_pathfinder_adjust_destination(owner, dest)
     }
     fn ai_follow_exit_production_path( &mut self, owner: ObjectSlot, path: &[Coord3D], ignore_obj: Option<ObjectSlot>, cmd_source: CommandSourceType, ) {
-        not_wired("ai_follow_exit_production_path")
+        self.engine_ai_follow_exit_production_path(owner, path, ignore_obj, cmd_source)
     }
     fn pathfinder_adjust_to_possible_destination( &mut self, owner: ObjectSlot, dest: &mut Coord3D, ) -> Bool {
         not_wired("pathfinder_adjust_to_possible_destination")
