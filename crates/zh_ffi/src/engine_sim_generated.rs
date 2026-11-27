@@ -38,7 +38,7 @@ use zh_logic::modules::module::SupplyTruckAiFacet;
 use zh_logic::modules::module::{BridgeScaffoldFacet, ScaffoldTargetMotion};
 use zh_logic::ai::seams::{NoPathServices, PathServices, NoAiSeams, SharedAiSeams};
 use zh_logic::modules::module::AiUpdateFacet;
-use zh_logic::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType};
+use zh_logic::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType, AiUpdate};
 use zh_logic::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use zh_logic::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
 use zh_logic::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};

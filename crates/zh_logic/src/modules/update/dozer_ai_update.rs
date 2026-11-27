@@ -4,7 +4,7 @@
 //!
 //! Packet doc: `packets/phase5/PKT-321_DozerAIUpdate.md`. Golden tests:
 //! `crates/zh_logic/tests/golden_s16_dozer_worker.rs` (construction) and
-//! `golden_s16_dozer_worker_frames.rs` (frames and orders).
+//! `golden_s16_dozer_worker_frames.rs` (frames and orders); `dozer_build_sim.rs`.
 //!
 //! The module is an `AIUpdateInterface` with a [`DozerBrain`], which a
 //! `WorkerAIUpdate` has too. As in `ai_state_machine.rs`, the machines are plain
@@ -510,14 +510,20 @@ fn internal_task_complete(sim: &mut dyn SimApi, ctx: ModuleContext, task: Int) {
     clear_previous_task(brain);
 }
 
-/// `internalCancelTask`.
+/// `internalCancelTask`: a dozer goes idle, a worker is ordered to where it
+/// stands.
 fn internal_cancel_task(sim: &mut dyn SimApi, ctx: ModuleContext, task: Int) {
     if task < 0 || task >= DOZER_NUM_TASKS as Int {
         return;
     }
     task_complete_or_cancelled(sim, ctx, task);
     forget_task(brain(sim, ctx), task);
-    idle_self(sim, ctx);
+    if is_worker(sim, ctx) {
+        let here = position(sim, ctx.owner_slot);
+        move_self(sim, ctx, &here);
+    } else {
+        idle_self(sim, ctx);
+    }
 }
 
 /// `cancelTask`.

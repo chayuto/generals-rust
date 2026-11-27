@@ -628,7 +628,7 @@ impl SimContext {
     }
 
     /// `ThingFactory::newObject(tmpl, team, statusBits)`.
-    pub(crate) fn factory_new_object_with_status(
+    pub fn factory_new_object_with_status(
         &mut self,
         mut tmpl: ThingTemplateId,
         team: TeamId,

@@ -45,7 +45,7 @@ use crate::modules::module::SupplyTruckAiFacet;
 use crate::modules::module::{BridgeScaffoldFacet, ScaffoldTargetMotion};
 use crate::ai::seams::{NoPathServices, PathServices, NoAiSeams, SharedAiSeams};
 use crate::modules::module::AiUpdateFacet;
-use crate::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType};
+use crate::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType, AiUpdate};
 use crate::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use crate::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
 use crate::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
@@ -6896,6 +6896,17 @@ impl SimView for SimContext {
 }
 
 impl SimContext {
+    /// `clientSafeQuickDoesPathExist` from `from`; true without a pathfind map or
+    /// an asking unit.
+    fn has_quick_path(&self, from: Option<(Coord3D, Int)>, to: &Coord3D) -> bool {
+        let Some((from, surfaces)) = from else {
+            return true;
+        };
+        self.world.pathfinder.as_ref().is_none_or(|p| {
+            p.quick_path_exists(self.terrain.as_ref(), surfaces, &from, to)
+        })
+    }
+
     fn try_find_position(
         &self,
         center: &Coord3D,
@@ -6921,6 +6932,9 @@ impl SimContext {
         }
 
         if zh_common::math::gm_fabsf(pos.z - center.z) > options.max_z_delta {
+            return None;
+        }
+        if layer == PathfindLayerEnum::Ground && self.terrain.is_cliff_cell(pos.x, pos.y) != FALSE {
             return None;
         }
         let cell_x = real_to_int_floor(pos.x / 10.0_f32);
@@ -10938,6 +10952,13 @@ impl SimApi for SimContext {
             Some(a) => a,
             None => self.rng_logic_real(0.0, two_pi),
         };
+        // `sourceToPathToDest`: only a spot its AI has a quick path to will do.
+        let path_from = options.source_to_path_to_dest.and_then(|source| {
+            let o = self.world.objects.get(source)?;
+            let (from, ms) = (*o.thing.get_position(), o.ai_slot?);
+            let ai = self.resident_state_mut(ms)?.downcast_mut::<AiUpdate>()?;
+            Some((from, ai.locomotor_set.get_valid_surfaces()))
+        });
         let ring_spacing = 5.0_f32;
         let mut dist = options.min_radius;
         while dist <= options.max_radius {
@@ -10949,12 +10970,18 @@ impl SimApi for SimContext {
             let samples = real_to_int_ceil((two_pi / angle_spacing) / 2.0_f32);
             for i in 0..samples {
                 let angle_pos = start_angle + angle_spacing * (i as Real);
-                if let Some(found) = self.try_find_position(center, dist, angle_pos, options) {
+                if let Some(found) = self
+                    .try_find_position(center, dist, angle_pos, options)
+                    .filter(|found| self.has_quick_path(path_from, found))
+                {
                     return Some(found);
                 }
                 if i != 0 {
                     let angle_neg = start_angle - angle_spacing * (i as Real);
-                    if let Some(found) = self.try_find_position(center, dist, angle_neg, options) {
+                    if let Some(found) = self
+                        .try_find_position(center, dist, angle_neg, options)
+                        .filter(|found| self.has_quick_path(path_from, found))
+                    {
                         return Some(found);
                     }
                 }

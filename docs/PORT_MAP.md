@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`290` implemented, `37` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `120` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `115` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `121` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `116` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -500,6 +500,7 @@
 | `docs/golden_vectors/S13_WeaponFiring.json` | 3000 | no |
 | `docs/golden_vectors/S14_AttackStates.json` | 80 | no |
 | `docs/golden_vectors/S16_DozerWorker.json` | 160 | no |
+| `docs/golden_vectors/S16_DozerWorkerFrames.json` | 48 | yes |
 | `docs/golden_vectors/S1_Terrain.json` | - | no |
 | `docs/golden_vectors/S1_Terrain_Retail.json` | - | no |
 | `docs/golden_vectors/S2_PathfindMap.json` | - | no |
@@ -626,6 +627,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s13_weapon_firing.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s14_attack_states.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s16_dozer_worker.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s16_dozer_worker_frames.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s1_terrain.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s2_pathfind_map.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s3_path.rs` | `active` |

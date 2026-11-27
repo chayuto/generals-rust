@@ -181,6 +181,7 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `is_clearing_mines`, construction percent, build and repair orders. Stubbed: build legality from tape until S19.
 - Risks: task order; the worker switches between two state machines.
 - Seen: **a base can be built**.
+- **Done except the construct order and the supply half.** `golden_s16_dozer_worker_frames` traces 48 scenes (machines, tasks, dock points, positions, health, construction, cells, energy, AI CRC and save digest); `dozer_build_sim` builds a structure by an order alone. Gaps: `OPEN_DECISIONS.md`.
 
 ### S17. Aircraft and missiles
 - C++: Chinook (1,250), Jet (2,170), `ParkingPlaceBehavior` (840), Missile AI (670). Four workers: Chinook, Jet (two with parking), missile.

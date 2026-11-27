@@ -180,6 +180,16 @@ impl SimContext {
         let frame = self.world.frame;
         let fallers = pathfinder.classify_object_footprint(&footprint, insert, self, frame);
         self.world.pathfinder = Some(pathfinder);
+        // A removal also takes a unit's own cells off the map, with the same
+        // exceptions as the footprint.
+        let kept = footprint.mine
+            || footprint.projectile
+            || footprint.bridge_tower
+            || footprint.blast_crater
+            || (footprint.fence_width > 0.0 && !footprint.defensive_wall);
+        if !insert && !kept {
+            self.remove_unit_from_pathfind_map(slot);
+        }
         for id in fallers {
             let Some(victim) = self.world.objects.slot_by_id(id) else {
                 continue;
