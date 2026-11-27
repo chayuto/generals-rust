@@ -17,7 +17,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use zh_common::math::Coord3D;
+use zh_common::math::{Coord2D, Coord3D};
 use zh_common::types::{
     Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, UnsignedShort, FALSE,
 };
@@ -28,8 +28,8 @@ use super::script_engine::{
     TeamPrototypeInfo,
 };
 use super::scripts::{Condition, Parameter, ScriptAction, ScriptList};
-use crate::ai::ai_player::AiPlayer;
-use crate::ai::ai_skirmish_player::{get_ai_enemy, EnemyView};
+use crate::ai::ai_player::{build_by_supplies, AiPlayer, SupplyOrder};
+use crate::ai::ai_skirmish_player::{build_specific_ai_building, get_ai_enemy, EnemyView};
 use crate::arena::{with_module_dispatch, ModuleSlot};
 use crate::modules::update::ai_update::AiUpdate;
 use crate::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpdate;
@@ -935,6 +935,76 @@ impl ScriptWorld for LiveWorld<'_> {
     }
 
     fn unported_action(&mut self, _action: &ScriptAction) {}
+
+    fn ai_build_building(&mut self, player: ScriptPlayer, template: &str) {
+        let ai_players = self.ai_players.get_mut();
+        let (Some(ai), Some(p)) = (
+            ai_players.get_mut(&player),
+            self.game.players.player_mut(player),
+        ) else {
+            return;
+        };
+        if ai.skirmish.is_none() {
+            self.missing("AIPlayer::buildSpecificAIBuilding of a non-skirmish player");
+            return;
+        }
+        build_specific_ai_building(self.sim, ai, &mut p.build_list, template);
+    }
+
+    fn ai_build_by_supplies(&mut self, player: ScriptPlayer, minimum_cash: Int, template: &str) {
+        if !self.ai_players.get_mut().contains_key(&player) {
+            return;
+        }
+        // `getAiEnemy`, which may make the AI choose one; only a skirmish AI does.
+        let frame = self.sim.world.frame;
+        let enemy = get_ai_enemy(&mut self.ai_players.borrow_mut(), self, frame, player);
+        let enemy_center = enemy.map(|enemy| middle(&self.structure_positions(enemy)));
+        let pathfind_extent = self
+            .sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        let ai_players = self.ai_players.get_mut();
+        let (Some(ai), Some(p)) = (
+            ai_players.get_mut(&player),
+            self.game.players.player_mut(player),
+        ) else {
+            return;
+        };
+        let mut order = SupplyOrder {
+            sim: self.sim,
+            ai,
+            player: p,
+            enemy_center,
+            pathfind_extent,
+        };
+        build_by_supplies(&mut order, minimum_cash, template);
+    }
+
+}
+
+/// The middle of `getPlayerStructureBounds`, all zero without structures.
+fn middle(positions: &[Coord3D]) -> Coord2D {
+    let first = positions.first().copied().unwrap_or_default();
+    let (mut lo, mut hi) = ((first.x, first.y), (first.x, first.y));
+    for p in positions {
+        if p.x < lo.0 {
+            lo.0 = p.x;
+        }
+        if p.y < lo.1 {
+            lo.1 = p.y;
+        }
+        if p.x > hi.0 {
+            hi.0 = p.x;
+        }
+        if p.y > hi.1 {
+            hi.1 = p.y;
+        }
+    }
+    Coord2D {
+        x: (lo.0 + hi.0) * 0.5,
+        y: (lo.1 + hi.1) * 0.5,
+    }
 }
 
 impl EnemyView for LiveWorld<'_> {

@@ -1,26 +1,38 @@
-//! `PKT-427` (partial): `AISkirmishPlayer` as far as a game start reaches it:
-//! `newMap` with `adjustBuildList`, which moves the faction's build list to the
-//! player's start spot and turns it toward the middle of the map.
+//! `PKT-427` (partial): `AISkirmishPlayer`: `newMap` with `adjustBuildList`,
+//! which moves the faction's build list to the player's start spot and turns it
+//! toward the middle of the map; `processBaseBuilding` and
+//! `buildSpecificAIBuilding`.
 //!
-//! Not ported: `update` and what it drives.
+//! Not ported: team building (`doTeamBuilding`, `processTeamBuilding`,
+//! `startTraining`, `buildSpecificAITeam`, `recruitSpecificAITeam`),
+//! `queueDozer`'s override, base defenses, `checkBridges` and superweapon
+//! targeting.
 //!
 //! Golden tests: `crates/zh_logic/tests/golden_ai_new_map.rs`
 //! (`docs/golden_vectors/AiNewMap.json`, recorded from the running reference engine
-//! by `tests/cpp_harness/gen_ai_new_map.py`) and `golden_game_start.rs`.
+//! by `tests/cpp_harness/gen_ai_new_map.py`), `golden_game_start.rs` and
+//! `golden_game_frames.rs`.
 
 use zh_common::math::{gm_cosf, gm_sinf, Coord3D, Region3D};
 use std::collections::BTreeMap;
 
-use zh_common::types::{Bool, Int, Real, UnsignedInt, FALSE, TRUE};
+use zh_common::types::{Bool, Int, ObjectId, Real, UnsignedInt, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
 use crate::ai::ai_player::{
-    build_initial_structures, compute_center_and_radius_of_base, AiPlayer,
+    ai_mut, build_initial_structures, build_structure_with_dozer,
+    compute_center_and_radius_of_base, find_dozer, is_location_safe, owner_of, queue_dozer,
+    AiPlayer,
 };
+use crate::arena::{ObjectSlot, ThingTemplateId};
+use crate::modules::module::{CanMakeType, CommandSourceType};
+use crate::modules::update::ai_update::{AiCommandParms, AiCommandType};
 use crate::player::build_assistant::{BuildContext, PI};
 use crate::player::seams::PlayerIndex;
+use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::KindOfType;
-use crate::sim::SimView;
+use crate::rules::object_status_types::ObjectStatusType;
+use crate::sim::{SimContext, SimView};
 use crate::spatial::sides_list::BuildListInfo;
 
 /// The members `AISkirmishPlayer::xfer` adds.
@@ -294,4 +306,288 @@ pub fn new_map(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         compute_center_and_radius_of_base(cx, player);
     }
     build_initial_structures(cx, player, 0);
+}
+
+// -----------------------------------------------------------------------------
+// Base building
+// -----------------------------------------------------------------------------
+
+/// `LOGICFRAMES_PER_SECOND`.
+const FRAMES_PER_SECOND: Int = 30;
+
+/// What `processBaseBuilding` reads of a build list template.
+struct Plan {
+    id: ThingTemplateId,
+    power: bool,
+    cash_generator: bool,
+    footprint_radius: Real,
+}
+
+fn plan_of(sim: &SimContext, name: &str) -> Option<Plan> {
+    let factory = &sim.rules.thing_factory;
+    let id = factory.find_template_id(name)?;
+    let template = factory.find_template_final(name)?;
+    Some(Plan {
+        id,
+        power: template.is_kind_of(KindOfType::FsPower) != FALSE,
+        cash_generator: template.is_kind_of(KindOfType::CashGenerator) != FALSE,
+        footprint_radius: template
+            .get_template_geometry_info()
+            .get_bounding_circle_radius(),
+    })
+}
+
+/// `powerPlan->isEquivalentTo(bldgPlan)`; nothing is equivalent to no plan.
+fn equivalent(sim: &SimContext, a: ThingTemplateId, b: Option<ThingTemplateId>) -> bool {
+    let factory = &sim.rules.thing_factory;
+    let template = |id: ThingTemplateId| factory.find_by_template_id_final(id.0 as u16);
+    let (Some(a), Some(b)) = (template(a), b.and_then(template)) else {
+        return false;
+    };
+    a.is_equivalent_to(b) != FALSE
+}
+
+fn entry<'s>(cx: &'s mut BuildContext<'_>, player: PlayerIndex, at: usize) -> Option<&'s mut BuildListInfo> {
+    cx.players.player_mut(player)?.build_list.get_mut(at)
+}
+
+/// Looks after the listed building of entry `at`, if it had one: a lost or
+/// captured building is forgotten, and one under construction is given a dozer.
+/// Returns the object the entry named, whether construction of a power plant is
+/// going on, and `false` to skip the entry.
+fn tend_listed_building(
+    cx: &mut BuildContext<'_>,
+    player: PlayerIndex,
+    at: usize,
+    power_under_construction: &mut bool,
+) -> (Option<ObjectSlot>, bool) {
+    let Some(id) = entry(cx, player, at).map(|e| e.object_id) else {
+        return (None, false);
+    };
+    let building = cx.sim.world.objects.slot_by_id(id);
+    if id == ObjectId::INVALID {
+        return (building, true);
+    }
+    let frame = cx.sim.world.frame;
+    let forget = |cx: &mut BuildContext<'_>| {
+        if let Some(e) = entry(cx, player, at) {
+            e.object_id = ObjectId::INVALID;
+            e.object_timestamp = frame.wrapping_add(1);
+        }
+    };
+    let Some(slot) = building else {
+        forget(cx);
+        // A GLA rebuild hole takes the entry over.
+        let holes = cx
+            .sim
+            .world
+            .objects
+            .world_iter()
+            .any(|s| cx.sim.object_is_kind_of(s, KindOfType::RebuildHole) != FALSE);
+        if holes {
+            cx.unported("AIPlayer::processBaseBuilding with a rebuild hole");
+        }
+        return (None, true);
+    };
+    if owner_of(cx.sim, slot) != Some(player) {
+        // Captured.
+        forget(cx);
+        return (building, true);
+    }
+    let Some(object) = cx.sim.world.objects.get(slot) else {
+        return (building, true);
+    };
+    if object
+        .status
+        .test(ObjectStatusType::UnderConstruction.as_i32())
+        == FALSE
+    {
+        return (building, true);
+    }
+    let builder = object.builder_id;
+    if cx.sim.object_is_kind_of(slot, KindOfType::FsPower) != FALSE
+        && cx.sim.object_is_kind_of(slot, KindOfType::CashGenerator) == FALSE
+    {
+        *power_under_construction = true;
+    }
+    let position = *object.thing.get_position();
+    let mut dozer = cx.sim.world.objects.slot_by_id(builder);
+    let unfit = dozer.is_some_and(|d| {
+        owner_of(cx.sim, d) != Some(player)
+            || cx
+                .sim
+                .world
+                .objects
+                .get(d)
+                .is_some_and(|o| o.is_disabled_by_type(DisabledType::Unmanned) != FALSE)
+    });
+    if unfit {
+        dozer = None;
+        if let Some(o) = cx.sim.world.objects.get_mut(slot) {
+            o.builder_id = ObjectId::INVALID;
+        }
+    }
+    if dozer.is_none() {
+        queue_dozer(cx, player);
+        dozer = find_dozer(cx, player, &position);
+    }
+    let target = cx.sim.world.objects.id_of(slot);
+    let resumed = dozer.is_some_and(|d| {
+        if cx.sim.world.objects.get(d).and_then(|o| o.ai_slot).is_none() {
+            return false;
+        }
+        let mut order =
+            AiCommandParms::new(AiCommandType::ResumeConstruction, CommandSourceType::FromAi);
+        order.obj = target;
+        if !cx.sim.deliver_ai_command(d, order) {
+            cx.unported("aiResumeConstruction without resident AI");
+        }
+        true
+    });
+    (building, resumed)
+}
+
+/// `AISkirmishPlayer::processBaseBuilding`: picks one building of the list to
+/// build and gives it to a dozer. Only a priority entry, or a power plant, can be
+/// picked: the dozer is asked whether it can make the plan picked so far, and
+/// without one the answer is no.
+pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerIndex) {
+    let mut chosen: Option<(ThingTemplateId, usize)> = None;
+    let mut priority = false;
+    let mut power: Option<(ThingTemplateId, usize)> = None;
+    let frame = cx.sim.world.frame;
+    let under_powered = cx
+        .sim
+        .world
+        .player_energy
+        .get(&player)
+        .is_some_and(|e| e.has_sufficient_power(frame) == FALSE);
+    let mut power_under_construction = false;
+    let mut at = 0;
+    while let Some(name) = entry(cx, player, at).map(|e| e.template_name.clone()) {
+        let i = at;
+        at += 1;
+        if name.is_empty() {
+            continue;
+        }
+        let Some(plan) = plan_of(cx.sim, &name) else {
+            continue;
+        };
+        let (building, keep) = tend_listed_building(cx, player, i, &mut power_under_construction);
+        if !keep {
+            continue;
+        }
+        let rebuild_delay = cx
+            .sim
+            .rules
+            .ai_data
+            .rebuild_delay_seconds
+            .wrapping_mul(FRAMES_PER_SECOND) as UnsignedInt;
+        let Some(e) = entry(cx, player, i) else {
+            continue;
+        };
+        // Destroyed lately: wait before building it again.
+        if e.object_id == ObjectId::INVALID && e.object_timestamp > 0 {
+            if e.object_timestamp.wrapping_add(rebuild_delay) > frame {
+                continue;
+            }
+            e.object_timestamp = 0;
+        }
+        if building.is_some() {
+            continue;
+        }
+        let (location, priority_build, automatic, buildable) = (
+            e.location,
+            e.priority_build != FALSE,
+            e.automatically_build != FALSE,
+            e.is_buildable() != FALSE,
+        );
+        if !is_location_safe(cx.sim, player, &location, plan.footprint_radius) {
+            continue;
+        }
+        if priority_build && !priority {
+            chosen = Some((plan.id, i));
+            priority = true;
+        }
+        if plan.power && power.is_none() && !plan.cash_generator && (under_powered || automatic) {
+            power = Some((plan.id, i));
+        }
+        if !automatic {
+            continue;
+        }
+        let Some(dozer) = find_dozer(cx, player, &location) else {
+            if under_powered {
+                queue_dozer(cx, player);
+            }
+            continue;
+        };
+        let can = chosen.map_or(CanMakeType::NoPrereq, |(id, _)| {
+            cx.sim.production_can_make_unit(dozer, id, None)
+        });
+        if can != CanMakeType::Ok {
+            continue;
+        }
+        if buildable && chosen.is_none() {
+            chosen = Some((plan.id, i));
+        }
+    }
+    if let Some((id, i)) = power {
+        if !equivalent(cx.sim, id, chosen.map(|c| c.0)) && !power_under_construction {
+            chosen = Some((id, i));
+        }
+    }
+    let Some((what, i)) = chosen else {
+        return;
+    };
+    if build_structure_with_dozer(cx, player, what, i).is_none() {
+        return;
+    }
+    if let Some(e) = entry(cx, player, i) {
+        e.decrement_num_rebuilds();
+    }
+    let data = &cx.sim.rules.ai_data;
+    let (seconds, poor, wealthy, poor_mod, wealthy_mod) = (
+        data.structure_seconds,
+        data.resources_poor,
+        data.resources_wealthy,
+        data.structures_poor_mod,
+        data.structures_wealthy_mod,
+    );
+    let money = cx
+        .sim
+        .world
+        .player_default_teams
+        .get(&player)
+        .map_or(0, |&team| cx.sim.player_money(team));
+    if let Some(ai) = ai_mut(cx, player) {
+        ai.ready_to_build_structure = FALSE;
+        ai.structure_timer = (seconds * FRAMES_PER_SECOND as Real) as Int;
+        if money < poor as UnsignedInt {
+            ai.structure_timer = (ai.structure_timer as Real / poor_mod) as Int;
+        } else if money > wealthy as UnsignedInt {
+            ai.structure_timer = (ai.structure_timer as Real / wealthy_mod) as Int;
+        }
+        ai.frame_last_building_built = frame as Int;
+    }
+}
+
+/// `AISkirmishPlayer::buildSpecificAIBuilding`: the first listed building of that
+/// name which is not standing and not yet asked for gets priority.
+pub fn build_specific_ai_building(
+    sim: &SimContext,
+    ai: &mut AiPlayer,
+    list: &mut [BuildListInfo],
+    name: &str,
+) {
+    let wanted = list.iter_mut().find(|info| {
+        info.template_name == name
+            && !name.is_empty()
+            && sim.rules.thing_factory.find_template_id(name).is_some()
+            && sim.world.objects.slot_by_id(info.object_id).is_none()
+            && info.priority_build == FALSE
+    });
+    if let Some(info) = wanted {
+        info.priority_build = TRUE;
+        ai.build_delay = 0;
+    }
 }

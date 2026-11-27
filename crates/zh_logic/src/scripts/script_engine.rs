@@ -152,6 +152,12 @@ pub trait ScriptWorld {
     /// `Player::killPlayer`.
     fn kill_player(&mut self, player: ScriptPlayer);
 
+    // Orders to computer players; a player without an AI ignores them.
+    /// `Player::buildSpecificBuilding`.
+    fn ai_build_building(&mut self, player: ScriptPlayer, template: &str);
+    /// `Player::buildBySupplies`.
+    fn ai_build_by_supplies(&mut self, player: ScriptPlayer, minimum_cash: Int, template: &str);
+
     // Teams.
     fn team_prototype(&self, name: &str) -> Option<TeamPrototypeInfo>;
     fn team_name(&self, team: ScriptTeamId) -> String;

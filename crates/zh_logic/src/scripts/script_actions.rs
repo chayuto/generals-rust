@@ -90,6 +90,8 @@ pub const PORTED_ACTIONS: &[Int] = &[
     at::QUICKVICTORY,
     at::DEFEAT,
     at::LOCALDEFEAT,
+    at::SKIRMISH_BUILD_BUILDING,
+    at::AI_PLAYER_BUILD_SUPPLY_CENTER,
 ];
 
 impl ScriptEngine {
@@ -126,6 +128,17 @@ impl ScriptEngine {
                 &second.string_val,
                 third.int_val.wrapping_sub(1),
             ),
+            // The current player's.
+            at::SKIRMISH_BUILD_BUILDING => {
+                if let Some(p) = self.current_player {
+                    world.ai_build_building(p, &first);
+                }
+            }
+            at::AI_PLAYER_BUILD_SUPPLY_CENTER => {
+                if let Some(p) = self.player_from_name(world, &first) {
+                    world.ai_build_by_supplies(p, third.int_val, &second.string_val);
+                }
+            }
             at::TEAM_STOP_SEQUENTIAL_SCRIPT => {
                 if let Some(team) = self.team_named(world, &first) {
                     // The same as the team being destroyed.

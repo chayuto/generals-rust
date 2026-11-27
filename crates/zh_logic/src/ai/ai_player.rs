@@ -1,25 +1,46 @@
-//! `PKT-426` (partial): `AIPlayer` as far as a game start reaches it: the
-//! constructor's state, `newMap`, `buildStructureNow` and its `xfer`.
+//! `PKT-426` (partial): `AIPlayer`: the constructor's state, `newMap`,
+//! `buildStructureNow`, `xfer`, and the part of `update` the first 300 frames of a
+//! skirmish reach: the base building timers, `findDozer`, `isLocationSafe`,
+//! `buildStructureWithDozer`, `buildBySupplies` with `findSupplyCenter`, and the
+//! skill set choice of `doUpgradesAndSkills`.
 //!
-//! Not ported: `update` and everything it drives (base and team building, repairs,
-//! upgrades, superweapon targeting), so the build and ready queues stay empty.
+//! Not ported, each counted in `BuildContext::unported` where it is reached:
+//! `queueDozer`, the science purchase, `updateBridgeRepair` with a queued bridge,
+//! the base building of a non-skirmish player, and a rebuild hole. Not ported and
+//! not reached: team building (`doTeamBuilding`, `checkReadyTeams`,
+//! `checkQueuedTeams`, `queueUnits`, `selectTeamToBuild`, `startTraining`,
+//! `onUnitProduced`, so the build and ready queues stay empty), `repairStructure`,
+//! `buildUpgrade`, base defenses, guard and superweapon targeting, `crc` and
+//! `loadPostProcess`.
 //!
 //! Golden tests: `crates/zh_logic/tests/golden_ai_new_map.rs`
 //! (`docs/golden_vectors/AiNewMap.json`, recorded from the running reference engine
-//! by `tests/cpp_harness/gen_ai_new_map.py`) and `golden_game_start.rs`.
+//! by `tests/cpp_harness/gen_ai_new_map.py`), `golden_game_start.rs` and, for the
+//! update, `golden_game_frames.rs`.
 
-use zh_common::math::{gm_sqrtf, Coord2D, Coord3D};
-use zh_common::types::{Bool, Int, ObjectId, Real, XferVersion, FALSE, TRUE};
+use zh_common::math::{gm_sqrtf, Coord2D, Coord3D, Region3D};
+use zh_common::types::{
+    Bool, Int, ObjectId, Real, Relationship, UnsignedInt, XferVersion, FALSE, TRUE,
+};
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
 use crate::ai::ai_skirmish_player::{self, AiSkirmishPlayer};
-use crate::arena::ObjectSlot;
+use crate::arena::{ObjectSlot, ThingTemplateId};
+use crate::modules::update::ai_update::{AiUpdate, DerivedAi};
+use crate::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpdate;
+use crate::sim::PRIVATE_STATUS_OFF_MAP;
+use crate::player::player::Player;
+use crate::modules::update::dozer_ai_update::{is_task_pending, DOZER_TASK_BUILD};
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
-use crate::player::build_assistant::{build_object_now, BuildContext};
+use crate::player::build_assistant::{
+    build_object_now, build_object_with_dozer, is_location_legal_to_build, legal_options,
+    quick_path_available, BuildContext, LegalBuildCode, PlacementQuery,
+};
 use crate::player::seams::{AiKind, PlayerIndex};
 use crate::rules::kind_of::KindOfType;
 use crate::rules::object_status_types::ObjectStatusType;
-use crate::sim::{SimApi, SimView};
+use crate::sim::{SimApi, SimContext, SimView};
+use crate::spatial::partition_query::DistanceCalculationType;
 use crate::spatial::sides_list::BuildListInfo;
 
 /// `MAX_STRUCTURES_TO_REPAIR`.
@@ -446,4 +467,663 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
     if holes {
         cx.unported("AIPlayer::onStructureProduced with a rebuild hole");
     }
+}
+
+// -----------------------------------------------------------------------------
+// The frame update
+// -----------------------------------------------------------------------------
+
+/// `LOGICFRAMES_PER_SECOND` and `PATHFIND_CELL_SIZE_F`.
+const FRAMES_PER_SECOND: Int = 30;
+const PATHFIND_CELL_SIZE_F: Real = 10.0;
+
+/// `Player::update`'s `m_ai->update()`: `AIPlayer::update`, with the overrides of
+/// `AISkirmishPlayer`.
+///
+/// Not ported: the ready and build queues of teams (`checkReadyTeams`,
+/// `checkQueuedTeams`, `doTeamBuilding`).
+pub fn update(cx: &mut BuildContext<'_>, player: PlayerIndex) {
+    if !cx.sim.world.ai_players.contains_key(&player) {
+        return;
+    }
+    do_base_building(cx, player);
+    do_upgrades_and_skills(cx, player);
+    update_bridge_repair(cx, player);
+}
+
+/// `doUpgradesAndSkills`: once the player has points to spend, a skirmish AI picks
+/// one of its side's skill sets at random, and buys from it.
+///
+/// Not ported: the purchase itself (`attemptToPurchaseScience`).
+fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
+    // Nothing in the first two frames.
+    if cx.sim.world.frame < 2 {
+        return;
+    }
+    let Some(p) = cx.players.player(player) else {
+        return;
+    };
+    if p.science_purchase_points <= 0 {
+        return;
+    }
+    let Some(info) = cx
+        .sim
+        .rules
+        .ai_data
+        .side_info
+        .iter()
+        .find(|info| info.side == p.side)
+    else {
+        return;
+    };
+    let sizes: [usize; 5] = std::array::from_fn(|i| info.skill_sets[i].len());
+    let Some(ai) = cx.sim.world.ai_players.get(&player) else {
+        return;
+    };
+    let mut selector = ai.skillset_selector;
+    if selector == INVALID_SKILLSET_SELECTION {
+        selector = if ai.skirmish.is_some() {
+            // The sets after the first count while each of them has skills.
+            let limit = sizes[1..].iter().take_while(|&&size| size > 0).count();
+            cx.sim.world.rng.get_game_logic_random_value(0, limit as Int)
+        } else {
+            0
+        };
+        if let Some(ai) = ai_mut(cx, player) {
+            ai.skillset_selector = selector;
+        }
+    }
+    let set = usize::try_from(selector).ok().filter(|&i| i < 5).unwrap_or(0);
+    if sizes[set] > 0 {
+        cx.unported("Player::attemptToPurchaseScience");
+    }
+}
+
+/// The state of the player's AI. The callers have checked that there is one.
+pub(super) fn ai_mut<'s>(
+    cx: &'s mut BuildContext<'_>,
+    player: PlayerIndex,
+) -> Option<&'s mut AiPlayer> {
+    cx.sim.world.ai_players.get_mut(&player)
+}
+
+/// `doBaseBuilding` of either class. The skirmish AI never waits longer than three
+/// seconds to be ready.
+fn do_base_building(cx: &mut BuildContext<'_>, player: PlayerIndex) {
+    if !cx.players.player(player).is_some_and(|p| p.can_build_base) {
+        return;
+    }
+    let Some(ai) = ai_mut(cx, player) else {
+        return;
+    };
+    let skirmish = ai.skirmish.is_some();
+    if ai.ready_to_build_structure == FALSE {
+        ai.structure_timer = ai.structure_timer.wrapping_sub(1);
+        if ai.structure_timer <= 0 {
+            ai.ready_to_build_structure = TRUE;
+            ai.build_delay = 0;
+        }
+        if skirmish && ai.structure_timer > 3 * FRAMES_PER_SECOND {
+            ai.structure_timer = 3 * FRAMES_PER_SECOND;
+        }
+    }
+    // A building or a unit finishing shortcuts the delay.
+    ai.build_delay = ai.build_delay.wrapping_sub(1);
+    if ai.build_delay >= 1 {
+        return;
+    }
+    if ai.ready_to_build_structure != FALSE {
+        if skirmish {
+            ai_skirmish_player::process_base_building(cx, player);
+        } else if cx
+            .players
+            .player(player)
+            .is_some_and(|p| !p.build_list.is_empty())
+        {
+            cx.unported("AIPlayer::processBaseBuilding of a non-skirmish player");
+        }
+    }
+    if let Some(ai) = ai_mut(cx, player) {
+        if ai.build_delay < 1 {
+            ai.build_delay = 2 * FRAMES_PER_SECOND;
+        }
+    }
+}
+
+/// What `findDozer` asks a dozer or worker.
+struct DozerState {
+    any_task_pending: bool,
+    building: bool,
+    /// A worker made to go for supplies.
+    forced_to_gather: bool,
+}
+
+fn dozer_state(sim: &SimContext, slot: ObjectSlot) -> Option<DozerState> {
+    let module = sim.world.objects.get(slot)?.ai_slot?;
+    let ai = sim
+        .world
+        .modules
+        .payload(module)?
+        .as_any()?
+        .downcast_ref::<AiUpdate>()?;
+    let (brain, forced) = match &ai.derived {
+        DerivedAi::Dozer(d) => (&d.brain, false),
+        // The supply half of the worker is not ported: none is ferrying.
+        DerivedAi::Worker(w) => (&w.brain, w.force_pending != FALSE),
+        DerivedAi::Base => return None,
+    };
+    Some(DozerState {
+        any_task_pending: (0..brain.tasks.len() as Int).any(|t| is_task_pending(brain, t)),
+        building: is_task_pending(brain, DOZER_TASK_BUILD),
+        forced_to_gather: forced,
+    })
+}
+
+pub(super) fn owner_of(sim: &SimContext, slot: ObjectSlot) -> Option<PlayerIndex> {
+    sim.controlling_player(sim.world.objects.get(slot)?.team_id)
+}
+
+/// `findDozer`: the closest idle dozer to `pos`, else the first that is not
+/// building. Queues a dozer if the player has none.
+pub(super) fn find_dozer(
+    cx: &mut BuildContext<'_>,
+    player: PlayerIndex,
+    pos: &Coord3D,
+) -> Option<ObjectSlot> {
+    let repair_dozer = cx.sim.world.ai_players.get(&player)?.repair_dozer;
+    let mut dozer = None;
+    let mut need_dozer = true;
+    let mut closest: Option<(ObjectSlot, Real)> = None;
+    for slot in cx.sim.world.objects.world_iter() {
+        if owner_of(cx.sim, slot) != Some(player)
+            || cx.sim.object_is_kind_of(slot, KindOfType::Dozer) == FALSE
+        {
+            continue;
+        }
+        let Some(state) = dozer_state(cx.sim, slot) else {
+            continue;
+        };
+        if !state.any_task_pending && state.forced_to_gather {
+            continue;
+        }
+        if cx.sim.world.objects.id_of(slot) == Some(repair_dozer) {
+            continue;
+        }
+        need_dozer = false;
+        if state.building {
+            continue;
+        }
+        if !state.any_task_pending || dozer.is_none() {
+            dozer = Some(slot);
+        }
+        if state.any_task_pending {
+            continue;
+        }
+        let Some(at) = dozer
+            .and_then(|d| cx.sim.world.objects.get(d))
+            .map(|o| *o.thing.get_position())
+        else {
+            continue;
+        };
+        let dx = pos.x - at.x;
+        let dy = pos.y - at.y;
+        let squared = dx * dx + dy * dy;
+        if closest.is_none_or(|(_, best)| squared < best) {
+            closest = dozer.map(|d| (d, squared));
+        }
+    }
+    if need_dozer {
+        queue_dozer(cx, player);
+    }
+    closest.map(|c| c.0).or(dozer)
+}
+
+/// `queueDozer`: not ported.
+pub(super) fn queue_dozer(cx: &mut BuildContext<'_>, _player: PlayerIndex) {
+    cx.unported("AIPlayer::queueDozer");
+}
+
+/// `isLocationSafe`: no enemy of any account stands within the supply center safe
+/// radius of where `template`'s footprint would reach.
+pub(super) fn is_location_safe(
+    sim: &SimContext,
+    player: PlayerIndex,
+    pos: &Coord3D,
+    footprint_radius: Real,
+) -> bool {
+    let radius = sim.rules.ai_data.supply_center_safe_radius + footprint_radius;
+    let mut allow = |slot| {
+        let Some(other) = sim.world.objects.get(slot) else {
+            return false;
+        };
+        let kind = |k| sim.object_is_kind_of(slot, k) != FALSE;
+        // Enemies only, and not the player's own.
+        let owner = sim.controlling_player(other.team_id);
+        let relationship = owner.and_then(|o| sim.world.player_relationships.get(&(player, o)));
+        if relationship != Some(&Relationship::Enemies) || owner == Some(player) {
+            return false;
+        }
+        if other.is_effectively_dead() != FALSE {
+            return false;
+        }
+        let has = |s: ObjectStatusType| other.status.test(s.as_i32()) != FALSE;
+        if has(ObjectStatusType::Stealthed)
+            && !has(ObjectStatusType::Detected)
+            && !has(ObjectStatusType::Disguised)
+        {
+            return false;
+        }
+        // An empty or ungarrisonable civilian building is not significant.
+        if kind(KindOfType::Structure)
+            && !FACTION_STRUCTURE_KINDS.iter().any(|&k| kind(k))
+            && other.contain_slot.is_some()
+            && (sim.contain_is_garrisonable(slot) == FALSE || sim.contain_count(slot) == 0)
+        {
+            return false;
+        }
+        !kind(KindOfType::Harvester) && !kind(KindOfType::Dozer)
+    };
+    sim.closest_object_to_position(
+        pos,
+        radius,
+        DistanceCalculationType::FromBoundingSphere2d,
+        &mut allow,
+    )
+    .is_none()
+}
+
+/// `KINDOFMASK_FS`.
+const FACTION_STRUCTURE_KINDS: [KindOfType; 14] = [
+    KindOfType::FsFactory,
+    KindOfType::FsBaseDefense,
+    KindOfType::FsTechnology,
+    KindOfType::FsSupplyDropzone,
+    KindOfType::FsSuperweapon,
+    KindOfType::FsBlackMarket,
+    KindOfType::FsSupplyCenter,
+    KindOfType::FsStrategyCenter,
+    KindOfType::FsFake,
+    KindOfType::FsInternetCenter,
+    KindOfType::FsAdvancedTech,
+    KindOfType::FsBarracks,
+    KindOfType::FsWarfactory,
+    KindOfType::FsAirfield,
+];
+
+/// `buildStructureWithDozer` of build list entry `at`: finds a legal place near the
+/// listed one and gives a dozer the order. Returns the new building.
+pub(super) fn build_structure_with_dozer(
+    cx: &mut BuildContext<'_>,
+    player: PlayerIndex,
+    what: ThingTemplateId,
+    at: usize,
+) -> Option<ObjectId> {
+    let info = cx.players.player(player)?.build_list.get(at)?.clone();
+    let dozer = find_dozer(cx, player, &info.location)?;
+    let team = cx.sim.world.objects.get(dozer)?.team_id;
+    let default_team = *cx.sim.world.player_default_teams.get(&player)?;
+    if cx.sim.player_money(default_team) < cx.sim.unit_cost_to_build(team, what) as UnsignedInt {
+        return None;
+    }
+    let mut pos = info.location;
+    pos.z += cx.sim.terrain.get_ground_height(pos.x, pos.y, None);
+    let angle = info.angle;
+    let skirmish = cx.sim.world.ai_players.get(&player)?.skirmish.is_some();
+    let pos = find_place(cx, player, what, dozer, pos, angle, skirmish)?;
+
+    // A dozer that cannot reach the site is put there.
+    if !quick_path_available(cx.sim, dozer, &pos) {
+        cx.sim.set_object_position(dozer, &pos);
+    }
+    let built = build_object_with_dozer(cx.sim, &mut *cx.unported, dozer, what, &pos, angle)?;
+    // The natural rally point is asked for and never set.
+    let id = cx.sim.world.objects.id_of(built)?;
+    let frame = cx.sim.world.frame;
+    let info = cx.players.player_mut(player)?.build_list.get_mut(at)?;
+    info.object_id = id;
+    info.object_timestamp = frame.wrapping_add(1);
+    info.under_construction = TRUE;
+    Some(id)
+}
+
+/// Where `buildStructureWithDozer` builds: the listed place, else the first legal
+/// one of widening squares around it, else the listed place if only friends are in
+/// the way.
+fn find_place(
+    cx: &BuildContext<'_>,
+    player: PlayerIndex,
+    what: ThingTemplateId,
+    dozer: ObjectSlot,
+    pos: Coord3D,
+    angle: Real,
+    skirmish: bool,
+) -> Option<Coord3D> {
+    use legal_options::*;
+    let skirmish_player = cx
+        .players
+        .player(player)
+        .is_some_and(|p| p.ai == Some(AiKind::Skirmish));
+    let sim = &*cx.sim;
+    let extent = cx.pathfind_extent;
+    let legal = |at: &Coord3D, options| {
+        is_location_legal_to_build(
+            sim,
+            &PlacementQuery {
+                pos: at,
+                what,
+                angle,
+                options,
+                builder: Some(dozer),
+                skirmish_ai: skirmish_player,
+                pathfind_extent: &extent,
+            },
+        ) == LegalBuildCode::Ok
+    };
+    // Enemy units or structures there: do not build at all.
+    if !legal(&pos, NO_ENEMY_OBJECT_OVERLAP) {
+        return None;
+    }
+    let full = CLEAR_PATH | TERRAIN_RESTRICTIONS | NO_OBJECT_OVERLAP;
+    if legal(&pos, full) {
+        return Some(pos);
+    }
+    let cell = PATHFIND_CELL_SIZE_F;
+    let limit = if skirmish { 120.0 * cell } else { 10.0 * cell };
+    // The skirmish AI steps twice as far.
+    let mut new_pos = pos;
+    let mut pos_offset: Real = 0.0;
+    while pos_offset < limit {
+        if skirmish {
+            pos_offset += 2.0 * cell;
+        }
+        let offset = pos_offset / 2.0;
+        let mut valid = false;
+        let mut y = pos.y - offset;
+        let mut x = pos.x - offset;
+        while x <= pos.x + offset {
+            if skirmish {
+                x += cell;
+            }
+            new_pos.x = x;
+            new_pos.y = y;
+            valid = legal(&new_pos, full);
+            if valid {
+                break;
+            }
+            new_pos.y = y + pos_offset;
+            valid = legal(&new_pos, full);
+            x += cell;
+        }
+        // The `if (valid) break` after the second test is missing in the
+        // reference, so the row is finished and `valid` is the last test.
+        if valid {
+            return Some(new_pos);
+        }
+        x = pos.x - offset;
+        y = pos.y - offset;
+        while y <= pos.y + offset {
+            if skirmish {
+                y += cell;
+            }
+            new_pos.x = x;
+            new_pos.y = y;
+            valid = legal(&new_pos, full);
+            if valid {
+                break;
+            }
+            new_pos.x = x + pos_offset;
+            valid = legal(&new_pos, full);
+            y += cell;
+        }
+        if valid {
+            return Some(new_pos);
+        }
+        pos_offset += 2.0 * cell;
+    }
+    legal(&pos, NO_ENEMY_OBJECT_OVERLAP).then_some(pos)
+}
+
+/// `updateBridgeRepair` as far as an empty queue: entries are only added by
+/// `repairStructure`, which is not ported.
+fn update_bridge_repair(cx: &mut BuildContext<'_>, player: PlayerIndex) {
+    if ai_mut(cx, player).is_some_and(|ai| ai.structures_in_queue != 0) {
+        cx.unported("AIPlayer::updateBridgeRepair");
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Orders from scripts
+// -----------------------------------------------------------------------------
+
+/// `SUPPLY_CENTER_CLOSE_DIST`.
+const SUPPLY_CENTER_CLOSE_DIST: Real = 20.0 * PATHFIND_CELL_SIZE_F;
+
+/// The computer player a script order is for.
+pub struct SupplyOrder<'a> {
+    pub sim: &'a SimContext,
+    pub ai: &'a mut AiPlayer,
+    pub player: &'a mut Player,
+    /// The middle of the structures of `getAiEnemy`, if it has an enemy.
+    pub enemy_center: Option<Coord2D>,
+    /// `TheTerrainLogic->getMaximumPathfindExtent`.
+    pub pathfind_extent: Region3D,
+}
+
+/// `getBoxesStored` of the object's `SupplyWarehouseDockUpdate`.
+fn warehouse_boxes(sim: &SimContext, slot: ObjectSlot) -> Option<Int> {
+    sim.world
+        .objects
+        .get(slot)?
+        .behaviors
+        .iter()
+        .find_map(|&(module, _)| {
+            sim.world
+                .modules
+                .payload(module)?
+                .as_any()?
+                .downcast_ref::<SupplyWarehouseDockUpdate>()
+                .map(|dock| dock.boxes_stored)
+        })
+}
+
+/// `findSupplyCenter`: the supply source closest to the base which holds enough,
+/// is no enemy's, has no cash generator of the player by it and is not much closer
+/// to the enemy. The wanted sum is halved until one is found.
+pub fn find_supply_center(order: &SupplyOrder<'_>, minimum_cash: Int) -> Option<ObjectSlot> {
+    let sim = order.sim;
+    let me = order.ai.player;
+    let base = order.ai.base_center;
+    let mut minimum = minimum_cash;
+    loop {
+        let mut best: Option<(ObjectSlot, Real)> = None;
+        for slot in sim.world.objects.world_iter() {
+            let kind = |k| sim.object_is_kind_of(slot, k) != FALSE;
+            if !kind(KindOfType::Structure) || !kind(KindOfType::SupplySource) {
+                continue;
+            }
+            let (Some(boxes), Some(object)) =
+                (warehouse_boxes(sim, slot), sim.world.objects.get(slot))
+            else {
+                continue;
+            };
+            let cash = boxes.wrapping_mul(sim.rules.global_data.base_value_per_supply_box);
+            if cash < minimum {
+                continue;
+            }
+            let owner = sim.controlling_player(object.team_id);
+            if owner.and_then(|o| sim.world.player_relationships.get(&(me, o)))
+                == Some(&Relationship::Enemies)
+            {
+                continue;
+            }
+            let center = *object.thing.get_position();
+            let radius = SUPPLY_CENTER_CLOSE_DIST + object.geometry.get_bounding_circle_radius();
+            let mut mine = |s| {
+                sim.object_is_kind_of(s, KindOfType::CashGenerator) != FALSE
+                    && owner_of(sim, s) == Some(me)
+                    && sim
+                        .world
+                        .objects
+                        .get(s)
+                        .is_some_and(|o| o.private_status & PRIVATE_STATUS_OFF_MAP == 0)
+            };
+            let taken = sim.closest_object_to_position(
+                &center,
+                radius,
+                DistanceCalculationType::FromBoundingSphere2d,
+                &mut mine,
+            );
+            if taken.is_some() {
+                continue;
+            }
+            let dx = center.x - base.x;
+            let dy = center.y - base.y;
+            let squared = dx * dx + dy * dy;
+            if let Some(enemy) = order.enemy_center {
+                let ex = center.x - enemy.x;
+                let ey = center.y - enemy.y;
+                // `distSqr*0.4` is a double, the other side a float.
+                let theirs = (ex * ex + ey * ey) * 0.6;
+                if f64::from(squared) * 0.4 > f64::from(theirs) {
+                    continue;
+                }
+            }
+            if best.is_none_or(|(_, d)| d > squared) {
+                best = Some((slot, squared));
+            }
+        }
+        if best.is_some() {
+            return best.map(|b| b.0);
+        }
+        minimum /= 2;
+        if minimum <= 100 {
+            return None;
+        }
+    }
+}
+
+/// `buildBySupplies`: lists one `template_name` to be built next to a supply
+/// source, a cash generator on the side facing the base and anything else on the
+/// side facing the enemy.
+pub fn build_by_supplies(order: &mut SupplyOrder<'_>, minimum_cash: Int, template_name: &str) {
+    use legal_options::*;
+    let sim = order.sim;
+    let factory = &sim.rules.thing_factory;
+    let (Some(what), Some(template)) = (
+        factory.find_template_id(template_name),
+        factory.find_template_final(template_name),
+    ) else {
+        return;
+    };
+    let cash_generator = template.is_kind_of(KindOfType::CashGenerator) != FALSE;
+    let mut best = find_supply_center(order, minimum_cash);
+    if !cash_generator {
+        best = sim
+            .world
+            .objects
+            .slot_by_id(order.ai.cur_warehouse_id)
+            .or(best);
+    }
+    let Some((warehouse, object)) = best.and_then(|s| Some((s, sim.world.objects.get(s)?))) else {
+        return;
+    };
+    let mut location = *object.thing.get_position();
+    let normalized = |x: Real, y: Real| {
+        let length = gm_sqrtf(x * x + y * y);
+        if length != 0.0 {
+            (x / length, y / length)
+        } else {
+            (x, y)
+        }
+    };
+    // Back towards the base.
+    let mut offset = normalized(
+        location.x - order.ai.base_center.x,
+        location.y - order.ai.base_center.y,
+    );
+    let mut radius = 3.0 * PATHFIND_CELL_SIZE_F;
+    if !cash_generator {
+        // Probably a defensive structure: towards the enemy.
+        let enemy = order.enemy_center.unwrap_or_default();
+        offset = normalized(location.x - enemy.x, location.y - enemy.y);
+        radius = object.geometry.get_bounding_circle_radius();
+    }
+    location.x -= offset.0 * radius;
+    location.y -= offset.1 * radius;
+    let angle = template.get_placement_view_angle();
+    let skirmish_ai = order.player.ai == Some(AiKind::Skirmish);
+    let extent = order.pathfind_extent;
+    let legal = |at: &Coord3D, options| {
+        is_location_legal_to_build(
+            sim,
+            &PlacementQuery {
+                pos: at,
+                what,
+                angle,
+                options,
+                builder: None,
+                skirmish_ai,
+                pathfind_extent: &extent,
+            },
+        ) == LegalBuildCode::Ok
+    };
+    if !legal(&location, NO_OBJECT_OVERLAP) {
+        let full = CLEAR_PATH | TERRAIN_RESTRICTIONS | NO_OBJECT_OVERLAP;
+        if let Some(found) = wiggle(&location, |at| legal(at, full)) {
+            location = found;
+        }
+    }
+    // Build list locations are relative to the ground.
+    location.z = 0.0;
+    let warehouse_id = sim.world.objects.id_of(warehouse);
+    let mut info = BuildListInfo::new();
+    info.template_name = template_name.to_owned();
+    info.location = location;
+    info.angle = angle;
+    info.priority_build = TRUE;
+    info.num_rebuilds = 1;
+    order.player.build_list.insert(0, info);
+    if let Some(id) = warehouse_id {
+        order.ai.cur_warehouse_id = id;
+    }
+}
+
+/// The widening squares `buildBySupplies` searches around `center`.
+fn wiggle(center: &Coord3D, legal: impl Fn(&Coord3D) -> bool) -> Option<Coord3D> {
+    let cell = PATHFIND_CELL_SIZE_F;
+    let mut at = *center;
+    let mut pos_offset: Real = 0.0;
+    while pos_offset < 2.0 * SUPPLY_CENTER_CLOSE_DIST {
+        let offset = pos_offset / 2.0;
+        let y = center.y - offset;
+        let mut x = center.x - offset;
+        while x <= center.x + offset {
+            at.x = x;
+            at.y = y;
+            if legal(&at) {
+                return Some(at);
+            }
+            at.y = y + pos_offset;
+            if legal(&at) {
+                return Some(at);
+            }
+            x += cell;
+        }
+        let x = center.x - offset;
+        let mut y = center.y - offset;
+        while y <= center.y + offset {
+            at.x = x;
+            at.y = y;
+            if legal(&at) {
+                return Some(at);
+            }
+            at.x = x + pos_offset;
+            if legal(&at) {
+                return Some(at);
+            }
+            y += cell;
+        }
+        pos_offset += 2.0 * cell;
+    }
+    None
 }

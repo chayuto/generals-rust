@@ -612,6 +612,9 @@ impl ScriptWorld for World {
     fn unported_action(&mut self, _action: &ScriptAction) {
         self.unported += 1;
     }
+    // Computer players are not part of the recording.
+    fn ai_build_building(&mut self, _player: ScriptPlayer, _template: &str) {}
+    fn ai_build_by_supplies(&mut self, _player: ScriptPlayer, _cash: Int, _template: &str) {}
 }
 
 fn read_parms(t: &mut Tokens) -> (Int, Vec<Parameter>) {
@@ -1016,6 +1019,10 @@ fn script_engine_matches_the_reference() {
         at::WAREHOUSE_SET_VALUE,
         at::AUDIO_OVERRIDE_VOLUME_TYPE,
         at::SHOW_WEATHER,
+        // Orders to computer players, carried out by the host:
+        // `golden_game_frames`.
+        at::SKIRMISH_BUILD_BUILDING,
+        at::AI_PLAYER_BUILD_SUPPLY_CENTER,
     ];
     for a in PORTED_ACTIONS {
         assert!(
@@ -1186,7 +1193,7 @@ fn every_type_is_ported_or_reaches_the_host() {
         }
     }
     assert_eq!(PORTED_CONDITIONS.len(), 49);
-    assert_eq!(PORTED_ACTIONS.len(), 70);
+    assert_eq!(PORTED_ACTIONS.len(), 72);
     let distinct: BTreeSet<Int> = PORTED_ACTIONS.iter().copied().collect();
     assert_eq!(distinct.len(), PORTED_ACTIONS.len());
     // None of the ported ones goes to the host.

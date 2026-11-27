@@ -22,12 +22,14 @@ use zh_common::io::file::OsDiskFileHost;
 use zh_common::io::recorder::ReplayReader;
 use zh_common::math::Coord3D;
 use zh_common::types::{Bool, ObjectId, TeamId};
+use zh_logic::ai::ai_player;
 use zh_logic::arena::FacetMask;
 use zh_logic::gamelogic::command_target::{dispatch_command, CommandState};
 use zh_logic::gamelogic::frame::{run_frame, FrameSeams};
 use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader, StartupStores};
 use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, ReplayGameRules};
 use zh_logic::modules::update::ai_update::AiUpdate;
+use zh_logic::player::build_assistant::BuildContext;
 use zh_logic::player::player_list::PlayerList;
 use zh_logic::player::team::TeamFactory;
 use zh_logic::scripts::{GameScripts, ScriptGame};
@@ -224,6 +226,8 @@ struct Playback<'a> {
 /// The unported parts of a frame this comparison runs: the commands and the scripts.
 struct Frame<'p, 'a, 'g> {
     playback: &'p mut Playback<'a>,
+    /// What the computer players' updates could not carry out.
+    unported: &'p mut BTreeMap<&'static str, u32>,
     scripts: &'g mut GameScripts,
     players: &'g mut PlayerList,
     teams: &'g mut TeamFactory,
@@ -242,6 +246,21 @@ impl FrameSeams for Frame<'_, '_, '_> {
             named_objects: self.named_objects,
         };
         self.scripts.update(sim, game);
+    }
+
+    fn player_ai(&mut self, sim: &mut SimContext, player: i32) {
+        let pathfind_extent = sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        let mut cx = BuildContext {
+            sim,
+            players: self.players,
+            named: self.named_objects,
+            unported: self.unported,
+            pathfind_extent,
+        };
+        ai_player::update(&mut cx, player);
     }
 
     fn is_time_frozen(&mut self, _sim: &SimContext) -> Bool {
@@ -413,9 +432,11 @@ fn compare(
     let mut first: BTreeMap<String, u32> =
         field_names().into_iter().map(|f| (f, FRAMES + 1)).collect();
     let mut tags = BTreeMap::new();
+    let mut unported = BTreeMap::new();
     for frame in 1..=FRAMES {
         let mut seams = Frame {
             playback: &mut playback,
+            unported: &mut unported,
             scripts: &mut started.scripts,
             players: &mut started.players,
             teams: &mut started.teams,
@@ -458,6 +479,7 @@ fn compare(
             "{game}: commands not carried out {:?}",
             playback.state.not_carried_out
         );
+        eprintln!("{game}: unported computer player calls {unported:?}");
         eprintln!(
             "{game}: unported conditions {:?} actions {:?} calls {:?}",
             started.scripts.engine.unported_conditions,
