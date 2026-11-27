@@ -59,6 +59,7 @@ python3 scripts/test_gen_engine_sim.py
 python3 scripts/test_module_census.py
 python3 scripts/test_swap_candidates.py
 python3 scripts/test_check_vendor.py
+python3 scripts/test_mutate_check.py
 python3 scripts/check_vendor.py
 python3 scripts/lint_determinism.py
 python3 scripts/port_map.py --check
