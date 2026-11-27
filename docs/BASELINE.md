@@ -35,6 +35,7 @@ A full check takes about 10 seconds. The baseline is `docs/baselines/replay_crc.
 | `ModelConditionUpgrade::upgradeImplementation` (the upgrade mux stays in C++) | `.../Object/Upgrade/ModelConditionUpgrade.cpp` | `PKT-223` |
 | `RadarUpdate`, `extendRadar` and `update` (members, `crc` and `xfer` stay in C++) | `.../Object/Update/RadarUpdate.cpp` | `PKT-358` |
 | `PowerPlantUpdate`, constructor, `extendRods` and `update` (`m_extended`, `crc` and `xfer` stay in C++) | `.../Object/Update/PowerPlantUpdate.cpp` | `PKT-351` |
+| `DefaultProductionExitUpdate`, `exitObjectViaDoor`, `getExitPosition` and `getNaturalRallyPoint` (the rally point, `crc` and `xfer` stay in C++) | `.../Object/Update/ProductionExitUpdate/DefaultProductionExitUpdate.cpp` | `PKT-315` |
 | The sleepy-update heap, which orders every module update (`m_sleepyUpdates` stays the storage) | `GeneralsMD/.../GameLogic/System/GameLogic.cpp`, the heap functions and the early returns of `friend_awakenUpdateModule` | `WP-7.1` |
 
 Nothing else. `zh_ffi` also exports the byte CRC, but the engine does not call it.
@@ -43,7 +44,7 @@ A swapped function that tells the engine about a change must store the change fi
 
 ## Running a ported module in the engine
 
-Behavior modules are written against the `SimView`/`SimApi` traits. `zh_ffi::engine_sim::EngineSim` implements both over C++ callbacks, bound to one object for one call. `scripts/gen_engine_sim.py` writes the impl; a method it does not connect aborts the game with its name. To connect one, add it to `WIRED` in the script, write `engine_<name>` in `engine_sim.rs`, extend `ZhEngineSimCallbacks`, answer it once in `include/zh_ffi_engine_sim.inc` (shared by every swapped module) and in `src/test_engine.rs`, and rerun the script. The trait methods that return references (`object`, `rules` and so on) cannot be connected this way; see `OPEN_DECISIONS.md` item 10.
+Behavior modules are written against the `SimView`/`SimApi` traits. `zh_ffi::engine_sim::EngineSim` implements both over C++ callbacks, bound to one object for one call. `scripts/gen_engine_sim.py` writes the impl; a method it does not connect aborts the game with its name. To connect one, add it to `WIRED` in the script, write `engine_<name>` in `engine_sim.rs`, extend `ZhEngineSimCallbacks`, answer it once in `include/zh_ffi_engine_sim.inc` (shared by every swapped module) and in `src/test_engine.rs`, and rerun the script. The trait methods that return references (`object`, `rules` and so on) cannot be connected this way. For `object`, replace the module's field reads with value-returning accessors (`object_transform` and the like) and connect those; do not build an `ObjectRecord` in the adapter. See `OPEN_DECISIONS.md` item 10. A call can also bind a second object (`GUEST`, the unit leaving a factory); each adapter method accepts only the object it can answer for.
 
 ## The fault test
 
@@ -56,6 +57,7 @@ python3 scripts/build_rust_engine.py --mutate lifetime     # every lifetime one 
 python3 scripts/build_rust_engine.py --mutate warehouse    # no player learns of a supply warehouse
 python3 scripts/build_rust_engine.py --mutate armor        # armor upgrade never applied (passes: not reached)
 python3 scripts/build_rust_engine.py --mutate modelcondition  # condition never set (passes: not reached)
+python3 scripts/build_rust_engine.py --mutate exit         # producer's facing read half a radian off
 python3 scripts/build_rust_engine.py --mutate radar        # RadarUpdate never runs again
 python3 scripts/build_rust_engine.py --mutate powerplant   # new power plants wake next frame, not never
 python3 scripts/build_rust_engine.py --mutate money        # all income halved
@@ -73,6 +75,7 @@ python3 scripts/check_replays.py --check --expect-rust \
 | `warehouse` | all six (frames 1100 to 1800) |
 | `armor` | **none**: never called |
 | `modelcondition` | **none**: never called |
+| `exit` | all six (frames 300 to 500) |
 | `radar` | all six (frames 900 to 2700) |
 | `powerplant` | all six (frames 900 to 2800) |
 | `money` | **none** (see the witness check) |
@@ -90,12 +93,17 @@ Calls from the engine over the six replays, counted with temporary logging:
 | `SupplyWarehouseCreate::onCreate` | 224 (6), 1,472 player registrations | yes |
 | `ArmorUpgrade::upgradeImplementation` | 0 | nothing |
 | `ModelConditionUpgrade::upgradeImplementation` | 0 | nothing |
+| `DefaultProductionExitUpdate::exitObjectViaDoor` | 117 (6), all with a ground-moving AI; rally point set in 7 (2) | transform, facing, the exit order and the rally leg |
+| `DefaultProductionExitUpdate::getNaturalRallyPoint` | 36 (6) | nothing |
+| `DefaultProductionExitUpdate::getExitPosition` | 0 | nothing |
 | `RadarUpdate::extendRadar` | 36 (4) | the call count only; see below |
 | `RadarUpdate::update` | 1,506,002 (6), 30 extensions finished | the returned sleep only |
 | `PowerPlantUpdate` constructor | 35 (6) | the wake frame |
 | `PowerPlantUpdate::extendRods`, `update` | 0 | nothing |
 
 The `radar` and `powerplant` faults appear to be caught through update order, since a module that sleeps differently moves other modules in the heap (inferred, not traced). The CRC does not cover these modules' model conditions or members. One-off faults that dropped every `RadarUpdate` model condition passed all six with the done frame also 3,000 frames late, although the drawable was present on all 96 condition calls. So no replay run says anything about its members or conditions.
+
+One-off faults in the exit swap: dropping the exit order fails all six (frames 300 to 500) and dropping the rally point fails two (`linux_2p_vanilla` at 600, `macos_2p_vanilla` at 3200). Reading every layer as ground, skipping the pathfinder add, and moving the natural rally point 40 units all pass, so the replays check none of those.
 
 An upgrade module's instance count says how many objects carry it, not how often it fires. `upgradeImplementation` was also never called for `WeaponBonusUpgrade`, `WeaponSetUpgrade`, `StealthUpgrade`, `LocomotorSetUpgrade`, `ExperienceScalarUpgrade`, `MaxHealthUpgrade` or `PowerPlantUpgrade`. It was called 39 times for `RadarUpgrade` and 5 for `CommandSetUpgrade`.
 
