@@ -498,8 +498,10 @@ impl<'a> IniReader<'a> {
             self.read_line(None)?;
             let field = match std::str::from_utf8(self.current_line_bytes()) {
                 Ok(s) => {
-                    let trimmed = s.trim_start();
-                    let field_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+                    // `strtok` with `INI::getSeps()`: `=` ends a field name too.
+                    let is_sep = |c: char| c.is_whitespace() || c == '=';
+                    let trimmed = s.trim_start_matches(is_sep);
+                    let field_end = trimmed.find(is_sep).unwrap_or(trimmed.len());
                     let field = &trimmed[..field_end];
                     let start = s.len() - trimmed.len();
                     let cursor = start + field_end;

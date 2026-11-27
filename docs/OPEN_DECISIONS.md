@@ -103,6 +103,7 @@ Found while porting modules mechanically. Each needs an owner decision or a late
 - `Pathfinder::updatePos` on every change of an AI unit's cell is unported (AI plan S4). `set_object_layer` only reproduces its effect on the cached height above terrain.
 - Targeting and mood (`ai/ai.rs`, `ai/mood.rs`) have no caller. `TargetingSeams` still stands for `Weapon::isWithinAttackRange`, `Pathfinder::isViewBlockedByObstacle`, `Object::getShroudedStatus`, `Team::getTeamTargetObject` and, until it is wired, `getAbleToAttackSpecificObject`. `AIData` is not parsed, and the attack priority sets are keyed by template name with no script engine filling them. `mood.rs` belongs to the `AIUpdate` packet's file once that exists. `PORT_MAP.md` shows `PKT-421 AI` as implemented; only its targeting is. `player_relationship` ignores per-team overrides. Not covered: undetected defectors. The vectors count terrain sight questions, which are not compared (unported code behind the tape asks too).
 - `getMoodMatrixValue`, `getMoodMatrixActionAdjustment` and `resetNextMoodCheckTime` exist twice: in `modules/update/ai_update.rs` and in `ai/mood.rs`. Each passes its own vectors. Keep one when targeting is wired into the AI module.
+- `IniReader::read_block_fields` skips a line that is not valid UTF-8; the reference reads it byte by byte. No retail startup file is known to depend on it.
 
 ## Waiting on unported code
 
