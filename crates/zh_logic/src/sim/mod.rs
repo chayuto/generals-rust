@@ -10156,6 +10156,12 @@ impl SimApi for SimContext {
         self.world
             .ai_exit_orders
             .push((rider_id, container_id, cmd_source));
+        // A resident AI takes the order through its command entry.
+        if self.command_ai(rider, AiCommandType::Exit, cmd_source, |s, p| {
+            p.obj = s.world.objects.id_of(container)
+        }) {
+            return;
+        }
         if let Some(ai_ms) = self.world.objects.get(rider).and_then(|o| o.ai_slot) {
             if !self.world.modules.is_executing(ai_ms) {
                 let _ = self.dispatch_module(ai_ms, |m, sim, ctx| {

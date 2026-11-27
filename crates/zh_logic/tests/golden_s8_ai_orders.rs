@@ -847,6 +847,14 @@ fn world_orders_reach_the_module() {
         ai_update::LocoGoalType::None
     );
 
+    // An exit order reaches the module too.
+    sim.ai_idle(unit, source);
+    sim.object_mut(unit).expect("object").contained_by = Some(other);
+    sim.order_ai_exit(unit, other, source);
+    assert_eq!(look(&mut sim), (s::EXIT, source, other_id));
+    sim.object_mut(unit).expect("object").contained_by = None;
+    sim.ai_idle(unit, source);
+
     // An object without an AI keeps its goal on the record.
     let bare = spawn(&mut sim, "S8_Crate", 1);
     sim.object_mut(bare).expect("object").ai_goal_object = Some(other);
