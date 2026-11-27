@@ -351,9 +351,34 @@ impl PathfindCellGrid {
         self.cells.is_empty()
     }
 
+    /// A grid over the given cell positions with the given info pool.
+    pub fn from_parts(coords: Vec<ICoord2D>, pool: PathfindCellInfoPool, mode: PathfindMode) -> Self {
+        Self {
+            cells: vec![PathfindCell::new(); coords.len()],
+            coords,
+            pool,
+            mode,
+        }
+    }
+
+    /// Appends reset cells (a bridge or wall layer) and returns the first index.
+    pub fn push_cells(&mut self, coords: impl IntoIterator<Item = ICoord2D>) -> usize {
+        let base = self.cells.len();
+        for pos in coords {
+            self.cells.push(PathfindCell::new());
+            self.coords.push(pos);
+        }
+        base
+    }
+
     #[inline]
     pub fn cell(&self, idx: CellIdx) -> &PathfindCell {
         &self.cells[idx.0]
+    }
+
+    #[inline]
+    pub fn cell_mut(&mut self, idx: CellIdx) -> &mut PathfindCell {
+        &mut self.cells[idx.0]
     }
 
     #[inline]

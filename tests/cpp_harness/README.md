@@ -219,6 +219,24 @@ A small object normally spans at most two cells per axis, and its cell array has
 - **What happens:** `canBuild` is asked about the last button whose template is equivalent to the request, not about the requested template.
 - **Guard:** `golden_pkt354_production` (`U9` follows `UE` in the command set).
 
+### `setDamageState(BODY_RUBBLE)` puts a structure on the pathfind map twice
+
+- **Where:** `ActiveBody::setDamageState`.
+- **What happens:** `setCorrectDamageState` removes and re-adds the structure, and is reached twice (from `internalChangeHealth` and directly). A harness that replays one remove and add gets different cells.
+- **Guard:** `golden_s2_pathfind_map` (the rubble operation emits both pairs).
+
+### A pathfind layer's margin is zero
+
+- **Where:** `PathfindLayer::allocateCells`, `allocateCellsForWallLayer`.
+- **What happens:** `PATHFIND_CELL_SIZE/100` is unsigned integer division, so the intended 0.1 margin is 0.
+- **Guard:** `golden_s2_pathfind_map` (`lmeta`).
+
+### `PKT-418`'s `frames[1]` is not the frame its answer was taken at
+
+- **Where:** `gen_pkt418_zone_manager.cpp`: it prints `m_frame` after moving it on to `frame0 + 5`.
+- **What happens:** a replay using `frames[1]` for `need_calc[1]` fits a wrong frame-0 rule. Record an input when it is used, not at print time.
+- **Guard:** `golden_pkt418_zone_manager` derives the frame; `golden_s2_pathfind_map` marks zones dirty at frame 0.
+
 ## Shared world fixture (`oracle_wp51_world.h`)
 
 These are headless-setup gaps, not reference-code quirks. Each one surfaced as a segfault or a silent wrong answer.

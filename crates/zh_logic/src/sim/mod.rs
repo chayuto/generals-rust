@@ -6,6 +6,7 @@
 //! 2. [`SimWorld`] (all mutable state hashed by `GameLogic::getCRC`)
 //! 3. [`ClientSink`] (write-only visual/audio notifications, no-op in headless simulation)
 
+mod pathfind_map;
 mod production;
 
 use crate::combat::WhichTurretType;
@@ -2369,6 +2370,9 @@ pub struct SimWorld {
     pub hulk_max_lifetime_override: Int,
     pub deselected_objects: Vec<(ObjectId, UnsignedShort, Bool)>,
     pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
+    /// `TheAI->pathfinder()`'s map. `None` in a world without one; footprint
+    /// calls then only record membership.
+    pub pathfinder: Option<Box<crate::pathfinder::Pathfinder>>,
     /// Footprints registered by `createAWallFromMyFootprint`.
     pub pathfind_walls: BTreeSet<ObjectId>,
     /// Unported detonation damage: source, weapon, position, extra bonus flags.
@@ -2521,6 +2525,7 @@ impl SimWorld {
             hulk_max_lifetime_override: -1,
             deselected_objects: Vec::new(),
             stealth_detected_events: Vec::new(),
+            pathfinder: None,
             pathfind_walls: BTreeSet::new(),
             projectile_detonations: Vec::new(),
             weapon_templates_stubbed: false,
@@ -6239,6 +6244,10 @@ impl SimView for SimContext {
             .blocked_pathfind_cells
             .get(&(layer as Int, cell_x, cell_y))
         {
+            return ct;
+        }
+        let mapped = self.world.pathfinder.as_ref();
+        if let Some(ct) = mapped.and_then(|p| p.cell_type(layer, cell_x, cell_y)) {
             return ct;
         }
         let max_cx = real_to_int_floor(self.world.map_extent_hi.x / 10.0_f32);
@@ -10317,12 +10326,14 @@ impl SimApi for SimContext {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.pathfind_walls.insert(id);
         }
+        self.classify_pathfind_wall(owner, true);
     }
 
     fn pathfinder_remove_wall(&mut self, owner: ObjectSlot) {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.pathfind_walls.remove(&id);
         }
+        self.classify_pathfind_wall(owner, false);
     }
 
     fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {
@@ -10669,6 +10680,7 @@ impl SimApi for SimContext {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.pathfind_map_objects.insert(id);
         }
+        self.classify_on_pathfind_map(owner, true);
     }
 
     fn pathfinder_adjust_destination(&mut self, owner: ObjectSlot, dest: &mut Coord3D) -> Bool {
@@ -11062,6 +11074,7 @@ impl SimApi for SimContext {
         if let Some(id) = self.world.objects.id_of(owner) {
             self.world.pathfind_map_objects.remove(&id);
         }
+        self.classify_on_pathfind_map(owner, false);
     }
 
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {

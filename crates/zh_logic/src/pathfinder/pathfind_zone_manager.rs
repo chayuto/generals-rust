@@ -7,8 +7,8 @@
 
 #![allow(unused_variables, dead_code)]
 
-use crate::pathfinder::pathfind_cell::PathfindCell;
-use crate::pathfinder::pathfind_cell_info::PathfindCellInfoPool;
+use crate::pathfinder::pathfind_cell::{PathfindCell, PathfindCellGrid};
+use crate::pathfinder::pathfind_cell_info::{CellIdx, PathfindCellInfoPool};
 use crate::pathfinder::pathfind_constants::{
     PathfindLayerEnum, PathfindMode, ZONE_UPDATE_FREQUENCY,
 };
@@ -59,24 +59,25 @@ impl ZoneLayerSlot {
 pub struct PathfindZoneMap {
     width: Int,
     height: Int,
-    cells: Vec<PathfindCell>,
-    pool: PathfindCellInfoPool,
-    mode: PathfindMode,
+    grid: PathfindCellGrid,
 }
 
 impl PathfindZoneMap {
     pub fn new(width: Int, height: Int) -> Self {
-        let w = width.max(0) as usize;
-        let h = height.max(0) as usize;
+        let mut coords = Vec::new();
+        for x in 0..width.max(0) {
+            for y in 0..height.max(0) {
+                coords.push(ICoord2D::new(x, y));
+            }
+        }
+        let mode = PathfindMode {
+            use_fixed_pathfinding: true,
+            force_clean_cells: false,
+        };
         Self {
             width,
             height,
-            cells: vec![PathfindCell::new(); w * h],
-            pool: PathfindCellInfoPool::new(),
-            mode: PathfindMode {
-                use_fixed_pathfinding: true,
-                force_clean_cells: false,
-            },
+            grid: PathfindCellGrid::from_parts(coords, PathfindCellInfoPool::new(), mode),
         }
     }
 
@@ -90,34 +91,52 @@ impl PathfindZoneMap {
         self.height
     }
 
+    /// The grid index of the ground cell at `(x, y)`.
+    #[inline]
+    pub fn index(&self, x: Int, y: Int) -> CellIdx {
+        CellIdx((x as usize) * (self.height as usize) + (y as usize))
+    }
+
+    /// The cells and info pool: ground first, then any appended layer cells.
+    #[inline]
+    pub fn grid(&self) -> &PathfindCellGrid {
+        &self.grid
+    }
+
+    #[inline]
+    pub fn grid_mut(&mut self) -> &mut PathfindCellGrid {
+        &mut self.grid
+    }
+
     #[inline]
     pub fn cell(&self, x: Int, y: Int) -> &PathfindCell {
-        &self.cells[(x as usize) * (self.height as usize) + (y as usize)]
+        self.grid.cell(self.index(x, y))
     }
 
     #[inline]
     pub fn cell_mut(&mut self, x: Int, y: Int) -> &mut PathfindCell {
-        &mut self.cells[(x as usize) * (self.height as usize) + (y as usize)]
+        let idx = self.index(x, y);
+        self.grid.cell_mut(idx)
     }
 
     #[inline]
     pub fn pool(&self) -> &PathfindCellInfoPool {
-        &self.pool
+        self.grid.pool()
     }
 
     #[inline]
     pub fn pool_mut(&mut self) -> &mut PathfindCellInfoPool {
-        &mut self.pool
+        self.grid.pool_mut()
     }
 
     #[inline]
-    pub const fn mode(&self) -> PathfindMode {
-        self.mode
+    pub fn mode(&self) -> PathfindMode {
+        self.grid.mode()
     }
 
     #[inline]
     pub fn mode_mut(&mut self) -> &mut PathfindMode {
-        &mut self.mode
+        self.grid.mode_mut()
     }
 }
 
@@ -179,10 +198,7 @@ impl PathfindZoneManager {
     }
 
     pub fn mark_zones_dirty(&mut self, current_frame: UnsignedInt) {
-        if current_frame == 0 {
-            self.next_frame_to_calculate_zones =
-                current_frame.wrapping_add(ZONE_UPDATE_FREQUENCY);
-        } else if current_frame < 2 {
+        if current_frame < 2 {
             self.next_frame_to_calculate_zones = 2;
         } else {
             let candidate = current_frame.wrapping_add(ZONE_UPDATE_FREQUENCY);

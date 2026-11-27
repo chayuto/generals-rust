@@ -13,7 +13,9 @@
 
 use crate::ai::seams::{MapTerrain, WaypointInfo};
 use crate::object::thing::{make_align_to_normal_matrix, ThingTerrainAccess};
+use crate::pathfinder::ai_pathfind::Pathfinder;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
+use crate::terrain::bridge::{highest_layer, nearest_layer, Bridge, BridgeList, BridgeWorld};
 use crate::spatial::polygon_trigger::{PolygonTrigger, PolygonTriggerList};
 use crate::spatial::terrain::{find_closest_edge_point, find_farthest_edge_point};
 use crate::terrain::height_map::{HeightMap, MAX_HEIGHT_VALUE};
@@ -126,8 +128,8 @@ pub trait WaterGrid {
 
 /// What a change of water height does elsewhere.
 pub trait TerrainEffects {
-    /// `Pathfinder::forceMapRecalculation`.
-    fn force_map_recalculation(&mut self) {}
+    /// `Pathfinder::forceMapRecalculation` over the changed terrain.
+    fn force_map_recalculation(&mut self, _terrain: &TerrainLogic) {}
     /// The objects within `radius` of `center` that are now underwater take
     /// `amount` water damage.
     fn damage_objects_in_water(
@@ -192,6 +194,7 @@ pub struct TerrainLogic {
     world_dict: Dict,
     elevated: Box<dyn ElevatedLayers>,
     water_grid: Option<Box<dyn WaterGrid>>,
+    bridges: BridgeList,
 }
 
 impl Default for TerrainLogic {
@@ -344,7 +347,62 @@ impl TerrainLogic {
             world_dict: Dict::new(),
             elevated: Box::new(NoElevatedLayers),
             water_grid: None,
+            bridges: BridgeList::default(),
         }
+    }
+
+    pub fn bridges(&self) -> &BridgeList {
+        &self.bridges
+    }
+
+    pub fn bridges_mut(&mut self) -> &mut BridgeList {
+        &mut self.bridges
+    }
+
+    /// `addBridgeToLogic` and `addLandmarkBridgeToLogic`: links the bridge and
+    /// gives it a pathfind layer. Making the objects is the caller's.
+    pub fn add_bridge(&mut self, mut bridge: Bridge, pathfinder: &mut Pathfinder) {
+        bridge.layer = pathfinder.add_bridge(bridge.geometry, bridge.object_id);
+        self.bridges.push(bridge);
+    }
+
+    /// `updateBridgeDamageStates`: closes and reopens bridge layers.
+    pub fn update_bridge_damage_states(
+        &mut self,
+        world: &mut dyn BridgeWorld,
+        pathfinder: &mut Pathfinder,
+        frame: u32,
+    ) {
+        let mut bridges = std::mem::take(&mut self.bridges);
+        let terrain: &Self = self;
+        bridges.update_damage_states(world, &mut |layer, repaired| {
+            pathfinder.change_bridge_state(layer, repaired, terrain, frame);
+        });
+        self.bridges = bridges;
+    }
+
+    /// The decks over `pos`, in list order.
+    fn decks_at(&self, pos: &Coord3D) -> Vec<BridgeDeck> {
+        let mut decks = self.bridges.decks_at(pos);
+        decks.extend(self.elevated.bridges_at(pos));
+        decks
+    }
+
+    /// `objectInteractsWithBridgeLayer`.
+    pub fn object_interacts_with_bridge_layer(
+        &self,
+        pos: &Coord3D,
+        minor_radius: Real,
+        object_layer: PathfindLayerEnum,
+        layer: PathfindLayerEnum,
+        consider_health: bool,
+    ) -> bool {
+        if layer == PathfindLayerEnum::Wall {
+            return object_layer == PathfindLayerEnum::Wall
+                || self.elevated.is_point_on_wall(pos) != FALSE;
+        }
+        self.bridges
+            .interacts_with_layer(pos, minor_radius, layer, consider_health)
     }
 
     pub fn set_elevated_layers(&mut self, elevated: Box<dyn ElevatedLayers>) {
@@ -366,6 +424,7 @@ impl TerrainLogic {
         self.map_max_z = 1.0;
         self.map_objects.clear();
         self.world_dict = Dict::new();
+        self.bridges.clear();
     }
 
     /// `loadMap` over the bytes of a map file. `query` reads the sizes,
@@ -866,7 +925,7 @@ impl TerrainLogic {
         };
         let region = self.water_bounding_rect(water);
         if force_pathfind_update != FALSE || previous != height {
-            effects.force_map_recalculation();
+            effects.force_map_recalculation(self);
         }
         if damage_amount > 0.0 && height > previous {
             let center = Coord3D::new(
@@ -1266,24 +1325,13 @@ impl ThingTerrainAccess for TerrainLogic {
 
     /// `getLayerForDestination`: the surface nearest in height.
     fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum {
-        let mut best = PathfindLayerEnum::Ground;
-        let mut distance = (pos.z - self.ground_height(pos.x, pos.y, None)).abs();
-        let wall = self.elevated.wall_height();
-        if distance > wall / 2.0 && self.elevated.is_point_on_wall(pos) != FALSE {
-            let delta = (pos.z - wall).abs();
-            if delta < distance {
-                best = PathfindLayerEnum::Wall;
-                distance = delta;
-            }
-        }
-        for deck in self.elevated.bridges_at(pos) {
-            let delta = (pos.z - deck.height).abs();
-            if delta < distance {
-                best = deck.layer;
-                distance = delta;
-            }
-        }
-        best
+        nearest_layer(
+            pos,
+            self.ground_height(pos.x, pos.y, None),
+            self.elevated.wall_height(),
+            || self.elevated.is_point_on_wall(pos) != FALSE,
+            &self.decks_at(pos),
+        )
     }
 
     /// `getLayerHeight`.
@@ -1306,7 +1354,11 @@ impl ThingTerrainAccess for TerrainLogic {
             }
             return height;
         }
-        match self.elevated.bridge_height(&loc, layer, clip, normal) {
+        let found = match self.bridges.find_layer_at(&loc, layer, clip != FALSE) {
+            Some(bridge) => Some(bridge.geometry.height(&loc, normal)),
+            None => self.elevated.bridge_height(&loc, layer, clip, normal),
+        };
+        match found {
             Some(deck) if deck > height => deck,
             _ => height,
         }
@@ -1318,27 +1370,14 @@ impl ThingTerrainAccess for TerrainLogic {
         pos: &Coord3D,
         only_healthy_bridges: Bool,
     ) -> PathfindLayerEnum {
-        let mut best = PathfindLayerEnum::Ground;
-        let mut distance = pos.z - self.ground_height(pos.x, pos.y, None);
-        let wall = self.elevated.wall_height();
-        if distance > wall / 2.0 && self.elevated.is_point_on_wall(pos) != FALSE {
-            let delta = pos.z - wall;
-            if delta >= 0.0 && delta.abs() < distance.abs() {
-                best = PathfindLayerEnum::Wall;
-                distance = delta;
-            }
-        }
-        for deck in self.elevated.bridges_at(pos) {
-            if only_healthy_bridges != FALSE && deck.rubble != FALSE {
-                continue;
-            }
-            let delta = pos.z - deck.height;
-            if delta >= 0.0 && delta.abs() < distance.abs() {
-                best = deck.layer;
-                distance = delta;
-            }
-        }
-        best
+        highest_layer(
+            pos,
+            self.ground_height(pos.x, pos.y, None),
+            self.elevated.wall_height(),
+            || self.elevated.is_point_on_wall(pos) != FALSE,
+            &self.decks_at(pos),
+            only_healthy_bridges != FALSE,
+        )
     }
 }
 

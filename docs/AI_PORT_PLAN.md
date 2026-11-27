@@ -51,6 +51,10 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Dump of every cell type, layer and zone after placing structures, fences and bridges; `Pathfinder::crc`. Stubbed: terrain only.
 - Seams: footprint add and remove already used by minefields and toppling; `link_bridge_tower` (open item 8). Risks: float-to-cell rounding, object order, zone numbering.
 - Seen: buildings block cells; bridges open and close them.
+- **Done**, ground, bridges and walls. `pathfinder::Pathfinder` (map half), `PathfindLayer` and `terrain::bridge` build the map, take footprints and fences, change bridge states and number zones. Dump: `golden_s2_pathfind_map` (every cell field, layer, effective and block zone, `Pathfinder::crc`, bridge queries; synthetic terrain).
+  - Reached from the sim: `pathfinder_add_object`, `pathfinder_remove_object`, the footprint walls and `pathfind_cell_type`, once `SimContext::new_pathfind_map` has run. `TerrainEffects::force_map_recalculation` now takes the terrain (`PathfindEffects`).
+  - Not done: `removeUnitFromPathfindMap` (S4), searches and queue processing (S5), bridge and tower object creation, `link_bridge_tower` (open item 8 stays open), loading bridges from a map file, object creation, destruction and `ActiveBody` rubble calling the map, and `GameLogic` calling `add_wall_piece`, `new_map`, `begin_path_queue` and the wall surface hand-over.
+  - Found: zones marked dirty before frame 2 are due on frame 2 (`PathfindZoneManager` had 300 for frame 0, fitted to a mis-recorded input of the `PKT-418` test). The layer margin `PATHFIND_CELL_SIZE/100` is zero. `ActiveBody::setDamageState(RUBBLE)` takes a structure off the map and puts it back twice. A layer keeps its destroyed flag across `reset`.
 
 ### S3. Path objects and movement-surface queries
 - C++: `Path.cpp`, `PathNode.cpp` (730), validity, line-walking and passability parts of `AIPathfind.cpp` (about 700). One worker.

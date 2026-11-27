@@ -142,7 +142,9 @@ fn test_pkt418_1000_golden_vectors() {
 
         let frames = get_i32_vec(line, "frames").unwrap();
         let frame0 = frames[0] as UnsignedInt;
-        let frame1 = frames[1] as UnsignedInt;
+        // The harness checks `need_calc[1]` at this frame; `frames[1]` is the
+        // frame it printed later, after moving to `frame0 + 5`.
+        let frame1 = frame0.wrapping_add(if seed % 3 == 0 { 1 } else { 350 });
         let need_exp = get_i32_array::<4>(line, "need_calc").unwrap();
 
         let mut zm = PathfindZoneManager::new();

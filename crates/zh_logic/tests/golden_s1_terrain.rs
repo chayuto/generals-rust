@@ -357,7 +357,7 @@ struct Effects {
 }
 
 impl TerrainEffects for Effects {
-    fn force_map_recalculation(&mut self) {
+    fn force_map_recalculation(&mut self, _terrain: &TerrainLogic) {
         self.recalculated = true;
     }
     /// The partition query: centres within the radius, then those underwater.
