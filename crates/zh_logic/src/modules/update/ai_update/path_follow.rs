@@ -4,10 +4,12 @@
 //! The module owns its path (`AiUpdate::path`) and the pathfind map belongs to
 //! the sim. Without a map the S8 seams still answer.
 //!
-//! The closest, patch, safe, move-away and attack searches are not ported (S6);
-//! they are asked through [`crate::ai::seams::AiSeams`] from this module only,
-//! in the functions at the end of the file.
+//! The closest, patch, safe and move-away searches (S6) are called from the
+//! functions at the end of the file, the attack search from `attack_path`. A
+//! harness whose reference replaced them answers through
+//! [`crate::ai::seams::AiSeams::replaces_searches`].
 
+use super::attack_path::compute_attack_path;
 use super::{ai, is_doing_ground_movement, is_projectile, layer_of, position_of};
 use crate::ai::ai_state_machine::state_id;
 use crate::ai::seams::ai_seams;
@@ -93,7 +95,7 @@ pub(super) fn quick_path_exists(sim: &mut dyn SimApi, ctx: ModuleContext, to: &C
 }
 
 /// What the searches read from the unit.
-fn search_unit(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<SearchUnit> {
+pub(super) fn search_unit(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<SearchUnit> {
     let owner = ctx.owner_slot;
     let view = sim.ai_path_view(owner)?;
     let dozer = sim.object_is_kind_of(owner, KindOfType::Dozer) != FALSE;
@@ -111,7 +113,7 @@ fn search_unit(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<SearchUnit> {
 }
 
 /// `getCrusherLevel() > 0`.
-fn is_crusher(sim: &dyn SimApi, owner: ObjectSlot) -> bool {
+pub(super) fn is_crusher(sim: &dyn SimApi, owner: ObjectSlot) -> bool {
     sim.object_crusher_level(owner) > 0
 }
 
@@ -129,7 +131,7 @@ fn contains_2d(region: &Region3D, pos: &Coord3D) -> bool {
 }
 
 /// `Pathfinder::updateGoal` at the end of the unit's own path.
-fn update_goal_at_path_end(sim: &mut dyn SimApi, ctx: ModuleContext) {
+pub(super) fn update_goal_at_path_end(sim: &mut dyn SimApi, ctx: ModuleContext) {
     let Some((pos, layer)) = ai(sim, ctx).path.as_ref().and_then(|path| {
         path.last_node()
             .map(|n| (*path.node(n).position(), path.node(n).layer()))
@@ -327,10 +329,7 @@ pub(super) fn do_pathfind_on_map(sim: &mut dyn SimApi, ctx: ModuleContext) {
     if ai(sim, ctx).is_attack_path != FALSE {
         let wanted = ai(sim, ctx).requested_victim_id;
         let victim = sim.find_object(wanted);
-        let victim_id = victim.map(|_| wanted);
-        let to = ai(sim, ctx).requested_destination;
-        if let Some(path) = attack_path(sim, ctx, victim_id, &to) {
-            set_path(sim, ctx, path);
+        if compute_attack_path(sim, ctx, victim) {
             update_goal_at_path_end(sim, ctx);
             ai(sim, ctx).is_attack_path = TRUE;
             return;
@@ -546,7 +545,7 @@ pub fn compute_path(sim: &mut dyn SimApi, ctx: ModuleContext, destination: &mut 
 }
 
 /// `Pathfinder::setIgnoreObstacleID`.
-fn set_ignore_obstacle(sim: &mut dyn SimApi, id: ObjectId) {
+pub(super) fn set_ignore_obstacle(sim: &mut dyn SimApi, id: ObjectId) {
     with_pathfinder(sim, |_, pathfinder| pathfinder.ignore_obstacle_id = id);
 }
 
@@ -731,11 +730,16 @@ pub fn is_valid_locomotor_position(
 }
 
 // -----------------------------------------------------------------------------
-// The searches that are not ported (S6)
+// The other searches (S6)
 // -----------------------------------------------------------------------------
 
+/// Whether the seams answer the searches instead of the map.
+pub(super) fn searches_replaced(sim: &mut dyn SimApi) -> bool {
+    ai_seams(sim).replaces_searches() != FALSE
+}
+
 /// `Pathfinder::findClosestPath` from where the unit stands. It may move `to`.
-fn closest_path(
+pub(super) fn closest_path(
     sim: &mut dyn SimApi,
     ctx: ModuleContext,
     to: &mut Coord3D,
@@ -743,13 +747,44 @@ fn closest_path(
     path_cost_factor: Real,
 ) -> Option<Path> {
     let from = position_of(sim, ctx.owner_slot);
-    ai_seams(sim).closest_path(ctx.owner_id, &from, to, blocked, path_cost_factor)
+    if searches_replaced(sim) {
+        return ai_seams(sim).closest_path(ctx.owner_id, &from, to, blocked, path_cost_factor);
+    }
+    let unit = search_unit(sim, ctx)?;
+    with_pathfinder(sim, |sim, pathfinder| {
+        pathfinder.find_closest_path(
+            sim.terrain(),
+            sim.path_units(),
+            &unit,
+            &from,
+            to,
+            blocked != FALSE,
+            path_cost_factor,
+        )
+    })
+    .flatten()
 }
 
 /// `Pathfinder::patchPath` of the unit's current path.
 fn patch_path(sim: &mut dyn SimApi, ctx: ModuleContext, blocked: Bool) -> Option<Path> {
     let current = ai(sim, ctx).path.clone();
-    ai_seams(sim).patch_path(ctx.owner_id, current.as_ref(), blocked)
+    if searches_replaced(sim) {
+        return ai_seams(sim).patch_path(ctx.owner_id, current.as_ref(), blocked);
+    }
+    let current = current?;
+    let unit = search_unit(sim, ctx)?;
+    let from = position_of(sim, ctx.owner_slot);
+    with_pathfinder(sim, |sim, pathfinder| {
+        pathfinder.patch_path(
+            sim.terrain(),
+            sim.path_units(),
+            &unit,
+            &from,
+            &current,
+            blocked != FALSE,
+        )
+    })
+    .flatten()
 }
 
 /// `Pathfinder::findSafePath`.
@@ -761,15 +796,53 @@ fn safe_path(
     radius: Real,
 ) -> Option<Path> {
     let from = position_of(sim, ctx.owner_slot);
-    ai_seams(sim).safe_path(ctx.owner_id, &from, repulsor1, repulsor2, radius)
+    if searches_replaced(sim) {
+        return ai_seams(sim).safe_path(ctx.owner_id, &from, repulsor1, repulsor2, radius);
+    }
+    let unit = search_unit(sim, ctx)?;
+    with_pathfinder(sim, |sim, pathfinder| {
+        pathfinder.find_safe_path(
+            sim.terrain(),
+            sim.path_units(),
+            &unit,
+            &from,
+            repulsor1,
+            repulsor2,
+            radius,
+        )
+    })
+    .flatten()
 }
 
-/// `computeAttackPath`: `None` for FALSE, else the path it left.
-fn attack_path(
+/// `Pathfinder::getMoveAwayFromPath`: off the path of `other`, and off the path
+/// of the unit moved away from before.
+pub(super) fn move_away_path(
     sim: &mut dyn SimApi,
     ctx: ModuleContext,
-    victim: Option<ObjectId>,
-    victim_pos: &Coord3D,
-) -> Option<Option<Path>> {
-    ai_seams(sim).attack_path(ctx.owner_id, victim, victim_pos)
+    other: ObjectId,
+    other_path: &Path,
+    second: Option<ObjectId>,
+    second_path: Option<&Path>,
+) -> Option<Path> {
+    if searches_replaced(sim) {
+        return ai_seams(sim).move_away_path(ctx.owner_id, other, other_path, second, second_path);
+    }
+    let unit = search_unit(sim, ctx)?;
+    let from = position_of(sim, ctx.owner_slot);
+    let other = sim
+        .find_object(other)
+        .and_then(|slot| sim.ai_path_view(slot))
+        .map(|view| view.agent);
+    with_pathfinder(sim, |sim, pathfinder| {
+        pathfinder.get_move_away_from_path(
+            sim.terrain(),
+            sim.path_units(),
+            &unit,
+            &from,
+            other.as_ref(),
+            other_path,
+            second_path,
+        )
+    })
+    .flatten()
 }

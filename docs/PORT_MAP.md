@@ -387,6 +387,7 @@
 | `zh_logic` | `crates/zh_logic/src/gamelogic/frame.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/module_data.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/allies.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/attack_path.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/collision.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/path_follow.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_actions.rs` | `implemented` |
@@ -502,6 +503,7 @@
 | `docs/golden_vectors/S3_Path.json` | - | no |
 | `docs/golden_vectors/S4_Reservations.json` | - | no |
 | `docs/golden_vectors/S5_Search.json` | - | no |
+| `docs/golden_vectors/S6_AttackPath.json` | 120 | no |
 | `docs/golden_vectors/S6_Search.json` | - | no |
 | `docs/golden_vectors/S7_LocomotorMovement.json` | 1200 | no |
 | `docs/golden_vectors/S8_AiOrders.json` | 220 | no |
@@ -625,6 +627,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s3_path.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s4_reservations.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s5_search.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s6_attack_path.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s6_other_searches.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s7_locomotor_movement.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s8_ai_orders.rs` | `active` |

@@ -347,6 +347,15 @@ fn members_with_slots(sim: &SimContext, group: GroupId) -> Vec<(ObjectId, Object
 // What a member is
 // -----------------------------------------------------------------------------
 
+/// `Pathfinder::removeGoal` of a member: the sim's map, else the seam.
+fn remove_goal(sim: &mut SimContext, member: ObjectId, slot: ObjectSlot) {
+    if sim.pathfinder().is_some() {
+        sim.pathfinder_remove_goal(slot);
+    } else {
+        ai_seams(sim).remove_goal(member);
+    }
+}
+
 fn has_ai(sim: &SimContext, slot: ObjectSlot) -> bool {
     sim.object(slot).is_some_and(|o| o.ai_slot.is_some())
 }
@@ -734,7 +743,7 @@ fn compute_ground_path(sim: &mut SimContext, group: GroupId, pos: &Coord3D) -> b
     let mut center_vehicle: Option<ObjectSlot> = None;
     let mut center_vehicle_dist = dist_sqr * 10.0;
     for (member, slot) in members_with_slots(sim, group) {
-        ai_seams(sim).remove_goal(member);
+        remove_goal(sim, member, slot);
         if is_held(sim, slot) || !has_ai(sim, slot) {
             continue;
         }
@@ -975,7 +984,7 @@ fn march(
             }
         }
         let unit = position(sim, slot);
-        ai_seams(sim).remove_goal(member);
+        remove_goal(sim, member, slot);
         let dx = unit.x - center.x;
         let dy = unit.y - center.y;
         by_side.insert(member, slot, dx * r.start_normal.x + dy * r.start_normal.y);
@@ -1398,7 +1407,7 @@ pub fn group_move_to_position(
             continue;
         }
         let unit = position(sim, slot);
-        ai_seams(sim).remove_goal(member);
+        remove_goal(sim, member, slot);
         let dx = unit.x - pos.x;
         let dy = unit.y - pos.y;
         iter.insert(member, slot, 0.0 + dx * dx + dy * dy);
@@ -1434,7 +1443,7 @@ pub fn group_scatter(sim: &mut SimContext, group: GroupId, source: CommandSource
             continue;
         }
         let unit = position(sim, slot);
-        ai_seams(sim).remove_goal(member);
+        remove_goal(sim, member, slot);
         let dx = unit.x - center.x;
         let dy = unit.y - center.y;
         iter.insert(member, slot, dx * dx + dy * dy);

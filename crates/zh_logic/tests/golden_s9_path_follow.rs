@@ -175,6 +175,10 @@ impl AiSeams for Seams {
         let mut id = state;
         xfer.xfer_unsigned_int(&mut id)
     }
+    /// The reference harness replaced the searches too.
+    fn replaces_searches(&mut self) -> Bool {
+        TRUE
+    }
     fn closest_path(
         &mut self,
         owner: ObjectId,

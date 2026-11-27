@@ -1263,6 +1263,8 @@ pub trait SimView {
     fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real;
     fn world_object_slots(&self) -> Vec<ObjectSlot>;
     fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool;
+    /// What `isAttackViewBlockedByObstacle` reads from an attacker or a victim.
+    fn view_party(&self, owner: ObjectSlot) -> Option<crate::pathfinder::ViewParty>;
     fn player_is_active(&self, team_id: TeamId) -> Bool;
     fn player_bounty_percent(&self, team_id: TeamId) -> Real;
     fn object_is_trainable(&self, owner: ObjectSlot) -> Bool;
@@ -5792,6 +5794,10 @@ impl SimView for SimContext {
 
     fn world_object_slots(&self) -> Vec<ObjectSlot> {
         self.world.objects.world_iter().collect()
+    }
+
+    fn view_party(&self, owner: ObjectSlot) -> Option<crate::pathfinder::ViewParty> {
+        self.view_party_of(owner)
     }
 
     fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool {
@@ -11796,6 +11802,9 @@ impl SimView for MockSimApi {
         self.ctx.world_object_slots()
     }
 
+    fn view_party(&self, owner: ObjectSlot) -> Option<crate::pathfinder::ViewParty> {
+        self.ctx.view_party(owner)
+    }
     fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool {
         self.ctx.object_is_significantly_above_terrain(owner)
     }

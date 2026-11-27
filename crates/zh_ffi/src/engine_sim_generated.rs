@@ -364,6 +364,9 @@ impl SimView for EngineSim<'_> {
     fn object_is_significantly_above_terrain(&self, owner: ObjectSlot) -> Bool {
         not_wired("object_is_significantly_above_terrain")
     }
+    fn view_party(&self, owner: ObjectSlot) -> Option<zh_logic::pathfinder::ViewParty> {
+        not_wired("view_party")
+    }
     fn player_is_active(&self, team_id: TeamId) -> Bool {
         not_wired("player_is_active")
     }

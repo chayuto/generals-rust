@@ -6,7 +6,6 @@
 
 use super::{ai, AiCall, AiCommandParms, AiCommandType};
 use crate::ai::ai_state_machine::{self as machine, state_id};
-use crate::ai::seams::ai_seams;
 use crate::arena::{ModuleContext, ObjectSlot};
 use crate::modules::module::CommandSourceType;
 use crate::pathfinder::{AllyMover, AllyUnit, MoveAlliesWorld, Path, PathAgent, Pathfinder};
@@ -211,7 +210,8 @@ pub(super) fn private_move_away_from_unit(
         return;
     };
     let search = |sim: &mut dyn SimApi| {
-        ai_seams(sim).move_away_path(ctx.owner_id, unit, &unit_path, second, second_path.as_ref())
+        let second_path = second_path.as_ref();
+        super::path_follow::move_away_path(sim, ctx, unit, &unit_path, second, second_path)
     };
     let mut new_path = search(sim);
     if new_path.is_none() && ai(sim, ctx).can_path_through_units == FALSE {

@@ -155,6 +155,11 @@ pub trait AiSeams: Send {
     }
     /// `Path::computePointOnPath` or `computeFlightDistToGoal` (S3, S9): the
     /// point to steer for and the distance along the path.
+    /// Whether the seams answer the four searches below instead of the map.
+    /// For harnesses whose reference replaced them too.
+    fn replaces_searches(&mut self) -> Bool {
+        FALSE
+    }
     /// `Pathfinder::findClosestPath`, which may move `to` (S6).
     fn closest_path(
         &mut self,
@@ -196,15 +201,6 @@ pub trait AiSeams: Send {
         _second: Option<ObjectId>,
         _second_path: Option<&Path>,
     ) -> Option<Path> {
-        None
-    }
-    /// `computeAttackPath`: `None` for FALSE, else the path it left.
-    fn attack_path(
-        &mut self,
-        _owner: ObjectId,
-        _victim: Option<ObjectId>,
-        _victim_pos: &Coord3D,
-    ) -> Option<Option<Path>> {
         None
     }
     fn point_on_path(&mut self, _owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real) {
@@ -432,11 +428,11 @@ forward! {
     compute_path(owner: ObjectId) -> Bool;
     point_on_path(owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real);
     path_xfer(owner: ObjectId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
+    replaces_searches() -> Bool;
     closest_path(owner: ObjectId, from: &Coord3D, to: &mut Coord3D, blocked: Bool, path_cost_factor: Real) -> Option<Path>;
     patch_path(owner: ObjectId, current: Option<&Path>, blocked: Bool) -> Option<Path>;
     safe_path(owner: ObjectId, from: &Coord3D, repulsor1: &Coord3D, repulsor2: &Coord3D, radius: Real) -> Option<Path>;
     move_away_path(owner: ObjectId, unit: ObjectId, unit_path: &Path, second: Option<ObjectId>, second_path: Option<&Path>) -> Option<Path>;
-    attack_path(owner: ObjectId, victim: Option<ObjectId>, victim_pos: &Coord3D) -> Option<Option<Path>>;
     replaces_state(owner: ObjectId, state: StateId) -> Bool;
     state_enter(owner: ObjectId, state: StateId) -> StateReturnType;
     state_update(owner: ObjectId, state: StateId) -> StateReturnType;

@@ -54,6 +54,7 @@ use zh_common::types::{
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
 mod allies;
+mod attack_path;
 mod collision;
 mod path_follow;
 
@@ -64,6 +65,7 @@ pub use path_follow::{
     locomotor_distance_to_goal, request_approach_path, request_attack_path, request_path,
     request_safe_path,
 };
+pub use attack_path::is_attack_view_blocked_by_obstacle;
 pub(crate) use path_follow::{goal_position, update_goal};
 use path_follow::{point_on_path, set_path, with_pathfinder};
 

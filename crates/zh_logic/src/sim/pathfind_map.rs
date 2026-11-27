@@ -19,8 +19,8 @@ use crate::combat::locomotor::LocomotorAppearance;
 use crate::gamelogic::global_data::BodyDamageType;
 use crate::modules::update::ai_update::AiUpdate;
 use crate::pathfinder::ai_pathfind::{
-    AdjustUnit, Footprint, GoalMover, NoPathCost, PathAgent, PathUnit, PathUnits, PathWorld,
-    Pathfinder, TallBuilding, TallBuildings,
+    AdjustUnit, Footprint, GoalMover, GoalObject, NoPathCost, PathAgent, PathUnit, PathUnits,
+    PathWorld, Pathfinder, TallBuilding, TallBuildings, ViewParty,
 };
 use crate::pathfinder::pathfind_constants::{PathfindLayerEnum, PATHFIND_CELL_SIZE_F};
 use crate::rules::combat_types::{DamageType, DeathType, LocomotorSurfaceTypeMask};
@@ -73,6 +73,30 @@ impl SimContext {
             mobile: !kind(KindOfType::Immobile) && obj.is_disabled() == FALSE,
             height_above_terrain: self.object_height_above_terrain(slot),
             rubble: self.object_body_damage_state(slot) == BodyDamageType::Rubble,
+        })
+    }
+
+    /// What a line of sight check reads from the object in `slot`.
+    pub(super) fn view_party_of(&self, slot: ObjectSlot) -> Option<ViewParty> {
+        let objects = &self.world.objects;
+        let id = objects.id_of(slot)?;
+        let obj = objects.get(slot)?;
+        let kind = self.object_is_kind_of(slot, KindOfType::AttackNeedsLineOfSight);
+        let slaver = obj
+            .slaved_slot
+            .and_then(|ms| self.world.modules.payload(ms)?.as_slaved_update())
+            .map(|slaved| slaved.get_slaver_id());
+        Some(ViewParty {
+            id,
+            position: *obj.thing.get_position(),
+            layer: obj.layer,
+            container: obj
+                .contained_by
+                .and_then(|c| objects.id_of(c))
+                .unwrap_or(ObjectId::INVALID),
+            slaver: slaver.unwrap_or(ObjectId::INVALID),
+            needs_line_of_sight: kind != FALSE,
+            significantly_above_terrain: self.object_is_significantly_above_terrain(slot) != FALSE,
         })
     }
 
@@ -211,6 +235,25 @@ impl PathUnits for SimContext {
             (Some(a), Some(b)) => self.player_relationship(a, b) != Relationship::Enemies,
             _ => false,
         }
+    }
+
+    fn goal_object(&self, id: ObjectId) -> Option<GoalObject> {
+        let slot = self.world.objects.slot_by_id(id)?;
+        let obj = self.world.objects.get(slot)?;
+        Some(GoalObject {
+            position: *obj.thing.get_position(),
+            layer: obj.layer,
+            airfield: self.object_is_kind_of(slot, KindOfType::FsAirfield) != FALSE,
+        })
+    }
+
+    fn is_idle(&self, id: ObjectId) -> bool {
+        self.world
+            .objects
+            .slot_by_id(id)
+            .and_then(|slot| self.world.objects.get(slot)?.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms)?.as_ai())
+            .is_some_and(|ai| ai.is_idle() != FALSE)
     }
 
     /// `canCrushOrSquish(other, TEST_CRUSH_OR_SQUISH)`.
