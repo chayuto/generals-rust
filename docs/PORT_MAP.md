@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`254` implemented, `0` seeded skeletons, `209` unported)
-- **Golden Vector Oracles:** `82` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `80` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `83` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `81` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -292,6 +292,8 @@
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim_generated.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/lifetime_update.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/sleepy_heap.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/gamelogic/frame.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/command_button.rs` | `implemented` |
@@ -356,6 +358,7 @@
 | `docs/golden_vectors/PKT368_314_Ability.json` | 1300 | no |
 | `docs/golden_vectors/PKT374_373_Stealth.json` | 1600 | no |
 | `docs/golden_vectors/PKT383_377_305_Topple.json` | 1800 | no |
+| `docs/golden_vectors/S0_FrameDriver.json` | 3200 | no |
 | `docs/golden_vectors/SHROUD_UPDATES.json` | 300 | no |
 | `docs/golden_vectors/WP2_1_Xfer.json` | 1000 | no |
 | `docs/golden_vectors/WP2_2a_GameMath.json` | 2000 | no |
@@ -446,6 +449,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt434_scripts.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt442_global_data.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt444_messagestream.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s0_frame_driver.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_shroud_updates.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_sleepy_heap.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_1_economy.rs` | `active` |

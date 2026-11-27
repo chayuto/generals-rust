@@ -32,6 +32,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | after `52478cd` | `PKT-296 SpawnBehavior`, `PKT-365 SlavedUpdate` |
 | after `c0b420d` | `PKT-334 HelicopterSlowDeathBehavior`, `PKT-267 DumbProjectileBehavior`, `PKT-382 TensileFormationUpdate`, `PKT-346 OCLUpdate`; weapon speeds now converted to per frame |
 | after `5da9d25` | `PKT-354 ProductionUpdate` |
+| after `4fc8921` | AI plan slice S0: logic frame step, resident AI seams, frame oracle; two disabled-state differences fixed |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 
