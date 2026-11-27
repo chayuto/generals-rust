@@ -30,6 +30,7 @@ use crate::economy::academy_stats::AcademyStats;
 use crate::gamelogic::game_engine::{GameDataLoader, StartupStores};
 use crate::gamelogic::global_data::PlayerType;
 use crate::modules::module::{MaxHealthChangeType, ModuleType};
+use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::object::object_script_status_bits::{
     OBJECT_STATUS_SCRIPT_DISABLED, OBJECT_STATUS_SCRIPT_TARGETABLE, OBJECT_STATUS_SCRIPT_UNPOWERED,
     OBJECT_STATUS_SCRIPT_UNSELLABLE,
@@ -1416,12 +1417,34 @@ fn place_object(
         t.set_active();
     }
     loader.sim.add_object_to_pathfind_map(slot);
-    // Asked of every unit with an AI there; a unit whose AI module is not ported
-    // has none here, so the count is by kind.
     if loader.sim.object_is_kind_of(slot, KindOfType::Immobile) == FALSE {
-        loader.report.unported("Pathfinder::adjustDestination");
+        adjust_to_free_cell(loader, slot, pos);
     }
     Some(slot)
+}
+
+/// The end of `placeObjectAtPosition`: a unit with an AI moves to a cell it may
+/// head for and reserves it.
+fn adjust_to_free_cell(loader: &mut Loader<'_>, slot: ObjectSlot, pos: &Coord3D) {
+    if loader
+        .sim
+        .world
+        .objects
+        .get(slot)
+        .is_none_or(|o| o.ai_slot.is_none())
+    {
+        // The reference gives every mobile starting unit an AI; the port has none
+        // for a class it has not ported.
+        loader.report.unported("mobile starting unit without AI");
+        return;
+    }
+    let mut dest = *pos;
+    if loader.sim.pathfinder_adjust_destination(slot, &mut dest) != FALSE {
+        loader
+            .sim
+            .pathfinder_update_goal(slot, &dest, PathfindLayerEnum::Ground);
+        loader.sim.set_object_position(slot, &dest);
+    }
 }
 
 /// `placeNetworkBuildingsForPlayer`: the starting building and units of one slot.

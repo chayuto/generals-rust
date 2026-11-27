@@ -13,7 +13,8 @@
 //!
 //! Not here: path requests, `computePath`, blocked and collision handling and the
 //! `POSITION_ON_PATH` drive (S9); turrets (S14); mood targets (S12); the derived
-//! AI classes (S15 to S18); groups, command buttons and `privateMoveAwayFromUnit`.
+//! AI classes (S15 to S18; of the dozer and worker only construction and `xfer`,
+//! see [`DerivedAi`]); groups, command buttons and `privateMoveAwayFromUnit`.
 
 use crate::object::weapon_queries;
 use crate::ai::ai_state_machine::{self as machine, state_id, AiStateMachine};
@@ -24,6 +25,8 @@ use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::combat::locomotor::{Locomotor, LocomotorWorld};
 use crate::combat::locomotor_set::{LocomotorSet, LocomotorSetType};
 use crate::combat::turret_ai::{TurretAIData, TURRET_AI_DATA_FIELD_PARSE};
+use crate::modules::update::dozer_ai_update::DozerAi;
+use crate::modules::update::worker_ai_update::WorkerAi;
 use crate::modules::behavior::behavior_module::UpdateScheduleTracker;
 use crate::modules::module::{
     AiUpdateFacet, AttitudeType, BehaviorModule, CommandSourceType, ModuleData,
@@ -386,6 +389,18 @@ pub struct AiUpdate {
     pub is_blocked_and_stuck: Bool,
     pub is_moving_flag: Bool,
     pub is_in_update: Bool,
+
+    /// What a class derived from `AIUpdateInterface` adds.
+    pub derived: DerivedAi,
+}
+
+/// The derived class of an AI module, with its members.
+#[derive(Debug, Clone)]
+pub enum DerivedAi {
+    /// `AIUpdateInterface` itself, which also stands in for the unported classes.
+    Base,
+    Dozer(Box<DozerAi>),
+    Worker(Box<WorkerAi>),
 }
 
 impl AiUpdate {
@@ -457,6 +472,18 @@ impl AiUpdate {
             is_blocked_and_stuck: FALSE,
             is_moving_flag: FALSE,
             is_in_update: FALSE,
+            derived: DerivedAi::Base,
+        }
+    }
+
+    /// The rest of a derived class's constructor: `createMachines`.
+    fn construct_derived(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+        match &mut self.derived {
+            DerivedAi::Base => {}
+            DerivedAi::Dozer(dozer) => dozer.brain.create_machine(sim, ctx),
+            // The supply truck and worker machines enter states that do nothing
+            // while the object has no AI yet.
+            DerivedAi::Worker(worker) => worker.brain.create_machine(sim, ctx),
         }
     }
 
@@ -599,6 +626,29 @@ impl AiUpdate {
         if xfer.mode() == XferMode::Load {
             return Err(XferError::InvalidParameters);
         }
+        if matches!(self.derived, DerivedAi::Base) {
+            return self.xfer_base(xfer, sim, owner, version);
+        }
+        // The dozer and worker versions follow the same switch as the base's.
+        let derived_version: XferVersion = if version < 5 { 1 } else { 2 };
+        let mut written = derived_version;
+        xfer.xfer_version(&mut written, derived_version)?;
+        self.xfer_base(xfer, sim, owner, version)?;
+        match &mut self.derived {
+            DerivedAi::Base => Ok(()),
+            DerivedAi::Dozer(dozer) => dozer.brain.xfer(xfer, derived_version),
+            DerivedAi::Worker(worker) => worker.xfer(xfer, derived_version),
+        }
+    }
+
+    /// `AIUpdateInterface::xfer`.
+    fn xfer_base(
+        &mut self,
+        xfer: &mut dyn Xfer,
+        sim: &dyn SimView,
+        owner: ObjectId,
+        version: XferVersion,
+    ) -> Result<(), XferError> {
         let crc = xfer.mode() == XferMode::Crc;
         let mut seams = ai_seams(sim);
         let mut written = version;
@@ -2151,6 +2201,7 @@ impl BehaviorModule for AiUpdate {
         self.schedule.bind(ctx);
         choose_locomotor_set_on(self, sim, ctx, LocomotorSetType::Normal);
         sim.set_wake_frame(ctx.mod_slot, UpdateSleepTime::NONE);
+        self.construct_derived(sim, ctx);
     }
 
     /// The destructor halts the machine: no state exits.

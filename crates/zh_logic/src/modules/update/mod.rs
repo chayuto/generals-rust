@@ -85,7 +85,8 @@ pub mod worker_ai_update;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;
-use crate::modules::module_factory::ModuleRegistry;
+use crate::modules::module_data::parse_data;
+use crate::modules::module_factory::{ModuleCreateFn, ModuleDataParseFn, ModuleRegistry};
 use crate::scheduler::SleepyUpdatePhase;
 use zh_common::core::name_key_generator::NameKeyGenerator;
 
@@ -101,6 +102,30 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
         ai_update::parse_ai_update_data,
         ai_update::create_ai_update,
     );
+    let derived_ai: [(&str, ModuleDataParseFn, ModuleCreateFn); 2] = [
+        (
+            "DozerAIUpdate",
+            parse_data::<dozer_ai_update::DozerAIUpdateModuleData>,
+            dozer_ai_update::create_dozer_ai_update,
+        ),
+        (
+            "WorkerAIUpdate",
+            parse_data::<worker_ai_update::WorkerAIUpdateModuleData>,
+            worker_ai_update::create_worker_ai_update,
+        ),
+    ];
+    for (name, parse, create) in derived_ai {
+        reg.register_module(
+            nk,
+            name,
+            ModuleType::Behavior,
+            FacetMask(0x001 | FacetMask::AI_UPDATE.0),
+            SleepyUpdatePhase::Initial,
+            true,
+            parse,
+            create,
+        );
+    }
     reg.register_module(
         nk,
         "BattlePlanUpdate",

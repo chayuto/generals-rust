@@ -21,8 +21,8 @@ use zh_common::io::file::OsDiskFileHost;
 use zh_logic::gamelogic::frame::{run_frame, NoFrameSeams};
 use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader};
 use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, StartStage};
-use zh_logic::rules::kind_of::KindOfType;
-use zh_logic::sim::SimView;
+use zh_logic::modules::update::ai_update::{AiUpdate, DerivedAi};
+use zh_logic::pathfinder::pathfind_constants::PathfindLayerEnum;
 
 #[path = "game_start_support/mod.rs"]
 mod support;
@@ -34,37 +34,19 @@ const GOLDEN: &str = include_str!("../../../docs/golden_vectors/GameStart.json")
 /// Logic frames each started game runs.
 const FRAMES: u32 = 300;
 
-/// Why a digest differs from the reference, if it is known to. At `before_units`
-/// everything matches. `before_ai`:
-///
-/// - the seed: `DozerAIUpdate` and `WorkerAIUpdate` are not ported, so a starting
-///   dozer or worker has no AI module and draws no random numbers;
-/// - the starting objects' positions: `Pathfinder::adjustDestination` is not
-///   ported, so a starting dozer stays where `findPositionAround` put it.
-///
-/// `end` adds `AIPlayer::newMap`, not ported: in the reference it destroys the
-/// computer player's command center and what stands under the new one (which sets
-/// their destroyed bit) and builds it again, which changes the next object id and
-/// that team's member count.
+/// Why a digest differs from the reference, if it is known to. `before_units` and
+/// `before_ai` match; `end` differs by `AIPlayer::newMap`, not ported: in the
+/// reference it destroys the computer player's command center and what stands
+/// under the new one (which sets their destroyed bit) and builds it again, which
+/// changes the next object id and that team's member count. On the six-player
+/// custom map the reference also draws random numbers there.
 fn known_divergence(stage: &str, key: &str) -> Option<&'static str> {
-    if stage == "before_units" {
-        return None;
-    }
-    KNOWN_AT_BOTH
-        .iter()
-        .find(|(k, _)| *k == key)
-        .map(|&(_, cause)| cause)
-        .or_else(|| {
-            (stage == "end" && KNOWN_AT_END.contains(&key)).then_some("unported AIPlayer::newMap")
-        })
+    (stage == "end" && KNOWN_AT_END.contains(&key)).then_some("unported AIPlayer::newMap")
 }
 
-const KNOWN_AT_BOTH: [(&str, &str); 2] = [
-    ("seed_digest", "unported dozer and worker AI"),
-    ("start_position_digest", "unported adjustDestination"),
-];
-
-const KNOWN_AT_END: [&str; 12] = [
+const KNOWN_AT_END: [&str; 14] = [
+    "seed_digest",
+    "start_position_digest",
     // `AIPlayer::newMap` clears map objects from under the new buildings.
     "unbridged_digest",
     "game_digest",
@@ -213,8 +195,9 @@ fn golden_cases() -> Vec<Case> {
 
 /// Stages recorded per game.
 const STAGES: usize = 3;
-/// Mobile starting units, over all games and at both later stages, which
-/// `adjustDestination` moved in the reference.
+/// Starting units which `adjustDestination` moves in the reference, over the games
+/// without bridges (the ones a port without it placed differently). Each reserves
+/// its cell.
 const MOVED_UNITS: u32 = 38;
 /// Replays of the baseline, and games made from options strings.
 const REPLAY_GAMES: usize = 6;
@@ -302,13 +285,46 @@ fn start_positions(rows: &[String]) -> Vec<(i32, String)> {
         .collect()
 }
 
-/// Whether the object with `id` cannot move, so `adjustDestination` leaves it alone.
-fn is_immobile(game: &GameStart, id: i32) -> bool {
-    game.sim
-        .world
-        .objects
-        .slot_by_id(zh_common::types::ObjectId(id))
-        .is_some_and(|slot| game.sim.object_is_kind_of(slot, KindOfType::Immobile) != 0)
+/// The starting dozers and workers which hold a goal cell (`updateGoal`), which
+/// no digest shows. A reserved cell must name its unit.
+fn count_reservations(game: &GameStart, failures: &mut Vec<String>, name: &str) -> u32 {
+    let world = &game.sim.world;
+    let Some(pathfinder) = world.pathfinder.as_ref() else {
+        return 0;
+    };
+    let mut reserved = 0;
+    for slot in world.objects.world_iter() {
+        let Some(obj) = world.objects.get(slot) else {
+            continue;
+        };
+        let Some(ai) = obj
+            .ai_slot
+            .and_then(|m| world.modules.payload(m))
+            .and_then(|m| m.as_any())
+            .and_then(|a| a.downcast_ref::<AiUpdate>())
+        else {
+            continue;
+        };
+        let cell = ai.pathfind_goal_cell;
+        if matches!(ai.derived, DerivedAi::Base) || (cell.x, cell.y) == (-1, -1) {
+            continue;
+        }
+        reserved += 1;
+        let holder = pathfinder
+            .get_cell(PathfindLayerEnum::Ground, cell.x, cell.y)
+            .map(|idx| pathfinder.goal_unit(idx));
+        if holder != Some(obj.id) {
+            failures.push(format!("{name}: unit {:?} holds no goal cell", obj.id));
+        }
+    }
+    reserved
+}
+
+/// Whether the map has bridges, which the port does not make.
+fn is_bridged(game: &GameStart) -> bool {
+    ["map bridge", "TerrainLogic::addLandmarkBridgeToLogic"]
+        .iter()
+        .any(|call| game.report.unported.contains_key(call))
 }
 
 /// Every map object is made or counted as skipped, and the calls that were left
@@ -335,19 +351,13 @@ fn check_report(game: &GameStart, before: &[String], failures: &mut Vec<String>,
         ));
     }
     let count = |call: &str| report.unported.get(call).copied().unwrap_or(0);
-    let mobile = start_positions(before)
-        .iter()
-        .filter(|(id, _)| !is_immobile(game, *id))
-        .count() as u32;
     let computers = count("AIPlayer");
-    if count("Pathfinder::adjustDestination") != mobile
+    // Every mobile starting unit has an AI to place it.
+    if count("mobile starting unit without AI") != 0
         || count("AIPlayer::newMap") != computers
         || count("ScriptEngine") != 1
     {
-        failures.push(format!(
-            "{name}: unported calls {:?}, {mobile} mobile starting units",
-            report.unported
-        ));
+        failures.push(format!("{name}: unported calls {:?}", report.unported));
     }
 }
 
@@ -360,7 +370,7 @@ fn retail_game_starts_match_the_reference_and_run() {
     let mut compared = 0;
     let mut bridged_games = 0;
     let mut started: BTreeMap<&str, Started> = BTreeMap::new();
-    let mut moved_units = 0;
+    let mut reserved = 0;
     for case in &cases {
         let name = case.name.as_str();
         if std::env::var("GAME_START_ONLY").is_ok_and(|only| only != name) {
@@ -375,6 +385,10 @@ fn retail_game_starts_match_the_reference_and_run() {
             };
             compared += 1;
             check_report(&game.game, &game.before_ai, &mut failures, name);
+            let count = count_reservations(&game.game, &mut failures, name);
+            if !is_bridged(&game.game) {
+                reserved += count;
+            }
             if let Ok(dir) = std::env::var("GAME_START_DUMP") {
                 for stage in ["before_units", "before_ai", "end"] {
                     let rows = game.rows(stage);
@@ -394,27 +408,21 @@ fn retail_game_starts_match_the_reference_and_run() {
         let ours = summarize(rows);
         // The port makes no bridge objects, so on such a map only the players and the
         // other map objects, by content, can be compared.
-        let bridged = ["map bridge", "TerrainLogic::addLandmarkBridgeToLogic"]
-            .iter()
-            .any(|call| game.report.unported.contains_key(call));
+        let bridged = is_bridged(game);
         bridged_games += u32::from(bridged && case.stage == "end");
         for (key, value) in &case.values {
             if bridged && !(key.starts_with("player_") || key.starts_with("unbridged_")) {
                 continue;
             }
             if key == "start_positions" {
-                let found = start_positions(rows);
+                let found: Vec<String> = start_positions(rows).into_iter().map(|p| p.1).collect();
                 let expected: Vec<&str> = value.split(',').filter(|v| !v.is_empty()).collect();
-                // A mobile unit may have been moved; everything else is exact.
-                for (i, (id, got)) in found.iter().enumerate() {
-                    if expected.get(i) == Some(&got.as_str()) {
-                        continue;
-                    }
-                    if case.stage == "before_units" || is_immobile(game, *id) {
-                        failures.push(format!("{name} {}: position of object {id}", case.stage));
-                    } else if case.stage == "before_ai" {
-                        moved_units += 1;
-                    }
+                // `AIPlayer::newMap` replaces objects, so at `end` only the
+                // objects both have are compared.
+                let differs = expected.iter().zip(&found).any(|(a, b)| a != b)
+                    || (case.stage != "end" && expected.len() != found.len());
+                if differs {
+                    failures.push(format!("{name} {}: starting positions", case.stage));
                 }
                 continue;
             }
@@ -435,18 +443,11 @@ fn retail_game_starts_match_the_reference_and_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     if compared == REPLAY_GAMES + VARIANT_GAMES {
         assert_eq!(bridged_games, BRIDGED_GAMES, "maps with bridges");
-        assert_eq!(
-            moved_units, MOVED_UNITS,
-            "mobile starting units that differ"
-        );
-        let known = KNOWN_AT_BOTH
-            .iter()
-            .flat_map(|&(k, _)| [("before_ai", k), ("end", k)])
-            .chain(KNOWN_AT_END.iter().map(|&k| ("end", k)));
-        for (stage, key) in known {
+        assert_eq!(reserved, MOVED_UNITS, "starting units with a goal cell");
+        for key in KNOWN_AT_END {
             assert!(
-                differing.contains(&(stage.to_owned(), key.to_owned())),
-                "{stage} {key} matches now: take it out of the known divergences"
+                differing.contains(&("end".to_owned(), key.to_owned())),
+                "end {key} matches now: take it out of the known divergences"
             );
         }
     }

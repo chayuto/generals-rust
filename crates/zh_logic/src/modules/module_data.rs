@@ -789,7 +789,7 @@ macro_rules! module_data {
 pub(crate) use module_data;
 
 /// `ModuleFactory::newModuleDataFromINI` for one of these.
-fn parse_data<T: DataOnly + 'static>(
+pub(crate) fn parse_data<T: DataOnly + 'static>(
     reader: &mut IniReader<'_>,
     tag_key: NameKeyType,
     module_name_key: NameKeyType,
