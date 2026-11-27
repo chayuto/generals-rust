@@ -5,3 +5,5 @@ pub mod thing_sort;
 pub use thing_sort::{
     parse_editor_sorting_type, EditorSortingType, EDITOR_SORTING_NAMES,
 };
+
+pub mod game_logic_dispatch;
