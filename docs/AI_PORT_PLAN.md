@@ -5,7 +5,7 @@ A plan only; nothing here is ported yet. Reference: `vendor/GeneralsX` at the pi
 ## What the plan rests on
 
 - No Rust module implements `AiUpdateFacet` or `SupplyTruckAiFacet`. The AI is imitated in `sim/mod.rs` (`ai_construct`, `ai_init_state_machine`, `ai_idle`), and orders are only recorded (`ai_commands`, `exit_path_orders`).
-- Some "implemented" packets are only partly there. `PKT-143 Locomotor` has templates and setters, no movement. `PKT-399 Weapon` lacks `fireWeaponTemplate`. `PKT-145 TurretAI` is not connected to the sim.
+- Some "implemented" packets are only partly there. `PKT-143 Locomotor` has templates and setters, no movement. `PKT-399 Weapon` had no `fireWeaponTemplate` when this was written; it has since been ported, so the weapons slice below is largely done. `PKT-145 TurretAI` is not connected to the sim.
 - Already usable: pathfind cell, cell info, cell list and zone manager (`PKT-413..418`), partition grid, physics, the sleepy-update heap, `zh_common::core::state_machine`.
 - Ground height is computed in device code that is **not in the manifest**: `W3DTerrainLogic.cpp`, `BaseHeightMap.cpp`, `WorldHeightMap.cpp`. Rust has only `FlatTerrain`, and no map loader.
 - The Rust sim has no frame driver and no game-wide CRC.

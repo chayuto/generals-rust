@@ -49,9 +49,9 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Next
 
-- **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10). Simulation first: weapons doing damage, then unit movement, then the unit AI (`AI_PORT_PLAN.md`). Client work waits on item 12.
+- **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10). Simulation first: weapons doing damage (done), then unit movement, then the unit AI (`AI_PORT_PLAN.md`). Client work waits on item 12.
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
-- Packet counts overstate completeness (see the known gaps): `Locomotor` has no movement code and weapons do no damage.
+- Packet counts overstate completeness (see the known gaps): `Locomotor` has no movement code. Weapons now do damage (`golden_pkt399_weapon_effects`); gaps are in `OPEN_DECISIONS.md`.
 - Next faithfulness gap of the same kind as the per-player fix: sciences, radar, cost modifiers and handicaps are still keyed by team.
 - Cheap further engine swaps: the byte CRC and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.

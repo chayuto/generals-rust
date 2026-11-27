@@ -58,6 +58,8 @@ python3 scripts/test_build_rust_engine.py
 python3 scripts/test_gen_engine_sim.py
 python3 scripts/test_module_census.py
 python3 scripts/test_swap_candidates.py
+python3 scripts/test_check_vendor.py
+python3 scripts/check_vendor.py
 python3 scripts/lint_determinism.py
 python3 scripts/port_map.py --check
 if command -v cargo >/dev/null 2>&1 && [[ -f Cargo.toml ]]; then
