@@ -2286,7 +2286,7 @@ pub trait SimApi: SimView {
     );
     /// `Pathfinder::removeObjectFromPathfindMap`.
     fn pathfinder_remove_object(&mut self, owner: ObjectSlot);
-    /// `BoneFXUpdate::stopAllBoneFX` (the module is unported: the call is recorded).
+    /// `BoneFXUpdate::stopAllBoneFX`; the call is also recorded.
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot);
     /// `InGameUI::addFloatingText` of an "add cash" message.
     fn add_floating_money_text(&mut self, owner: ObjectSlot, pos: &Coord3D, amount: Int);
@@ -11569,6 +11569,19 @@ impl SimApi for SimContext {
         let has_module = self.has_module_by_name_key(owner, key);
         if let (true, Some(id)) = (has_module, self.world.objects.id_of(owner)) {
             self.world.bone_fx_stops.push(id);
+        }
+        let slots: Vec<ModuleSlot> = self.world.objects.get(owner).map_or_else(Vec::new, |o| {
+            o.behaviors.iter().map(|&(s, _)| s).collect()
+        });
+        for ms in slots {
+            let payload = self.world.modules.payload(ms);
+            if payload.is_some_and(|p| p.module_name_key() == key) {
+                let _ = self.dispatch_module(ms, |m, _, _| {
+                    if let Some(update) = m.as_update_mut() {
+                        update.stop_all_bone_fx();
+                    }
+                });
+            }
         }
     }
 

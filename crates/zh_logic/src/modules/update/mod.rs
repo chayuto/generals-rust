@@ -228,6 +228,16 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
     );
     reg.register_module(
         nk,
+        "BoneFXUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        bone_fx_update::parse_bone_fx_update_data,
+        bone_fx_update::create_bone_fx_update,
+    );
+    reg.register_module(
+        nk,
         "StructureToppleUpdate",
         ModuleType::Behavior,
         FacetMask(0x003),

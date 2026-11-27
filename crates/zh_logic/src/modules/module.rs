@@ -775,6 +775,9 @@ pub trait UpdateFacet {
         SleepyUpdatePhase::Normal
     }
 
+    /// `BoneFXUpdate::stopAllBoneFX`.
+    fn stop_all_bone_fx(&mut self) {}
+
     /// Notifies `BoneFXUpdate` (via `BoneFXDamage`) when body damage state transitions.
     fn change_body_damage_state(
         &mut self,
