@@ -57,7 +57,7 @@ pub struct NeighborSearch<'a> {
     pub attack_distance: Int,
 }
 
-const NEIGHBORS: [(Int, Int); 8] = [
+pub(super) const NEIGHBORS: [(Int, Int); 8] = [
     (1, 0),
     (0, 1),
     (-1, 0),
@@ -67,8 +67,8 @@ const NEIGHBORS: [(Int, Int); 8] = [
     (-1, -1),
     (1, -1),
 ];
-const FIRST_DIAGONAL: usize = 4;
-const ADJACENT: [usize; 5] = [0, 1, 2, 3, 0];
+pub(super) const FIRST_DIAGONAL: usize = 4;
+pub(super) const ADJACENT: [usize; 5] = [0, 1, 2, 3, 0];
 
 /// `ClipLine2D`: the ends of the line cut to the region, `None` when it misses.
 fn clip_line(p1: ICoord2D, p2: ICoord2D, region: &IRegion2D) -> Option<(ICoord2D, ICoord2D)> {

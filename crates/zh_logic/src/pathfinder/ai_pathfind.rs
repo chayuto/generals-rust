@@ -30,9 +30,11 @@ use crate::terrain::bridge::BridgeGeometry;
 use crate::terrain::{ElevatedLayers, TerrainEffects, TerrainLogic};
 
 mod goals;
+mod hierarchical;
 mod queries;
 mod search;
 pub use goals::*;
+pub use hierarchical::*;
 pub use queries::*;
 pub use search::*;
 

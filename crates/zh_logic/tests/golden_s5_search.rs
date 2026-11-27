@@ -1,7 +1,8 @@
 //! Replays `docs/golden_vectors/S5_Search.json`
 //! (`tests/cpp_harness/gen_s5_search.cpp`): the open and closed lists, the
-//! neighbour checks, the ground A* search, path building, the cost search and
-//! the switch to the fixed code, with the whole search state after every call.
+//! neighbour checks, the ground A* search, path building, the cost search, the
+//! switch to the fixed code, the hierarchical searches, `findPath`, the ground
+//! path and the request queue, with the whole search state after every call.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,13 +10,16 @@ use zh_common::math::gamemath::real_to_int_floor;
 use zh_common::math::geometry::{GeometryInfo, GeometryType};
 use zh_common::math::{Coord3D, ICoord2D, Matrix3D, Region3D};
 use zh_common::types::{Bool, Int, ObjectId, Real};
+use zh_common::xfer::XferCrc;
+use zh_logic::gamelogic::frame::{run_frame, NoFrameSeams};
 use zh_logic::object::thing::ThingTerrainAccess;
 use zh_logic::pathfinder::{
-    AdjustUnit, CellIdx, Footprint, InfoIdx, NeighborSearch, Path, PathAgent, PathUnit, PathUnits,
-    PathWorld, PathfindCellList, PathfindLayerEnum, Pathfinder, SearchPathCost, SearchUnit,
-    WallSurface,
+    AdjustUnit, CellIdx, Footprint, HierarchicalSearch, InfoIdx, NeighborSearch, Path, PathAgent,
+    PathUnit, PathUnits, PathWorld, PathfindCellList, PathfindLayerEnum, Pathfinder,
+    SearchPathCost, SearchUnit, WallSurface,
 };
-use zh_logic::terrain::{nearest_layer, ElevatedLayers};
+use zh_logic::sim::{SimApi, SimContext};
+use zh_logic::terrain::{nearest_layer, Bridge, BridgeGeometry, ElevatedLayers, TerrainLogic};
 
 const VECTORS: &str = include_str!("../../../docs/golden_vectors/S5_Search.json");
 const INFO_COUNT: usize = 30_000;
@@ -93,6 +97,8 @@ struct Tables {
     height: Vec<u8>,
     wall_height: Real,
     wall: WallSurface,
+    /// Answers the layer questions of maps with bridges, whose ground is flat.
+    bridged: Option<TerrainLogic>,
 }
 
 impl Tables {
@@ -132,6 +138,9 @@ impl ThingTerrainAccess for Tables {
         Bool::from(self.water[self.at(x, y)] == b'1')
     }
     fn get_layer_for_destination(&self, pos: &Coord3D) -> PathfindLayerEnum {
+        if let Some(bridged) = &self.bridged {
+            return bridged.get_layer_for_destination(pos);
+        }
         nearest_layer(
             pos,
             self.get_ground_height(pos.x, pos.y, None),
@@ -208,6 +217,12 @@ struct Scene {
     units: Units,
     cells: Vec<CellIdx>,
     keys: BTreeMap<usize, i64>,
+    /// Cells holding records to leave few free.
+    hoard: Vec<CellIdx>,
+    /// Unit id to the search its queued request runs, and whom it queues.
+    plans: BTreeMap<Int, (Coord3D, Coord3D, ObjectId, Int)>,
+    /// Whether this frame's `processPathfindQueue` takes requests.
+    serving: bool,
 }
 
 fn read_footprint(t: &mut Tokens) -> Footprint {
@@ -492,6 +507,20 @@ impl Scene {
                 self.terrain.wall_height = self.wall_height;
             }
             "wallpiece" => self.pf.add_wall_piece(t.id()),
+            "plan" => {
+                let id = t.int();
+                let (from, to) = (t.point(), t.point());
+                self.plans.insert(id, (from, to, t.id(), t.int()));
+            }
+            "fill" => assert!(self.pf.queue_for_path(t.id())),
+            "frame" => {
+                let region = Region3D {
+                    lo: t.point(),
+                    hi: t.point(),
+                };
+                let frame = t.int() as u32;
+                self.serving = self.pf.begin_path_queue(&region, frame);
+            }
             "obj" => {
                 let fp = read_footprint(t);
                 self.footprints.insert(fp.id.0, fp);
@@ -511,6 +540,9 @@ impl Scene {
                     100,
                 );
                 self.terrain.wall = self.pf.wall_surface();
+                if let Some(bridged) = &mut self.terrain.bridged {
+                    bridged.set_elevated_layers(Box::new(self.pf.wall_surface()));
+                }
                 self.index_cells();
             }
             "unit" => {
@@ -621,11 +653,13 @@ impl Scene {
             "cost" => {
                 let m = self.mover(t);
                 let (from, to) = (t.point(), t.point());
+                self.pf.is_tunneling = t.flag();
                 let crusher = m.unit.agent.crusher_level > 0;
                 let cost =
                     self.pf
                         .check_path_cost(&self.terrain, crusher, m.unit.surfaces, &from, &to);
                 let out = format!("{} | {}", cost, self.state());
+                self.pf.is_tunneling = false;
                 self.done();
                 out
             }
@@ -817,10 +851,174 @@ impl Scene {
                 grid.release_info(gone);
                 format!("{} | {digests}", out.trim_start())
             }
+            "bridge" => {
+                let id = t.id();
+                let [from, to, fl, fr, tl, tr] = std::array::from_fn(|_| t.point());
+                let geometry = BridgeGeometry::from_corners(from, to, fl, fr, tl, tr);
+                let bridged = self.terrain.bridged.get_or_insert_with(TerrainLogic::new);
+                bridged.add_bridge(Bridge::new(geometry, "S5NoRoad", id), &mut self.pf);
+                let layer = bridged.bridges().iter().next().expect("bridge").layer;
+                (layer as Int).to_string()
+            }
+            "hier" => {
+                let m = self.mover(t);
+                let (human, crusher, closest_ok) = (t.flag(), t.flag(), t.flag());
+                let (from, to) = (t.point(), t.point());
+                let search = HierarchicalSearch {
+                    human,
+                    surfaces: m.unit.surfaces,
+                    crusher,
+                    closest_ok,
+                };
+                let path = self
+                    .pf
+                    .find_hierarchical_path(&self.terrain, &search, &from, &to);
+                let out = format!("{} | {}", Self::path_dump(path.as_ref()), self.state());
+                self.done();
+                out
+            }
+            "path" => {
+                let m = self.mover(t);
+                let (from, to) = (t.point(), t.point());
+                let path = self
+                    .pf
+                    .find_path(&self.terrain, &self.units, &m.unit, &from, &to);
+                let out = format!("{} | {}", Self::path_dump(path.as_ref()), self.state());
+                self.done();
+                out
+            }
+            "exists" => {
+                let m = self.mover(t);
+                let (from, to) = (t.point(), t.point());
+                let ignore = t.id();
+                let found = self.pf.slow_does_path_exist(
+                    &self.terrain,
+                    &self.units,
+                    &m.unit,
+                    &from,
+                    &to,
+                    ignore,
+                );
+                let out = format!(
+                    "{} {} | {}",
+                    u8::from(found),
+                    self.pf.ignore_obstacle_id.0,
+                    self.state()
+                );
+                self.done();
+                out
+            }
+            "ground" => {
+                let diameter = t.int();
+                let crusher = t.flag();
+                let (from, to) = (t.point(), t.point());
+                let path = self.pf.find_ground_path(
+                    &self.terrain,
+                    &self.units,
+                    &from,
+                    &to,
+                    diameter,
+                    crusher,
+                );
+                format!("{} | {}", Self::path_dump(path.as_ref()), self.state())
+            }
+            "queue" => {
+                let ok = self.pf.queue_for_path(t.id());
+                format!("{} {}", u8::from(ok), self.crc())
+            }
+            "serve" => self.serve(t.int()),
+            "frameend" => {
+                // What is left has no AI, unless the frame's cells are spent.
+                while let Some(id) = self.next_request() {
+                    assert!(!self.plans.contains_key(&id.0), "unit {id:?} left unserved");
+                    self.pf.finish_path_request();
+                }
+                format!("{} {}", self.state(), self.crc())
+            }
+            "hoard" => {
+                let left = t.int() as u32;
+                for x in (0..self.terrain.w).rev().filter(|x| !(36..50).contains(x)) {
+                    for y in (0..self.terrain.h).rev() {
+                        if self.pf.map().pool().free_count() <= left {
+                            break;
+                        }
+                        let at = ICoord2D::new(x, y);
+                        let idx = self.cell(PathfindLayerEnum::Ground, at);
+                        if self.pf.map().grid().cell(idx).info_idx.is_none() {
+                            self.pf.map_mut().grid_mut().allocate_info(idx, at);
+                            self.hoard.push(idx);
+                        }
+                    }
+                }
+                format!("{} {}", self.pf.map().pool().free_count(), self.state())
+            }
+            "unhoard" => {
+                for idx in std::mem::take(&mut self.hoard) {
+                    self.pf.map_mut().grid_mut().release_info(idx);
+                }
+                self.state()
+            }
+            "retail" => {
+                self.pf.map_mut().mode_mut().use_fixed_pathfinding = false;
+                self.state()
+            }
             "setup" => self.state(),
             "records" => self.records().join(" "),
             other => panic!("unknown row {other}"),
         }
+    }
+
+    fn crc(&self) -> u32 {
+        let mut xfer = XferCrc::new();
+        self.pf.crc(&mut xfer).expect("crc");
+        xfer.get_crc()
+    }
+
+    fn next_request(&mut self) -> Option<ObjectId> {
+        if !self.serving {
+            return None;
+        }
+        self.pf.next_path_request()
+    }
+
+    /// The next queued unit runs its scripted search, as `doPathfind` did.
+    fn serve(&mut self, expected: Int) -> String {
+        let id = loop {
+            let id = self.next_request().expect("a request to serve");
+            if self.plans.contains_key(&id.0) {
+                break id.0;
+            }
+            self.pf.finish_path_request();
+        };
+        assert_eq!(id, expected, "served out of order");
+        let before = self.pf.cumulative_cells_allocated;
+        let (from, to, again, surfaces) = self.plans[&id];
+        let info = &self.units.info[&id];
+        let unit = SearchUnit {
+            agent: info.agent.clone(),
+            surfaces,
+            downhill_only: false,
+            human: info.human,
+            can_path_through_units: false,
+            dozer: info.dozer,
+            vehicle: info.vehicle,
+        };
+        let path = self
+            .pf
+            .find_path(&self.terrain, &self.units, &unit, &from, &to);
+        let mut queued = "-".to_string();
+        if again != ObjectId::INVALID {
+            queued = u8::from(self.pf.queue_for_path(again)).to_string();
+            self.plans.get_mut(&id).expect("plan").2 = ObjectId::INVALID;
+        }
+        let out = format!(
+            "{before} {} {queued} {} {}",
+            Self::path_dump(path.as_ref()),
+            self.pf.cumulative_cells_allocated,
+            self.crc()
+        );
+        self.pf.finish_path_request();
+        out
     }
 
     fn examine(&mut self, t: &mut Tokens) -> String {
@@ -932,7 +1130,16 @@ fn searches_match_row_for_row() {
         ("cap", 3),
         ("grand", 20),
         ("cut", 10),
-        ("setup", 20),
+        ("setup", 40),
+        ("bridge", 20),
+        ("hier", 170),
+        ("path", 170),
+        ("exists", 60),
+        ("ground", 170),
+        ("serve", 200),
+        ("queue", 700),
+        ("frameend", 80),
+        ("hoard", 30),
         ("records", 10),
     ] {
         assert!(
@@ -941,4 +1148,33 @@ fn searches_match_row_for_row() {
         );
     }
     assert!(found > 120, "only {found} paths found");
+}
+
+fn pathfinder_crc(sim: &SimContext) -> u32 {
+    let mut xfer = XferCrc::new();
+    let pathfinder = sim.world.pathfinder.as_deref().expect("map");
+    pathfinder.crc(&mut xfer).expect("crc");
+    xfer.get_crc()
+}
+
+/// A world with a pathfinder queues on it, and the frame step serves it.
+#[test]
+fn sim_queues_paths_on_the_map() {
+    let mut sim = SimContext::new();
+    let extent = Region3D {
+        lo: Coord3D::default(),
+        hi: Coord3D::new(200.0, 200.0, 100.0),
+    };
+    sim.new_pathfind_map(&extent, 12.0);
+    let empty = pathfinder_crc(&sim);
+    assert_eq!(SimApi::queue_for_path(&mut sim, ObjectId(77)), 1);
+    let queued = pathfinder_crc(&sim);
+    assert_ne!(queued, empty);
+    // A frame that has to recalculate the zones takes no request.
+    let mut frames = 0;
+    while pathfinder_crc(&sim) == queued {
+        run_frame(&mut sim, &mut NoFrameSeams);
+        frames += 1;
+        assert!(frames < 400, "request never taken");
+    }
 }

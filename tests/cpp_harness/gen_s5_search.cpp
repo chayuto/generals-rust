@@ -1,7 +1,8 @@
-// Golden vectors for the first half of slice S5: the open and closed lists,
+// Golden vectors for slice S5: the open and closed lists,
 // examineNeighboringCells, internalFindPath, prependCells, clip, checkPathCost,
-// cleanOpenAndClosedLists, forceCleanCells and the switch to fixed pathfinding,
-// all in the unmodified reference library.
+// cleanOpenAndClosedLists, forceCleanCells, the switch to fixed pathfinding,
+// the hierarchical searches, findPath, findGroundPath, slowDoesPathExist and
+// the path request queue, all in the unmodified reference library.
 //
 //   python3 scripts/build_oracle.py tests/cpp_harness/gen_s5_search.cpp -o gen_s5
 //   ./gen_s5 docs/golden_vectors/S5_Search.json
@@ -14,8 +15,11 @@
 // of the cells a search examined), the free list, every cell and the zone
 // blocks' passable flags.
 //
-// Not covered: bridges, pool exhaustion, the aircraft and line-of-sight cases
-// covered by earlier slices.
+// Not covered: pool exhaustion, the aircraft and line-of-sight cases covered by
+// earlier slices. doPathfind is answered by the driver, which records the
+// queue's calls and runs a scripted search.
+//
+// oracle-wrap: GeneralsMD/Code/GameEngine/libz_gameengine.a AIUpdate.cpp.o __ZN17AIUpdateInterface10doPathfindEP25PathfindServicesInterface
 
 #include "oracle_wp51_world.h"
 
@@ -76,6 +80,9 @@ S5_FN(PfExamine, Int (Pathfinder::*)(PathfindCell*, PathfindCell*, const Locomot
                                      const ICoord2D&, const Object*, Int),
       Pathfinder::examineNeighboringCells)
 S5_FN(PfPrepend, void (Pathfinder::*)(Path*, const Coord3D*, PathfindCell*, Bool), Pathfinder::prependCells)
+typedef Path* (Pathfinder::*S5Hier)(Bool, const LocomotorSet&, const Coord3D*, const Coord3D*, Bool);
+S5_FN(PfHier, S5Hier, Pathfinder::findHierarchicalPath)
+S5_FN(PfClosest, S5Hier, Pathfinder::findClosestHierarchicalPath)
 
 // The layout of a `PathfindCellInfo`, whose members are protected.
 struct InfoView {
@@ -163,6 +170,9 @@ public:
 static S5Terrain* g_terrain = nullptr;
 static oracle_wp51::World* g_world = nullptr;
 static Pathfinder* pf() { return TheAI->pathfinder(); }
+// A C cast reaches the private base, whose findPath is public.
+static PathfindServicesInterface* services() { return (PathfindServicesInterface*)pf(); }
+static ObjectID oid(int n) { return static_cast<ObjectID>(n); }
 static PathfindZoneManager& zones() { return pf()->*access_member(PfZones()); }
 
 static void blobs(std::string& table, char value, int count, int reach) {
@@ -220,6 +230,7 @@ static void make_templates() {
         g_blocks.push_back(name);
     }
     object_ini("S5Wall", "STRUCTURE IMMOBILE WALK_ON_TOP_OF_WALL", "BOX", 30, 18, "");
+    object_ini("S5Deck", "IMMOBILE", "BOX", 30, 12, "");
 }
 
 static int flags_of(Object* o) {
@@ -252,6 +263,8 @@ static Object* spawn(const std::string& name, Team* team, float x, float y, floa
 // ---- scene ----------------------------------------------------------------------
 
 struct Scene {
+    std::vector<Coord3D> bridge_points;
+    std::vector<std::string> bridges;
     int w = 0, h = 0;
     float maxx = 0, maxy = 0;
     std::vector<Object*> blocks, units, walls, everything;
@@ -593,9 +606,12 @@ static void endpoints(const Scene& s, Coord3D& from, Coord3D& to) {
 static bool g_full = false, g_first_scene = false;
 static int g_found = 0, g_missed = 0, g_costed = 0, g_uncosted = 0;
 
+static const Coord3D* g_start = nullptr;
+
 static void find_row(Scene& s) {
     Coord3D from, to;
     endpoints(s, from, to);
+    if (g_start) from = *g_start;
     passable(s);
     Mover m;
     choose(s, m, from);
@@ -612,9 +628,13 @@ static void cost_row(Scene& s) {
     endpoints(s, from, to);
     Mover m;
     choose(s, m, from);
+    const bool tunneling = chance(25);
+    pf()->*access_member(PfTunnel()) = tunneling;
     const Int cost = (pf()->*access_member(PfCost()))(m.unit, m.set, &from, &to);
     (cost != 0x7fff0000 ? g_costed : g_uncosted)++;
-    row("cost " + mover_text(m) + " " + c3(from) + " " + c3(to) + " = " + num(cost) + " | " + state(s));
+    row("cost " + mover_text(m) + " " + c3(from) + " " + c3(to) + " " + num(tunneling) + " = " + num(cost) + " | " +
+        state(s));
+    pf()->*access_member(PfTunnel()) = false;
     done(m);
     if (g_full) full_state(s);
 }
@@ -883,6 +903,245 @@ static void cut_row(Scene& s) {
     row("cut" + at_text(at) + " =" + out + " | " + digests);
 }
 
+// ---- hierarchical, ground and findPath ---------------------------------------------
+
+static bool g_decks_up = false;
+// A bridge from one bank to the other, along x or along y.
+static void add_bridge(Scene& s, bool along_x, float lo, float hi, float across) {
+    BridgeInfo info;
+    const float deck_z = chance(75) || g_decks_up ? 5.0f : 0.0f;
+    const float half = chance(50) ? 15.0f : between(8.0f, 26.0f);
+    const float skew = chance(20) ? between(-30.0f, 30.0f) : 0.0f;
+    info.from.x = along_x ? lo : across;
+    info.from.y = along_x ? across : lo;
+    info.from.z = deck_z;
+    info.to.x = along_x ? hi : across + skew;
+    info.to.y = along_x ? across + skew : hi;
+    info.to.z = deck_z;
+    float dx = info.to.x - info.from.x, dy = info.to.y - info.from.y;
+    const float d = std::sqrt(dx * dx + dy * dy);
+    const float px = -dy / d * half, py = dx / d * half;
+    info.bridgeWidth = 2.0f * half;
+    info.fromLeft.x = info.from.x + px; info.fromLeft.y = info.from.y + py; info.fromLeft.z = deck_z;
+    info.fromRight.x = info.from.x - px; info.fromRight.y = info.from.y - py; info.fromRight.z = deck_z;
+    info.toLeft.x = info.to.x + px; info.toLeft.y = info.to.y + py; info.toLeft.z = deck_z;
+    info.toRight.x = info.to.x - px; info.toRight.y = info.to.y - py; info.toRight.z = deck_z;
+    Object* deck = spawn("S5Deck", g_world->team_a, info.from.x, info.from.y, deck_z, 0.0f);
+    s.everything.push_back(deck);
+    s.bridge_points.push_back(info.from);
+    s.bridge_points.push_back(info.to);
+    info.bridgeObjectID = deck->getID();
+    for (int k = 0; k < BRIDGE_MAX_TOWERS; ++k) info.towerObjectID[k] = INVALID_ID;
+    info.bridgeIndex = 0;
+    info.curDamageState = BODY_PRISTINE;
+    info.damageStateChanged = false;
+    Dict props;
+    TheTerrainLogic->addBridgeToLogic(&info, &props, AsciiString("S5NoRoad"));
+    s.bridges.push_back("bridge " + num(deck->getID()) + " " + c3(info.from) + " " + c3(info.to) + " " +
+                        c3(info.fromLeft) + " " + c3(info.fromRight) + " " + c3(info.toLeft) + " " +
+                        c3(info.toRight) + " = " + num(TheTerrainLogic->getFirstBridge()->getLayer()));
+}
+
+// Where a search starts or ends: anywhere, or by a bridge.
+static Coord3D far_point(const Scene& s) {
+    Coord3D p = point(s, chance(5));
+    // Mostly on open ground, so that searches have something to find.
+    for (int n = 0; n < 20 && chance(85); ++n) {
+        const PathfindCell* c = pf()->getCell(LAYER_GROUND, &p);
+        if (c && c->getType() == PathfindCell::CELL_CLEAR && !c->getPinched()) break;
+        p = point(s, false);
+    }
+    if (!s.bridge_points.empty() && chance(30)) {
+        p = s.bridge_points[below(static_cast<int>(s.bridge_points.size()))];
+        p.x += between(-12.0f, 12.0f);
+        p.y += between(-12.0f, 12.0f);
+    } else if (chance(10)) {
+        p.z = 5.0f;
+    }
+    return p;
+}
+
+static void far_endpoints(const Scene& s, Coord3D& from, Coord3D& to) {
+    from = far_point(s);
+    to = far_point(s);
+    if (chance(35)) {  // across the whole map
+        from.x = coord(0.0f, s.maxx * 0.2f);
+        to.x = coord(s.maxx * 0.8f, s.maxx);
+    }
+    if (chance(3)) to = from;
+    if (chance(2)) { to.x = 0.0f; to.y = 0.0f; }
+}
+
+static int g_hier = 0, g_hier_null = 0, g_paths = 0, g_paths_null = 0, g_ground = 0, g_ground_null = 0;
+
+static void hier_row(Scene& s) {
+    Coord3D from, to;
+    far_endpoints(s, from, to);
+    Mover m;
+    choose(s, m, from);
+    const bool human = chance(50), crusher = chance(20), closest = chance(35);
+    Path* path = (pf()->*(closest ? access_member(PfClosest()) : access_member(PfHier())))(human, m.set, &from, &to,
+                                                                                          crusher);
+    (path ? g_hier : g_hier_null)++;
+    row("hier " + mover_text(m) + " " + num(human) + " " + num(crusher) + " " + num(closest) + " " + c3(from) + " " +
+        c3(to) + " = " + path_dump(path) + " | " + state(s));
+    if (path) deleteInstance(path);
+    done(m);
+    if (g_full) full_state(s);
+}
+
+static void path_row(Scene& s) {
+    Coord3D from, to;
+    far_endpoints(s, from, to);
+    Mover m;
+    choose(s, m, from);
+    Path* path = services()->findPath(m.unit, m.set, &from, &to);
+    (path ? g_paths : g_paths_null)++;
+    row("path " + mover_text(m) + " " + c3(from) + " " + c3(to) + " = " + path_dump(path) + " | " + state(s));
+    if (path) deleteInstance(path);
+    done(m);
+}
+
+static void exists_row(Scene& s) {
+    Coord3D from, to;
+    far_endpoints(s, from, to);
+    Mover m;
+    choose(s, m, from);
+    m.surfaces = m.unit->getAIUpdateInterface()->getLocomotorSet().getValidSurfaces();
+    m.downhill = m.unit->getAIUpdateInterface()->getLocomotorSet().isDownhillOnly();
+    const ObjectID ignore = !s.blocks.empty() && chance(60) ? pick(s.blocks)->getID() : INVALID_ID;
+    if (ignore != INVALID_ID && chance(70)) to = *TheGameLogic->findObjectByID(ignore)->getPosition();
+    const std::string in = mover_text(m);
+    const Bool found = pf()->slowDoesPathExist(m.unit, &from, &to, ignore);
+    row("exists " + in + " " + c3(from) + " " + c3(to) + " " + num(ignore) + " = " + num(found) + " " +
+        num(pf()->*access_member(PfIgnore())) + " | " + state(s));
+    done(m);
+}
+
+static void ground_row(Scene& s) {
+    Coord3D from, to;
+    far_endpoints(s, from, to);
+    if (!s.blocks.empty() && chance(40)) {  // a goal too narrow for the group
+        to = *pick(s.blocks)->getPosition();
+        to.x += between(-45.0f, 45.0f);
+        to.y += between(-45.0f, 45.0f);
+        to.z = 0.0f;
+    }
+    const int diameter = chance(15) ? below(12) : 1 + below(5);
+    const bool crusher = chance(30);
+    Path* path = pf()->findGroundPath(&from, &to, diameter, crusher);
+    (path ? g_ground : g_ground_null)++;
+    row("ground " + num(diameter) + " " + num(crusher) + " " + c3(from) + " " + c3(to) + " = " + path_dump(path) +
+        " | " + state(s));
+    if (path) deleteInstance(path);
+}
+
+// ---- the request queue ----------------------------------------------------------
+
+struct Plan {
+    Coord3D from, to;
+    ObjectID again = INVALID_ID;  // queued once while it is served
+};
+static std::map<ObjectID, Plan> g_plans;
+static Scene* g_scene = nullptr;
+
+void AIUpdateInterface::doPathfind(PathfindServicesInterface*) {
+    const ObjectID id = getObject()->getID();
+    Plan& plan = g_plans[id];
+    const Int before = pf()->*access_member(PfCumulative());
+    Path* path = services()->findPath(getObject(), getLocomotorSet(), &plan.from, &plan.to);
+    std::string queued = "-";
+    if (plan.again != INVALID_ID) {
+        queued = num(pf()->queueForPath(plan.again));
+        plan.again = INVALID_ID;
+    }
+    row("serve " + num(id) + " = " + num(before) + " " + path_dump(path) + " " + queued + " " +
+        num(pf()->*access_member(PfCumulative())) + " " + num(oracle_wp51::World::snapshot_crc(pf())));
+    if (path) deleteInstance(path);
+}
+
+static void queue_row(ObjectID id) {
+    const Bool ok = pf()->queueForPath(id);
+    row("queue " + num(id) + " = " + num(ok) + " " + num(oracle_wp51::World::snapshot_crc(pf())));
+}
+
+static void frame_row(Scene& s, UnsignedInt frame) {
+    g_world->set_frame(frame);
+    const Region3D& e = g_terrain->extent;
+    row("frame " + c3(e.lo) + " " + c3(e.hi) + " " + num(frame));
+    pf()->processPathfindQueue();
+    row("frameend = " + state(s) + " " + num(oracle_wp51::World::snapshot_crc(pf())));
+}
+
+static void queue_section(Scene& s, UnsignedInt frame) {
+    g_plans.clear();
+    // An AI keeps its own locomotor set and flags; clear what the searches poked.
+    for (Object* o : s.units) o->getAIUpdateInterface()->*access_member(AiThrough()) = false;
+    std::vector<ObjectID> ids;
+    for (Object* o : s.units) {
+        Plan& plan = g_plans[o->getID()];
+        far_endpoints(s, plan.from, plan.to);
+        if (chance(80)) {  // long searches, to spend a frame's cells
+            plan.from.x = coord(0.0f, s.maxx * 0.2f);
+            plan.to.x = coord(s.maxx * 0.8f, s.maxx);
+        }
+        if (chance(30)) plan.again = chance(40) ? o->getID() : pick(s.units)->getID();
+        row("plan " + num(o->getID()) + " " + c3(plan.from) + " " + c3(plan.to) + " " + num(plan.again) + " " +
+            num(o->getAIUpdateInterface()->getLocomotorSet().getValidSurfaces()));
+        ids.push_back(o->getID());
+    }
+    for (ObjectID id : ids) queue_row(id);
+    for (int n = 30 + below(30); n > 0; --n) {
+        const int kind = below(10);
+        if (kind == 0) queue_row(oid(900000 + below(5)));  // no such object
+        else if (kind == 1 && !s.blocks.empty()) queue_row(pick(s.blocks)->getID());  // no AI
+        else queue_row(ids[below(static_cast<int>(ids.size()))]);
+    }
+    for (int n = 0; n < 8; ++n) {
+        frame_row(s, frame + n);
+        for (int k = below(5); k > 0; --k) queue_row(ids[below(static_cast<int>(ids.size()))]);
+    }
+}
+
+// More requests than the ring holds.
+static void overflow_section(Scene& s, UnsignedInt frame) {
+    for (int n = 0; n < 530; ++n) {
+        const Bool ok = pf()->queueForPath(oid(700000 + n));
+        if (n % 40 == 0 || !ok || n > 505) {
+            row("queue " + num(700000 + n) + " = " + num(ok) + " " + num(oracle_wp51::World::snapshot_crc(pf())));
+        } else {
+            row("fill " + num(700000 + n));
+        }
+    }
+    queue_row(oid(700000));
+    frame_row(s, frame);
+    for (int n = 0; n < 600; ++n) {
+        const Bool ok = pf()->queueForPath(oid(800000 + n));
+        if (n > 505) row("queue " + num(800000 + n) + " = " + num(ok) + " " + num(oracle_wp51::World::snapshot_crc(pf())));
+        else row("fill " + num(800000 + n));
+    }
+    frame_row(s, frame + 1);
+}
+
+// Goals along the edges of the zone blocks, from where the hierarchical pass
+// steps: it only expands cells that already have a record.
+static void occupy_edges(const Scene& s, int percent) {
+    for (int x = 0; x < s.w; ++x) {
+        for (int y = 0; y < s.h; ++y) {
+            const int mx = x % 10, my = y % 10;
+            const bool edge = ((mx == 0 || mx == 9) && my > 1 && my < 9) || ((my == 0 || my == 9) && mx > 1 && mx < 9);
+            if (!edge || !chance(percent)) continue;
+            PathfindCell* cell = pf()->getCell(LAYER_GROUND, x, y);
+            Object* u = pick(s.units);
+            ICoord2D at;
+            at.x = x;
+            at.y = y;
+            cell->setGoalUnit(u->getID(), at);
+            row("goal " + num(LAYER_GROUND) + " " + num(x) + " " + num(y) + " " + num(u->getID()));
+        }
+    }
+}
+
 // ---- driver ---------------------------------------------------------------------
 
 static void run_scene(int index) {
@@ -973,6 +1232,15 @@ static void run_scene(int index) {
     g_first_scene = index == 0;
     if (g_full) full_state(s);
     row("setup = " + state(s));
+    for (int n = 0; n < 20 && !s.walls.empty(); ++n) {  // from the top of the wall
+        Coord3D top = *pick(s.walls)->getPosition();
+        top.x += between(-20.0f, 20.0f);
+        top.y += between(-10.0f, 10.0f);
+        top.z = 12.0f;
+        g_start = &top;
+        find_row(s);
+        g_start = nullptr;
+    }
     begin_frame(s, 1000);
     row("setup = " + state(s));
 
@@ -1014,6 +1282,362 @@ static void run_scene(int index) {
     row("end");
 }
 
+// A larger map cut by water, with bridges, for the zone blocks.
+static void run_far_scene(int index) {
+    Scene s;
+    std::fprintf(stderr, "scene %d at %zu rows\n", index, g_rows.size());
+    row("scenario " + num(index));
+    const bool big = index % 5 == 0;
+    // One large map with little in it, where a frame's searches pass the budget.
+    const bool open_field = index == 20;
+    s.w = big ? 82 + below(10) : 36 + below(40);
+    s.h = big ? 74 + below(10) : 24 + below(34);
+    s.maxx = s.w * 10.0f;
+    s.maxy = s.h * 10.0f;
+    S5Terrain& t = *g_terrain;
+    t.w = s.w;
+    t.h = s.h;
+    t.cliff.assign(static_cast<size_t>((s.w + 2) * (s.h + 2)), '0');
+    t.water = t.cliff;
+    t.height = t.cliff;
+    // Strips of water or cliff from one side to the other, sometimes with a gap.
+    struct Strip { bool across_x; int at, width; };
+    std::vector<Strip> strips;
+    if (index % 4 != 3 && !open_field) {
+        const int count = 1 + below(2);
+        for (int k = 0; k < count; ++k) {
+            Strip strip;
+            strip.across_x = k == 0 || chance(50);
+            const int span = strip.across_x ? s.w : s.h;
+            strip.width = 2 + below(4);
+            strip.at = span / 4 + below(span / 2);
+            strips.push_back(strip);
+            std::string& table = chance(75) ? t.water : t.cliff;
+            for (int i = 0; i < (strip.across_x ? s.h : s.w) + 2; ++i) {
+                for (int d = 0; d < strip.width; ++d) {
+                    const int x = strip.across_x ? strip.at + d : i;
+                    const int y = strip.across_x ? i : strip.at + d;
+                    table[t.at(x, y)] = '1';
+                }
+            }
+            if (chance(20)) {  // a ford
+                const int y = below((strip.across_x ? s.h : s.w) - 4);
+                for (int i = y; i < y + 3; ++i)
+                    for (int d = 0; d < strip.width; ++d)
+                        table[t.at(strip.across_x ? strip.at + d : i, strip.across_x ? i : strip.at + d)] = '0';
+            }
+        }
+    }
+    blobs(t.cliff, '1', open_field ? 3 : below(5), 6);
+    blobs(t.water, '1', open_field ? 0 : below(4), 6);
+    if (open_field) {  // two barriers open at opposite ends, so searches spread
+        for (int y = 0; y < s.h - 8; ++y) {
+            t.cliff[t.at(s.w / 3, y)] = '1';
+            t.cliff[t.at(2 * s.w / 3, s.h - 1 - y)] = '1';
+        }
+    }
+    t.extent.lo.x = 0.0f;
+    t.extent.lo.y = 0.0f;
+    t.extent.lo.z = 0.0f;
+    t.extent.hi.x = s.maxx;
+    t.extent.hi.y = s.maxy;
+    t.extent.hi.z = 100.0f;
+    const float wall_height = 12.0f;
+    const_cast<TAiData*>(TheAI->getAiData())->m_wallHeight = wall_height;
+    pf()->reset();
+    row("map " + f32(s.maxx) + " " + f32(s.maxy) + " " + f32(wall_height));
+    row("terrain " + num(s.w) + " " + num(s.h) + " " + t.cliff + " " + t.water + " " + t.height);
+    g_world->set_frame(100);
+    pf()->newMap();
+
+    for (int n = open_field ? 2 : below(big ? 30 : 14); n > 0; --n) {
+        const std::string name = g_blocks[below(static_cast<int>(g_blocks.size()))];
+        s.blocks.push_back(spawn(name, chance(50) ? g_world->team_a : g_world->team_b, coord(0.0f, s.maxx),
+                                 coord(0.0f, s.maxy), 0.0f, chance(50) ? 0.0f : between(-3.2f, 3.2f)));
+    }
+    if (index % 6 == 1) {
+        float x = coord(30.0f, s.maxx * 0.4f);
+        const float y = coord(30.0f, s.maxy - 30.0f);
+        for (int n = 2 + below(4); n > 0; --n) {
+            s.walls.push_back(spawn("S5Wall", g_world->team_a, x, y, 0.0f, 0.0f));
+            x += 48.0f;
+        }
+    }
+    for (int n = big ? 20 + below(8) : 6 + below(6); n > 0; --n) {
+        const std::string name = g_units[below(static_cast<int>(g_units.size()))];
+        s.units.push_back(spawn(name, chance(55) ? g_world->team_a : g_world->team_b, coord(0.0f, s.maxx),
+                                coord(0.0f, s.maxy), 0.0f, 0.0f));
+    }
+    for (Object* o : s.units) {
+        if (!s.blocks.empty() && chance(25)) o->getAIUpdateInterface()->ignoreObstacle(pick(s.blocks));
+    }
+    pf()->reset();
+    PathfindCellInfo::allocateCellInfos();
+    for (Object* o : s.walls) {
+        pf()->addWallPiece(o);
+        row("wallpiece " + num(o->getID()));
+    }
+    for (const Strip& strip : strips) {
+        const int length = strip.across_x ? s.h : s.w;
+        for (int n = chance(10) ? 0 : 1 + below(3); n > 0; --n) {
+            const float across = 10.0f * (2 + below(length - 4)) + (chance(50) ? 5.0f : 0.0f);
+            const float lo = 10.0f * strip.at - 10.0f * (1 + below(2));
+            const float hi = 10.0f * (strip.at + strip.width) + 10.0f * (1 + below(2));
+            add_bridge(s, strip.across_x, lo, hi, across);
+        }
+    }
+    s.everything.insert(s.everything.end(), s.blocks.begin(), s.blocks.end());
+    s.everything.insert(s.everything.end(), s.walls.begin(), s.walls.end());
+    s.everything.insert(s.everything.end(), s.units.begin(), s.units.end());
+    for (const std::string& r : s.bridges) row(r);
+    std::string order = "order";
+    for (Object* o = TheGameLogic->getFirstObject(); o; o = o->getNextObject()) {
+        order += " " + num(o->getID());
+        object_row(o);
+    }
+    row(order);
+    ThePartitionManager->update();
+    pf()->newMap();
+    index_cells(s);
+    unit_rows(s);
+    occupy(s, index % 3 == 0 ? 6 : open_field ? 3 : 15 + below(big ? 20 : 40));
+    if (index % 3 != 2) occupy_edges(s, index % 3 == 0 ? 90 : 55);
+    g_full = index == 13;
+    g_first_scene = false;
+    if (g_full) full_state(s);
+    row("setup = " + state(s));
+    begin_frame(s, 1000);
+    row("setup = " + state(s));
+
+    const int searches = big ? 9 : 16;
+    for (int n = 0; n < searches; ++n) {
+        if (n == 6) g_full = false;
+        hier_row(s);
+        path_row(s);
+        ground_row(s);
+        if (n % 3 == 0) exists_row(s);
+        if (n % 4 == 1) find_row(s);
+    }
+    // Occupied cells keep their records: the hierarchical pass steps from them.
+    if (index % 3 == 1) {
+        for (int n = 0; n < 30; ++n) chain_row(s);
+        for (int n = 0; n < searches / 2; ++n) {
+            hier_row(s);
+            path_row(s);
+            ground_row(s);
+            if (n % 3 == 0) exists_row(s);
+        }
+    }
+    queue_section(s, 2000);
+    if (index == 13) overflow_section(s, 3000);
+
+    for (Object* o : s.everything) TheGameLogic->destroyObject(o);
+    TheGameLogic->processDestroyList();
+    ThePartitionManager->update();
+    TheTerrainLogic->reset();
+    pf()->reset();
+    row("end");
+}
+
+// ---- a pool that runs out -----------------------------------------------------
+
+static int free_records() {
+    int n = 0;
+    for (InfoView* p = reinterpret_cast<InfoView*>(*access_member(InfoFree())); p && n <= INFO_COUNT;
+         p = p->pathParent) {
+        ++n;
+    }
+    return n;
+}
+
+static std::vector<PathfindCell*> g_hoard;
+
+// Takes records for cells from the far side until `left` are free, or gives
+// them all back. The columns around the first bridges stay without records.
+static void hoard_row(const Scene& s, int left) {
+    if (left < 0) {
+        for (PathfindCell* c : g_hoard) c->releaseInfo();
+        g_hoard.clear();
+        row("unhoard = " + state(s));
+        return;
+    }
+    for (int x = s.w - 1; x >= 0 && free_records() > left; --x) {
+        if (x >= 36 && x < 50) continue;
+        for (int y = s.h - 1; y >= 0 && free_records() > left; --y) {
+            PathfindCell* c = pf()->getCell(LAYER_GROUND, x, y);
+            if (!c || c->hasInfo()) continue;
+            ICoord2D at;
+            at.x = x;
+            at.y = y;
+            c->allocateInfo(at);
+            g_hoard.push_back(c);
+        }
+    }
+    row("hoard " + num(left) + " = " + num(free_records()) + " " + state(s));
+}
+
+// A map with more cells than there are records.
+static void run_exhaust_scene(int index) {
+    Scene s;
+    std::fprintf(stderr, "scene %d at %zu rows\n", index, g_rows.size());
+    row("scenario " + num(index));
+    s.w = 196;
+    s.h = 170;
+    s.maxx = s.w * 10.0f;
+    s.maxy = s.h * 10.0f;
+    S5Terrain& t = *g_terrain;
+    t.w = s.w;
+    t.h = s.h;
+    t.cliff.assign(static_cast<size_t>((s.w + 2) * (s.h + 2)), '0');
+    t.water = t.cliff;
+    t.height = t.cliff;
+    // Two water strips: only bridges cross them.
+    for (int y = 0; y < s.h + 2; ++y) {
+        for (int d = 0; d < 3; ++d) {
+            t.water[t.at(40 + d, y)] = '1';
+            t.water[t.at(90 + d, y)] = '1';
+        }
+    }
+    t.extent.lo.x = 0.0f;
+    t.extent.lo.y = 0.0f;
+    t.extent.lo.z = 0.0f;
+    t.extent.hi.x = s.maxx;
+    t.extent.hi.y = s.maxy;
+    t.extent.hi.z = 100.0f;
+    const_cast<TAiData*>(TheAI->getAiData())->m_wallHeight = 12.0f;
+    pf()->reset();
+    row("map " + f32(s.maxx) + " " + f32(s.maxy) + " " + f32(12.0f));
+    row("terrain " + num(s.w) + " " + num(s.h) + " " + t.cliff + " " + t.water + " " + t.height);
+    g_world->set_frame(100);
+    pf()->newMap();
+    for (int n = 0; n < 8; ++n) {
+        const std::string name = g_units[below(static_cast<int>(g_units.size()))];
+        s.units.push_back(spawn(name, chance(55) ? g_world->team_a : g_world->team_b, coord(0.0f, 350.0f),
+                                coord(0.0f, s.maxy), 0.0f, 0.0f));
+    }
+    pf()->reset();
+    PathfindCellInfo::allocateCellInfos();
+    g_decks_up = true;
+    for (int n = 0; n < 2; ++n) {
+        const float across = 10.0f * (24 + 60 * n) + 5.0f;  // off the block edges
+        add_bridge(s, true, 380.0f, 440.0f, across);
+        add_bridge(s, true, 880.0f, 940.0f, across + 200.0f);
+    }
+    s.everything.insert(s.everything.end(), s.units.begin(), s.units.end());
+    for (const std::string& r : s.bridges) row(r);
+    std::string order = "order";
+    for (Object* o = TheGameLogic->getFirstObject(); o; o = o->getNextObject()) {
+        order += " " + num(o->getID());
+        object_row(o);
+    }
+    row(order);
+    ThePartitionManager->update();
+    pf()->newMap();
+    index_cells(s);
+    unit_rows(s);
+    occupy(s, 10);
+    occupy_edges(s, 60);
+    g_full = false;
+    begin_frame(s, 1000);
+    row("setup = " + state(s));
+
+    // Hierarchical searches starting on a bridge, with room for none, one or
+    // both of its ends, in the retail layout and then fixed.
+    auto on_bridge_row = [&](int left, bool closest, bool from_ground = false) {
+        if (left >= 0) hoard_row(s, left);
+        Coord3D from = s.bridge_points[0];
+        from.x += from_ground ? -25.0f : 25.0f;
+        if (from_ground) from.z = 0.0f;
+        Coord3D to;
+        to.x = 1500.0f + 100.0f * below(3);
+        to.y = coord(100.0f, s.maxy - 100.0f);
+        to.z = 0.0f;
+        // A goal on open ground, or the zones differ and nothing is searched.
+        for (int n = 0; n < 50; ++n) {
+            const PathfindCell* c = pf()->getCell(LAYER_GROUND, &to);
+            if (c && c->getType() == PathfindCell::CELL_CLEAR && !c->getPinched()) break;
+            to.y = between(100.0f, s.maxy - 100.0f);
+        }
+        Mover m;
+        choose(s, m, from);
+        m.surfaces = 1;
+        m.set.*access_member(LsSurfaces()) = 1;
+        const bool human = false, crusher = false;
+        Path* path = (pf()->*(closest ? access_member(PfClosest()) : access_member(PfHier())))(human, m.set, &from, &to,
+                                                                                              crusher);
+        row("hier " + mover_text(m) + " " + num(human) + " " + num(crusher) + " " + num(closest) + " " + c3(from) +
+            " " + c3(to) + " = " + path_dump(path) + " | " + state(s));
+        if (path) deleteInstance(path);
+        done(m);
+        if (left >= 0) hoard_row(s, -1);
+    };
+    for (int n = 0; n < 4; ++n) on_bridge_row(-1, n % 2);
+    static const int kLeft[] = {0, 1, 2, 3, 4, 5, 6, 8, 12, 20, 40, 100, 300, 1000};
+    auto at_each = [&]() {
+        for (int left : kLeft) {
+            hoard_row(s, left);
+            find_row(s);
+            cost_row(s);
+            if (left <= 12) examine_row(s);
+            hier_row(s);
+            path_row(s);
+            ground_row(s);
+            hoard_row(s, -1);
+        }
+    };
+    // Room runs out during the bridge crossing: this switches to the fixed code.
+    for (int n = 0; n < 4; ++n) on_bridge_row(-1, n % 2, true);
+    // Room runs out on the bridge's own start, then in a crossing from the
+    // ground beside it; each switches to the fixed code, which is switched
+    // back so that both are met in the retail layout.
+    auto retail = [&]() {
+        s_useFixedPathfinding = false;
+        row("retail = " + state(s));
+    };
+    auto met = [&](const char* what) {
+        if (!s_useFixedPathfinding) {
+            std::fprintf(stderr, "%s did not run out of records\n", what);
+            std::exit(1);
+        }
+        retail();
+    };
+    on_bridge_row(40, false);
+    // With the goal's record already taken, the start takes one and the near
+    // end none, then the near end takes one and the far end none.
+    on_bridge_row(1, false);
+    met("the near end of the start bridge");
+    on_bridge_row(2, false);
+    if (s_useFixedPathfinding) retail();
+    for (int left : {3, 0}) on_bridge_row(left, false);
+    retail();
+    for (int left : {6, 3, 2, 1}) on_bridge_row(left, false, true);
+    at_each();
+    // Starts without a record, so taking one can fail.
+    for (int left : {0, 1, 2, 3, 5}) {
+        for (int n = 0; n < 3; ++n) {
+            Coord3D start;
+            start.x = between(365.0f, 395.0f);
+            start.y = between(20.0f, s.maxy - 20.0f);
+            start.z = 0.0f;
+            hoard_row(s, left);
+            g_start = &start;
+            find_row(s);
+            g_start = nullptr;
+            hoard_row(s, -1);
+        }
+    }
+    for (int left : {40, 6, 3, 2, 1}) on_bridge_row(left, false);
+    for (int left : {6, 3, 2, 1}) on_bridge_row(left, false, true);
+    for (int n = 0; n < 4; ++n) on_bridge_row(-1, n % 2);
+
+    for (Object* o : s.everything) TheGameLogic->destroyObject(o);
+    TheGameLogic->processDestroyList();
+    ThePartitionManager->update();
+    TheTerrainLogic->reset();
+    pf()->reset();
+    row("end");
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) return 2;
     oracle_wp51::World world;
@@ -1035,6 +1659,10 @@ int main(int argc, char** argv) {
     }
     human->*access_member(PlayerKind()) = PLAYER_HUMAN;
     for (int index = 0; index < 12; ++index) run_scene(index);
+    for (int index = 12; index < 22; ++index) run_far_scene(index);
+    run_exhaust_scene(22);
+    std::fprintf(stderr, "hierarchical %d/%d, paths %d/%d, ground %d/%d (found/not)\n", g_hier, g_hier_null,
+                 g_paths, g_paths_null, g_ground, g_ground_null);
     std::fprintf(stderr, "paths %d found %d not, costs %d found %d not\n", g_found, g_missed, g_costed,
                  g_uncosted);
 

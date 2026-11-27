@@ -387,6 +387,7 @@
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_queries.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/goals.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/hierarchical.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/queries.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/search.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/player/seams.rs` | `implemented` |

@@ -75,11 +75,29 @@ pub fn run_frame(sim: &mut SimContext, seams: &mut dyn FrameSeams) {
     sim.world.frame = sim.world.frame.wrapping_add(1);
 }
 
-/// `Pathfinder::processPathfindQueue`, less the queue itself.
+/// `Pathfinder::processPathfindQueue`. Without a pathfinder the queue is the
+/// seam's.
 fn process_path_queue(sim: &mut SimContext) {
-    sim.paths.begin_queue();
-    while let Some(id) = sim.paths.next_request() {
+    if sim.world.pathfinder.is_none() {
+        sim.paths.begin_queue();
+        while let Some(id) = sim.paths.next_request() {
+            do_pathfind(sim, id);
+        }
+        return;
+    }
+    if !sim.begin_path_queue_on_map() {
+        return;
+    }
+    while let Some(id) = sim
+        .world
+        .pathfinder
+        .as_deref_mut()
+        .and_then(|p| p.next_path_request())
+    {
         do_pathfind(sim, id);
+        if let Some(pathfinder) = sim.world.pathfinder.as_deref_mut() {
+            pathfinder.finish_path_request();
+        }
     }
 }
 

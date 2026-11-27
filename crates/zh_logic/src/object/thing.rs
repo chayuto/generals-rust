@@ -9,7 +9,7 @@ use crate::object::thing_factory::ThingFactory;
 use crate::object::thing_template::ThingTemplate;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::rules::kind_of::{KindOfMaskType, KindOfType};
-use zh_common::math::{gm_cosf, gm_sinf, Coord3D, Matrix3D};
+use zh_common::math::{gm_cosf, gm_sinf, Coord3D, Region3D, Matrix3D};
 use zh_common::types::{Bool, Int, Real, FALSE, TRUE};
 
 pub const INITIAL_THING_POS_X: Real = 0.0;
@@ -62,6 +62,11 @@ pub trait ThingTerrainAccess {
         _clip: Bool,
     ) -> Real {
         self.get_ground_height(x, y, normal)
+    }
+    /// `TerrainLogic::getExtent`, the playable area. `None` for a terrain
+    /// without one: the path queue then takes the whole pathfind map.
+    fn playable_extent(&self) -> Option<Region3D> {
+        None
     }
     fn get_highest_layer_for_destination(
         &self,

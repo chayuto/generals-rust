@@ -1251,6 +1251,10 @@ fn point_in_triangle(p0: [Real; 2], p1: [Real; 2], p2: [Real; 2], test: [Real; 2
 }
 
 impl ThingTerrainAccess for TerrainLogic {
+    fn playable_extent(&self) -> Option<Region3D> {
+        Some(self.extent())
+    }
+
     /// `getGroundHeight`.
     fn terrain_logic(&self) -> Option<&TerrainLogic> {
         Some(self)

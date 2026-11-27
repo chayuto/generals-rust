@@ -2765,7 +2765,7 @@ pub struct SimContext {
     pub world: SimWorld,
     pub terrain: Box<dyn ThingTerrainAccess>,
     pub client: Box<dyn ClientSink>,
-    /// The path queue, until the pathfinder is ported into the world.
+    /// The path queue of a world without a pathfinder.
     pub paths: Box<dyn PathServices>,
     /// What the unit AI asks of code that is not ported yet.
     pub ai_seams: SharedAiSeams,
@@ -11087,7 +11087,10 @@ impl SimApi for SimContext {
     }
 
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
-        self.paths.queue_for_path(id)
+        match self.world.pathfinder.as_deref_mut() {
+            Some(pathfinder) => Bool::from(pathfinder.queue_for_path(id)),
+            None => self.paths.queue_for_path(id),
+        }
     }
 
     fn new_locomotor(&mut self, name: &str) -> Option<Locomotor> {

@@ -21,7 +21,7 @@ use crate::pathfinder::ai_pathfind::{
     AdjustUnit, Footprint, GoalMover, NoPathCost, PathAgent, PathUnit, PathUnits, PathWorld,
     Pathfinder,
 };
-use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
+use crate::pathfinder::pathfind_constants::{PathfindLayerEnum, PATHFIND_CELL_SIZE_F};
 use crate::rules::combat_types::{DamageType, DeathType, LocomotorSurfaceTypeMask};
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::KindOfType;
@@ -73,6 +73,25 @@ impl SimContext {
             height_above_terrain: self.object_height_above_terrain(slot),
             rubble: self.object_body_damage_state(slot) == BodyDamageType::Rubble,
         })
+    }
+
+    /// The start of `processPathfindQueue`: whether the pathfinder's queue is
+    /// served this frame. Needs a pathfinder.
+    pub(crate) fn begin_path_queue_on_map(&mut self) -> bool {
+        let frame = self.world.frame;
+        let extent = self.terrain.playable_extent();
+        let Some(pathfinder) = self.world.pathfinder.as_deref_mut() else {
+            return false;
+        };
+        let extent = extent.unwrap_or_else(|| {
+            let hi = pathfinder.extent().hi;
+            let edge = |cell: i32| (cell + 1) as Real * PATHFIND_CELL_SIZE_F;
+            Region3D {
+                lo: Coord3D::default(),
+                hi: Coord3D::new(edge(hi.x), edge(hi.y), 0.0),
+            }
+        });
+        pathfinder.begin_path_queue(&extent, frame)
     }
 
     /// `TheAI->pathfinder()->newMap()` over the sim's terrain and objects,
