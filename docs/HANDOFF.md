@@ -1,129 +1,176 @@
-# Handoff note (2026-11-27)
+# Handover (2026-11-28)
 
-For the next session. Rules are in `AGENTS.md`; this note only records where work stopped. Update or delete it once it is stale.
+For the agent continuing this work. Read `AGENTS.md` first: its rules are binding. This
+note records where work stopped and how to carry on. Update or delete it once stale.
+History is in `git log`; gaps module by module are in `OPEN_DECISIONS.md`.
 
-## State
+## Goal and owner's direction
 
-- `PKT-372 SpyVisionUpdate` and `PKT-323 DynamicShroudClearingRangeUpdate` complete and verified (`golden_shroud_updates`, 300 vectors, 3 C++ build modes byte-identical, 6 single-line mutation checks verified), with wiring from `SpyVisionSpecialPower` (`PKT-245`) and `SabotageInternetCenterCrateCollide` (`PKT-234`).
-- Owner's direction: a **faithful** port, the exact behaviour of the original, and a **playable** game. Keep building while it makes token sense.
-- The Rust random generator, experience tracker, money, energy, the sleepy-update heap and seven behavior modules (`LifetimeUpdate`, `SupplyWarehouseCreate`, `ArmorUpgrade`, `ModelConditionUpgrade`, `RadarUpdate`, `PowerPlantUpdate`, `DefaultProductionExitUpdate`) run inside the C++ engine (`GeneralsXZH-rust`) and match a local replay baseline. The replays verify only part of that: see `BASELINE.md` before treating a swapped module as checked. Windowed play is untested.
-- Packets: 283 of 463 marked implemented, 40 data only, 140 unported (`PORT_MAP.md`). "Implemented" includes partial ones (`PKT-431` to `PKT-433`, `PKT-440`).
-- A Rust game starts from a retail map and runs 300 frames (`gamelogic/game_logic.rs`, `start_new_game`). It is not playable: no unit moves and there is no client.
+- **A full Rust port of the whole game, client included. No C++** in the result
+  (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`, six stages).
+- Faithful: the exact behaviour of the original. Decide faithful-port design questions
+  yourself. The aim is a playable game.
+- **Client crates: ask the owner before adding the first one**, naming them and their use
+  (item 12). The simulation stays bit-exact and free of external crates.
+- Keep building while it makes token sense: compute is cheap, tokens are not. The owner
+  allowed up to 5 parallel workers when their work is independent.
+- Batch pushes (Actions quota); `env:ephemeral-web` assignments are paused.
 
-## Recently done
+## Where things stand
 
-| Commits | Work |
-|---|---|
-| `e898491` to `6f759e0` | `WP-5.4` batches A to C, the shared weapon firing state machine, `FireWeaponUpdate` |
-| `c64ccb4` to `920ee37` | Spatial grid stages 1 to 3: filing, searches, collisions, wired into the sim |
-| `213bdc7`, `fb975a9` | `PKT-388 WeaponBonusUpdate`; `FiringTracker` attached; undetected defectors honoured |
-| `a31f330`, `2700f1d` | Spatial grid stage 4a–4b (`PKT-160 PartitionManager`): shroud cells, object-side vision/shroud/jamming, `SightingInfo`, refresh sites, `TerrainLogic::setActiveBoundary`, faithful `Object::onDestroy` + `TeamMemberList` ordering |
-| `de99fdb` | `PKT-372 SpyVisionUpdate` (plus `SpyVisionSpecialPower` / `SabotageInternetCenterCrateCollide` wiring and `SimApi` vision-spied helpers) & `PKT-323 DynamicShroudClearingRangeUpdate` (`golden_shroud_updates`) |
-| `b428ad1` | Contain getters take the game view (owner decision on `OPEN_DECISIONS.md` items 4 and 5) |
-| `fafa769` and next | `PKT-300 TunnelContain`, `PKT-264 CaveContain` |
-| after `2b88a3b` | Module census (`MODULE_USAGE.md`); `PKT-330 FlammableUpdate` and `PKT-327 FireSpreadUpdate`; fixed `HighlanderBody` on NaN damage |
-| after `2daf832` | `PKT-358 RadarUpdate` and `PKT-351 PowerPlantUpdate`; `RadarUpgrade` now extends the radar; CI time limit raised to 6 minutes |
-| `a8a882a`, `5fdee17` | `PKT-320/381/378/363` dock updates (dock state in the module); `PKT-348 PhysicsBehavior`, replacing the physics stand-ins; `find_position_around` uses the reference collision shapes |
-| after `c5f37a3` | `PKT-374 StealthUpdate` and `PKT-373 StealthDetectorUpdate`; dock stealth grants reach the real module |
-| after `198371f` | `PKT-315/379/357/367` production exit updates; a production exit now wins over a container listed before it |
-| after `83d6689` | `PKT-383 ToppleUpdate`, `PKT-377 StructureToppleUpdate`, `PKT-305 AutoDepositUpdate`; per-player score keepers |
-| after `9d795fc` | `PKT-336 HordeUpdate`, `PKT-370 SpectreGunshipDeploymentUpdate`, `PKT-306 AutoFindHealingUpdate`, `PKT-304 AssistedTargetingUpdate` |
-| after `9d53470` | `PKT-272 GenerateMinefieldBehavior`, `PKT-279 MinefieldBehavior`; cliff cells, overlap query, module self-lending |
-| after `d7fc62e` | `PKT-368 SpecialAbilityUpdate`, `PKT-314 CommandButtonHuntUpdate`; one `SpecialPowerUpdateFacet` for both porting branches |
-| after `52478cd` | `PKT-296 SpawnBehavior`, `PKT-365 SlavedUpdate` |
-| after `c0b420d` | `PKT-334 HelicopterSlowDeathBehavior`, `PKT-267 DumbProjectileBehavior`, `PKT-382 TensileFormationUpdate`, `PKT-346 OCLUpdate`; weapon speeds now converted to per frame |
-| after `5da9d25` | `PKT-354 ProductionUpdate` |
-| after `4fc8921` | AI plan slice S0: logic frame step, resident AI seams, frame oracle; two disabled-state differences fixed |
-| after `8eabb2f` | `PKT-286 ParkingPlaceBehavior`, `PKT-341`, `PKT-350`, `PKT-309 BattlePlanUpdate`; `Anti* = No` now clears the weapon bit |
-| after `889e46a` | Joined oracle over ported modules; fixed energy counting, split score and academy tables, money deposits, capture records and the stealth velocity cache |
-| after `f1501fc` | Faithfulness fixes: crushing rules, special power pause counts, weapon template parsing, reload retiming on bonus changes, academy power use |
-| after `fc9d180` | Second joined oracle with save loading (34,259 rows); fixed the weapon set model condition lost at drawable binding |
-| `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
-| `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
-| after `575ade7` | `SWAP_CANDIDATES.md` count; six more modules swapped into the engine; value accessors for `object()` reads; money, upgrades and energy keyed by player (`golden_player_state`) |
-| up to `2e28a9b` | Script engine, unit AI shell (S8), targeting (S12), pathfind map (S2), path queries (S3), players and teams, AI groups and squads, retail rule data loading |
-| `1801249`, `f2c51a8` | Weapon, locomotor, AI, creation list and road data in full; data parsers for the unported logic modules in the retail rules |
-| `4fe15f5` to `10fc0fc` | Map script lists, game start from a map, comparison with the reference (`golden_game_start`) |
-| after `963f5bb` | Goal reservations and destination adjustment (S4), weapon range queries and firing (S13) |
+Stage 1 (simulation) is in progress. **Nothing is playable: there is no graphics, input,
+sound or game loop.**
 
-## Not verified
+- A Rust game starts from a retail map. On 24 compared games its digests match the stock
+  engine at the three stages of game start, bridges and computer map setup included.
+- Frames run with scripts, Dozer and Worker updates, turrets, idle targeting, recorded
+  human orders (unit create, upgrade, dozer construct, science) and computer base
+  building.
+- A move order alone takes a unit to its goal, and an attack order alone destroys a
+  target (`path_follow_sim`, `move_order_retail`, `attack_sim`). The duels use
+  hand-built units; only moving was tried on retail maps.
+- Name keys handed out at engine start match the reference.
+- `PORT_MAP.md`: 290 of 463 packets marked implemented, 37 data only, 136 unported.
+  **"Implemented" includes many partial packets**, so real progress is lower. By line
+  count the whole game is very roughly a fifth to a quarter done.
+- Seven small modules and the core services also run inside the C++ engine as a check
+  (`BASELINE.md`).
 
-- Game start against the reference (24 games: 6 baseline replays and 18 option variants; `GameStart.json`):
-  - before the starting units, seed, players, teams, object fields, bridge records and the pathfind cells under each deck match on all 24 games;
-  - before the AI player's map setup, seed and starting positions also match;
-  - at the end, every digest matches too, with the computer players' map setup (`AIPlayer::newMap`; `golden_ai_new_map` compares what these digests leave out);
-  - map setup gaps, each guarded in `golden_ai_new_map`: raising a turreted structure (only the synthetic `built` stage does) misses the turret's idle scan draw (S14). Mine detonation on a construction status change is not ported. `ParticleUplinkCannonUpdate` is not attached;
-  - a pitfall: `BuildAssistant.cpp` takes the double `WWMath::Sqrt` of a sum of `Pow` results, which differs from `gm_sqrtf` by an ulp for some inputs;
-  - Dozer and Worker AI have construction and `xfer` only (`golden_s16_dozer_worker`): their orders and frame updates are slice S16, and `PORT_MAP.md` still lists them as data-only;
-  - scripts affect only delay draws (no `ScriptWorld` adapter), wall height is 0, frames are not CRC-checked;
-  - its mutation check is weak (17 of 60 caught before targeted rechecks): script status, shroud and observer paths are not exercised;
-  - the retail tests skip without game data, so CI does not run them.
-- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the swapped parts (`BASELINE.md`); the Rust sim has no game-wide CRC.
-- `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
-- No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
+## First 300 frames against the stock engine
 
-## First frames after game start
+`golden_game_frames` runs the 24 games with their recorded commands. It is a ratchet over
+`game_frames_agreement.txt` (first differing frame per field and owner group), not a
+parity test. It needs the retail game, so CI skips it. How many games agree for all 300:
 
-`golden_game_frames` runs the 24 games for 300 frames with their recorded commands and compares each frame with the stock engine (`GameFrames.json`, `gen_game_frames.py`). It is a ratchet over `game_frames_agreement.txt`, not a parity test. Frame N below is the world after N logic frames. Energy, bridges and decks agree throughout.
+| Field | Games | Others first differ at |
+|---|---|---|
+| seed | 9 / 24 | 2 to 241 |
+| game, player | 19 / 24 | player: frame 1 |
+| map object count | 20 / 24 | 2 to 181 |
+| computer object count | 20 / 24 | 2 to 241 |
+| computer positions | 5 / 24 | 2 to 181 |
+| human object count | 24 / 24 | |
+| human positions | 21 / 24 | 172 to 270 |
+| human AI state | 22 / 24 | 185 to 223 |
 
-What differs first, by games reached (of 24):
+## What to do next
 
-1. Computer player update not ported (`AIPlayer::update`, S21): 24 games, frames 1 and 2. The skirmish scripts now give the computer its money (player rows agree at frame 1 in 19 games and first differ at 2, where the reference's AI spends it; in the other 5 it spends in frame 1), then base building, upgrade choice and unit training differ. The seed agrees at frame 1 in all games and first differs at 2.
-2. Dozer and Worker frame updates (S16) are ported (`golden_s16_dozer_worker_frames`): the human players' module wake frames agree to the end in 17 games and to frames 146 to 249 in the `*_2p_*` and `*_6p_*` games. The Worker's supply half is missing.
-3. Mood targets are wired (`getNextMoodTarget`); the ratchet cannot show it while items 1 and 2 shift the seed. At frame 4 the mood draws match the stock engine except for computer dozers that item 2 leaves idle (2 games checked).
-4. Turrets not wired (S14): 6 games, map objects wake at frame 4, draws from frame 9.
-5. Human orders: unit create, upgrade and dozer construct are carried out (human money matches the reference for all 300 frames on the 6 replay games). Science purchase is carried out through `dispatch_game_command` (the 3 games buy at frames 243 to 284; no compared field shows it). The sim's shared special power timers are kept by team and are not started by a read, unlike `Player::getOrStartSpecialPowerReadyFrame`. Retaliation mode (message 1097) is not carried out. Human object rows are keyed by object id, so they differ once the computer players have created objects the port has not.
-6. Missing modules `RailroadBehavior` (2 games, frame 1) and `StructureCollapseUpdate` (2 games, asleep in these frames; not written). `BoneFXUpdate` is ported (`golden_bone_fx_update`). Its creation lists are only recorded (`spawn_ocl` runs nothing, so their random draws are missing), its particle systems are not made, and no vector covers bone positions or the rubble state. `RailroadBehavior` extends `PhysicsBehavior` and replaces its update, collision and save; `createCarriages` and the train movement are behind a locomotive flag.
-7. One civilian car in `tournament_city` has angle -pi in the reference and +pi in the port at frame 2 (not traced).
+In order of what the comparison shows. Rerun it after each merge; the list moves.
 
-The script engine runs in frames (`scripts/script_world.rs`, `golden_script_world`). Still unported among what these frames reach, counted by the engine and by `GameScripts::unported` (`GAME_FRAMES_DUMP` prints them):
+1. **Computer player, rest of S21** (about two more workers): team building and unit
+   training (queues and their `xfer`, `queueUnits`, `queueDozer`, supply trucks, team
+   selection, `BUILD_TEAM`, `startTraining`, `findFactory`, recruiting,
+   `onUnitProduced`), then non-skirmish building, rebuild holes, bridge repair,
+   defences, upgrades, superweapons. Check that dozer completion calls
+   `onStructureProduced`.
+2. **Why computer positions differ in 19 games**, many from early frames. Not
+   investigated.
+3. **A human dozer moves differently after a construct order** (`linux_2p_vanilla_map`,
+   `human.ai`, frame 185). The port's dock point leads to a move the reference does not
+   make. Cause not found; suspect dozer or position-search code.
+4. Small causes: `StructureCollapseUpdate`; `RailroadBehavior` (extends
+   `PhysicsBehavior`, replacing its update, collision and save; `createCarriages` and
+   train movement are behind a locomotive flag); the random draws of `BoneFXUpdate`
+   creation lists (`spawn_ocl` only records them); one car in `tournament_city` with
+   angle -pi against +pi at frame 2.
+5. Script actions and conditions still counted as unported (`GameScripts::unported`,
+   printed with `GAME_FRAMES_DUMP`), among them `BUILD_TEAM`,
+   `TEAM_USE_COMMANDBUTTON_ABILITY`, special power readiness, trigger areas, and group,
+   team-script and kill orders.
+6. `AI_PORT_PLAN.md`: S11 other non-combat states; S15 supply, dock and transport (the
+   Worker's supply half is missing); S17 aircraft and missiles (**missiles never
+   detonate**); S18 guard states; S19; S20. Also squad, hunt and attack-area states and
+   turret `transferAttack`. Check `AI_PORT_PLAN.md` "Done" notes before starting.
+7. **Terrain never blocks sight** in the sim.
+8. **A game loop.** The frame hookup (`FrameSeams`) lives in the test; nothing owns it.
+9. **A game-wide CRC.** Stage 1 is done only when a Rust headless replay matches the C++
+   CRC at every checkpoint.
 
-- Actions (the first three are `AIPlayer` calls, S21): `SKIRMISH_BUILD_BUILDING` (24 games), `BUILD_TEAM` (5), `AI_PLAYER_BUILD_SUPPLY_CENTER` (4), `TEAM_USE_COMMANDBUTTON_ABILITY` (1).
-- Conditions, each answering false: `SKIRMISH_SPECIAL_POWER_READY` (24 games, needs special power modules), `SKIRMISH_VALUE_IN_AREA` (5) and `TEAM_INSIDE_AREA_PARTIALLY` (4, both need trigger areas and enter/exit tracking), `SKIRMISH_TECH_BUILDING_WITHIN_DISTANCE` (5).
-- `MUSIC_TRACK_HAS_COMPLETED` answers false: there is no audio.
+Asset readers (stage 2) touch separate code and can run beside the simulation.
 
-Pitfalls:
+## Verification gaps from the last round
 
-- A field can agree by coincidence while two parts are missing. `bitter_winter.rep player` agreed at frame 1 with no scripts run, because the reference gives the computer 200 and spends it on a worker in the same frame; it now first differs at 1, and the ratchet was rewritten with that one step back. To see the reference's money, search candidate values for the one whose player rows give the recorded digest.
-- A script chunk reader given an empty `ScriptTemplateRegistry` turns every condition into `CONDITION_FALSE` without an error. Game start did that until the engine ran; `golden_script_world` now requires the start to leave nothing unported, but check `unported_conditions` is not empty-because-nothing-ran after touching the loading.
-- `NameKeyType` numbers match the reference only for the engine start (`golden_name_keys`): names are numbered in request order, so a new startup request must go where the reference makes it. Module class names and keys first asked for during a game do not match.
-- The dozer's order does not check placement (`isLocationLegalToBuild` is not ported).
-- `TeamFactory` member lists are filled at game start only; frames keep `world.team_members`. The comparison counts the latter. The script adapter copies them into the factory before `updateTeamStates`.
+- Computer base building: no focused oracle vectors, no mutation run, placement
+  rejection paths unverified. `isLocationLegalToBuild` is not applied to human dozer
+  orders; the terrain construction restriction is missing.
+- Turrets: no mutation run; no vectors for turreted containers, airborne pitch, bridges,
+  computer crushing, version 2 saves or loading.
+- Science purchase: two survivors have a new test, not rechecked. Shared special power
+  timers are kept by team and are not started by a read, unlike the reference.
+- `BoneFXUpdate`: 9 survivors not rechecked (load path, bone positions, rubble state, FX
+  calls).
+- Many earlier slices have mutation survivors not rechecked; see `OPEN_DECISIONS.md`.
+- An unverified `StructureCollapseUpdate` draft was left in a temporary session folder;
+  assume it is gone.
+- Gate 0 is still open (the public replays mismatch the local data). `check_replays.py`
+  covers only the swapped parts.
+- `PORT_MAP.md` shows as implemented, but only in part: `PKT-216`, `PKT-401`, `PKT-403`,
+  `PKT-411`, `PKT-421`, `PKT-426`, `PKT-427`, `PKT-431` to `PKT-433`, `PKT-440`.
+- No status was posted to GitHub Issues or Discussions.
 
-## Next
+## Running the work
 
-- **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
-- A unit moves: a move order alone takes a unit to its goal (S4, S5, S9, S10; `move_order_retail` on the six replay maps, starting units only, not compared with the reference). All searches are wired. Units fight: an attack order alone destroys a target (`attack_sim`, hand-built units, not tried with retail data or replay commands). Idle units pick targets and fight back (`attack_sim`, hand-built units). Missing for a play test: no turrets, missiles never detonate, terrain sight is always clear. Squad, hunt and attack-area states and the second half of S14 (turrets, weapon half of the AI update) are not ported.
-- Wiring still missing: the script adapter lacks group, team-script and kill orders (counted in `GameScripts::unported`); players, teams and AI groups are only partly connected. The frame hookup lives in the test's `FrameSeams`; there is no game loop that owns one yet.
-- The computer opponent's frame updates (`AIPlayer::update`, slice S21) are not ported.
-- Client crates: ask the owner before adding the first one (item 12).
-- Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
-- Packet counts overstate completeness (see the known gaps). Weapons now do damage (`golden_pkt399_weapon_effects`); gaps are in `OPEN_DECISIONS.md`.
-- Next faithfulness gap of the same kind as the per-player fix: sciences, radar, cost modifiers and handicaps are still keyed by team.
-- Cheap further engine swaps: the byte CRC and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
-- Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.
+One coordinator, workers in their own git worktrees. Give each worker
+`docs/WORKER_BRIEF.md` plus a short task naming the files it owns.
+
+Merging a worker's commits:
+
+1. Check author and message (no co-author, session link or assistant name), and that no
+   game-data file type is in the diff. Vectors hold digests or synthetic data only.
+2. `git cherry-pick`. On a `docs/PORT_MAP.md` conflict take theirs and run
+   `python3 scripts/port_map.py --write`. On a `game_frames_agreement.txt` conflict take
+   theirs, rewrite with `GAME_FRAMES_RATCHET=write`, and compare field by field with the
+   version from before the merge. Explain every loss.
+3. `cargo test --workspace`, then again with `--target x86_64-apple-darwin` (CI is x86).
+   Set `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`. The
+   x86 run can exceed 10 minutes: run it in the background.
+4. `lint_determinism.py`, `port_map.py --check`, `gen_engine_sim.py --check`,
+   `cargo check -p zh_logic --features retail-crc` and `retail-xfer-save`, every
+   `scripts/test_*.py`, `validate_manifest.py`, `check_vendor.py`.
+5. Push once per batch and check CI (about 5 minutes of a 10 minute limit).
+6. Remove the worktree: delete its `vendor` symlink first, then `git worktree remove`.
+
+## Pitfalls
+
+- **Parallel slices break each other's traces.** A trace recorded while a state or search
+  was unported replaced it; once ported, its test must say so
+  (`AiSeams::replaces_state`, `replaces_searches`, `replaces_attack_path`). This failed
+  several merges.
+- **A timed-out `cargo test` leaves its test binary running**, which can spin for an
+  hour. Kill the process group (`mutate_check.run`). If a worker looks stuck, check `ps`
+  for test binaries with parent 1.
+- Workers' isolation check misreads the reference's `Source/` folder as a shell builtin.
+  Workers have repeatedly got round it with globs or shell tools despite instructions;
+  `vendor/` stayed unchanged. Run `check_vendor.py` after every batch.
+- `rustfmt` rewrites a file's out-of-line `mod` files too.
+- A frame field can agree by coincidence while two parts are missing
+  (`bitter_winter` money did). A later "loss" may be that coincidence ending: show it.
+- Name keys are numbered in request order: a new startup request must go where the
+  reference makes it. Keys first requested during a game do not match.
+- A script chunk reader given an empty `ScriptTemplateRegistry` makes every condition
+  false without an error.
+- `BuildAssistant.cpp` uses the double `WWMath::Sqrt` of a sum of `Pow` results, which
+  differs from `gm_sqrtf` by an ulp for some inputs.
+- x86 gives a 0/0 NaN a sign bit: use `zh_common::math::reference_div_f32` where the
+  value can reach saved state.
+- The reference writes retail save versions (`RETAIL_COMPATIBLE_XFER_SAVE=1`); a
+  whole-run save comparison needs the `retail-xfer-save` feature.
+- `TeamFactory` member lists are filled at game start only; frames keep
+  `world.team_members`.
+- A harness that touches shroud cells must replace the local player
+  (`gen_partition_shroud.cpp`).
+- The repo is not `cargo fmt` clean. Do not reformat files you are not changing.
+
+## Cost seen
+
+Slice workers used 260k to 640k tokens each, most of them 300k to 500k, and about
+9 million in total from game start to here. Long contexts are the main cost: split large
+slices and hold workers to the limit in `WORKER_BRIEF.md`. Estimates made in advance
+have run low.
 
 ## Waiting on the owner
 
-- The unanswered items in `OPEN_DECISIONS.md`. Item 12 (client crates) is to be asked when it is needed.
-
-## Cost of module ports
-
-One worker per packet, with a script-built reading bundle: about 305k tokens for `PKT-300` and 270k for `PKT-264` (roughly 900 and 450 lines of C++ without comments), plus the coordinator's checks. The coordinator rebuilds the oracle three ways, reruns the gates and runs random mutations on the new module (read each survivor against the C++: several were harmless). Start the coordinator from a fresh session.
-
-## How the recent work was checked
-
-1. C++ oracle in `tests/cpp_harness/`, built three ways with `scripts/build_oracle.py` (`--opt O0`, `--opt O2`, `--opt O2 --sanitize`), run with `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`. The three outputs must be byte-identical.
-2. Rust suite in `crates/zh_logic/tests/` against the JSON in `docs/golden_vectors/`.
-3. Modules that pass alone can disagree together: `golden_joins_modules` and `golden_joins2_modules` run ported modules in one world with no Rust stand-ins. Add new modules there.
-4. CI runs on x86: run `cargo test --workspace --target x86_64-apple-darwin` before pushing and check the CI result after.
-5. Mutation check: plant bugs in a copy of the tree and confirm the suite fails each one. A suite that passes first time is not proof until this is done.
-6. For engine swaps: `python3 scripts/build_rust_engine.py`, then `check_replays.py --check --expect-rust --binary ...` and the fault variants (`BASELINE.md`). State the stock CRC leaves out needs the witness check there.
-7. `python3 scripts/lint_determinism.py crates/`; `cargo check --workspace --tests` with `--features zh_logic/retail-crc` and again with `zh_logic/retail-xfer-save`; `cargo test --workspace`; `python3 scripts/port_map.py --check`.
-
-## Practical notes
-
-- The repo is not `cargo fmt` clean. Do not reformat files you are not changing.
-- Concurrent porting branches added the same methods independently; after merging them, search for duplicated methods and tables before testing.
-- `env:ephemeral-web` assignments are paused and the Actions quota is nearly used up (`AGENTS.md` §4.4). Batch pushes.
-- A harness that touches shroud cells must replace the local player, or the cells call the absent display. See `gen_partition_shroud.cpp`.
+- Item 12, client crates: ask when first needed.
+- Whether a searchable copy of the reference source under another folder name may be made
+  for workers. It would sidestep the isolation check, so it needs a yes.
+- The other unanswered items in `OPEN_DECISIONS.md`.
