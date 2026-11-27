@@ -94,7 +94,7 @@ pub fn reload_ammo(weapon: &mut Weapon, sim: &mut dyn SimApi, owner: ObjectSlot)
 }
 
 /// `WeaponTemplate::getDelayBetweenShots`, drawing from the logic stream only for a real range.
-fn delay_between_shots(weapon: &Weapon, sim: &mut dyn SimApi, bonus: &WeaponBonus) -> Int {
+pub fn delay_between_shots(weapon: &Weapon, sim: &mut dyn SimApi, bonus: &WeaponBonus) -> Int {
     let lo = weapon.template.min_delay_between_shots;
     let hi = weapon.template.max_delay_between_shots;
     let delay = if lo == hi { lo } else { sim.rng_logic_int(lo, hi) };

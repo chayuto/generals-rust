@@ -227,7 +227,7 @@ impl ExitFacet for ScriptedExit {
 }
 
 impl ParkingPlaceFacet for ScriptedParking {
-    fn should_reserve_door_when_queued(&self, _tmpl: ThingTemplateId) -> Bool {
+    fn should_reserve_door_when_queued(&self, _sim: &dyn SimView, _tmpl: ThingTemplateId) -> Bool {
         script(|s| Bool::from(s.park_reserve))
     }
     fn has_available_space_for(&self, _sim: &dyn SimView, _tmpl: ThingTemplateId) -> Bool {

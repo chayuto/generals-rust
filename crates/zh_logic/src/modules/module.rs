@@ -6,6 +6,7 @@
 //! Reference C++ packets: `packets/phase5/PKT-163_Module.md`
 //! Golden Vector test: `crates/zh_logic/tests/golden_pkt164_module_factory.rs`
 
+use crate::combat::WhichTurretType;
 use crate::rules::command_button::CommandButton;
 use std::any::Any;
 
@@ -1603,7 +1604,11 @@ pub trait CountermeasuresFacet {
 
 /// Airfield/carrier parking and runway reservation facet (`ParkingPlaceBehaviorInterface`).
 pub trait ParkingPlaceFacet {
-    fn should_reserve_door_when_queued(&self, _tmpl_id: ThingTemplateId) -> Bool {
+    fn should_reserve_door_when_queued(
+        &self,
+        _sim: &dyn SimView,
+        _tmpl_id: ThingTemplateId,
+    ) -> Bool {
         FALSE
     }
     fn has_available_space_for(&self, _sim: &dyn SimView, _tmpl_id: ThingTemplateId) -> Bool {
@@ -1635,25 +1640,49 @@ pub trait ParkingPlaceFacet {
     ) -> Bool {
         FALSE
     }
-    fn release_runway(&mut self, _id: ObjectId) {}
+    fn release_runway(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext, _id: ObjectId) {}
     fn calc_pp_info(&self, _sim: &dyn SimView, _ctx: ModuleContext, _id: ObjectId, _info: &mut ParkingPlaceInfo) {}
-    fn get_runway_index(&self, _id: ObjectId) -> Int {
+    fn get_runway_index(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _id: ObjectId,
+    ) -> Int {
         -1
     }
     fn get_runway_count(&self) -> Int {
         0
     }
-    fn get_runway_reservation(&self, _runway_idx: Int, _rtype: RunwayReservationType) -> ObjectId {
+    fn get_runway_reservation(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _runway_idx: Int,
+        _rtype: RunwayReservationType,
+    ) -> ObjectId {
         ObjectId::INVALID
     }
-    fn transfer_runway_reservation_to_next_in_line_for_takeoff(&mut self, _id: ObjectId) {}
+    fn transfer_runway_reservation_to_next_in_line_for_takeoff(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _id: ObjectId,
+    ) {
+    }
     fn get_approach_height(&self) -> Real {
         0.0
     }
     fn get_landing_deck_height_offset(&self) -> Real {
         0.0
     }
-    fn set_healee(&mut self, _healee: ObjectSlot, _add: Bool) {}
+    fn set_healee(
+        &mut self,
+        _sim: &mut dyn SimApi,
+        _ctx: ModuleContext,
+        _healee: ObjectSlot,
+        _add: Bool,
+    ) {
+    }
     fn kill_all_parked_units(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
     fn defect_all_parked_units(
         &mut self,
@@ -1868,8 +1897,33 @@ pub trait DestroyFacet {
     fn on_destroy(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext);
 }
 
+/// What `ParkingPlaceBehavior` asks a `JetAIUpdate`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct JetAiState {
+    /// `friend_isTakeoffOrLandingInProgress`.
+    pub takeoff_or_landing_in_progress: Bool,
+    /// `friend_getParkingOffset`.
+    pub parking_offset: Real,
+}
+
 /// AI state-machine / locomotor facet (`AIUpdateInterface`).
 pub trait AiUpdateFacet {
+    /// `Some` for a `JetAIUpdate` only.
+    fn jet_ai(&self) -> Option<JetAiState> {
+        None
+    }
+    /// `getWhichTurretForCurWeapon`.
+    fn which_turret_for_cur_weapon(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> WhichTurretType {
+        WhichTurretType::Invalid
+    }
+    /// `setTurretEnabled`.
+    fn set_turret_enabled(&mut self, _turret: WhichTurretType, _enabled: Bool) {}
+    /// `recenterTurret`.
+    fn recenter_turret(&mut self, _turret: WhichTurretType) {}
+    /// `isTurretInNaturalPosition`.
+    fn is_turret_in_natural_position(&self, _turret: WhichTurretType) -> Bool {
+        FALSE
+    }
     /// `AIUpdateInterface::isClearingMines`: attacking with an anti-mine weapon.
     fn is_clearing_mines(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool {
         let Some(obj) = sim.object(ctx.owner_slot) else {

@@ -22,7 +22,7 @@ pub use module::{
     CountermeasuresFacet, CreateFacet, DamageFacet, DestroyFacet, DieFacet, EvacDisposition,
     ExitDoorType, ExitFacet, GenerateMinefieldFacet, HelperFacet, LandMineFacet, MaxHealthChangeType, ModuleData,
     ModuleSnapshotHeader, ModuleType, ObjectEnterExitType, OverchargeFacet, ParkingPlaceFacet,
-    ParkingPlaceInfo, PhysicsFacet, ProjectileFacet, RebuildHoleFacet, RunwayReservationType,
+    ParkingPlaceInfo, JetAiState, PhysicsFacet, ProjectileFacet, RebuildHoleFacet, RunwayReservationType,
     ScaffoldTargetMotion, SlavedUpdateFacet, SlowDeathFacet, SlowDeathPhaseType,
     SpawnBehaviorFacet, SpecialPowerFacet, StealthDetectorFacet, StealthFacet, StealthParams, StubModuleData,
     TransportPassengerFacet, UpdateFacet, UpgradeFacet, INVALID_BODY_TIMESTAMP,

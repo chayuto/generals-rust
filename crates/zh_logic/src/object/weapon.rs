@@ -242,14 +242,14 @@ impl WeaponTemplate {
                 "MissileCallsOnDie" => self.missile_calls_on_die = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
                 "RadiusDamageAffects" => self.affects_mask = parse_affects(value),
                 "ProjectileCollidesWith" => self.collide_mask = parse_collide(value),
-                "AntiAirborneVehicle" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_AIRBORNE_VEHICLE },
-                "AntiGround" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_GROUND },
-                "AntiProjectile" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_PROJECTILE },
-                "AntiSmallMissile" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_SMALL_MISSILE },
-                "AntiMine" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_MINE },
-                "AntiAirborneInfantry" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_AIRBORNE_INFANTRY },
-                "AntiBallisticMissile" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_BALLISTIC_MISSILE },
-                "AntiParachute" => if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { self.anti_mask |= WEAPON_ANTI_PARACHUTE },
+                "AntiAirborneVehicle" => set_anti(&mut self.anti_mask, WEAPON_ANTI_AIRBORNE_VEHICLE, value),
+                "AntiGround" => set_anti(&mut self.anti_mask, WEAPON_ANTI_GROUND, value),
+                "AntiProjectile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_PROJECTILE, value),
+                "AntiSmallMissile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_SMALL_MISSILE, value),
+                "AntiMine" => set_anti(&mut self.anti_mask, WEAPON_ANTI_MINE, value),
+                "AntiAirborneInfantry" => set_anti(&mut self.anti_mask, WEAPON_ANTI_AIRBORNE_INFANTRY, value),
+                "AntiBallisticMissile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_BALLISTIC_MISSILE, value),
+                "AntiParachute" => set_anti(&mut self.anti_mask, WEAPON_ANTI_PARACHUTE, value),
                 "ScatterTarget" => {
                     let mut x = 0.0_f32; let mut y = 0.0_f32;
                     for token in value.split_whitespace() {
@@ -329,6 +329,15 @@ impl WeaponTemplate {
             DamageType::Hack => FALSE,
             _ => if self.primary_damage > 0.0_f32 || self.secondary_damage > 0.0_f32 { TRUE } else { FALSE },
         }
+    }
+}
+
+/// `INI::parseBitInInt32`: the bit follows the value, so `No` clears a default.
+fn set_anti(mask: &mut Int, bit: Int, value: &str) {
+    if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE {
+        *mask |= bit;
+    } else {
+        *mask &= !bit;
     }
 }
 

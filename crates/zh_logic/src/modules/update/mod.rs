@@ -2,6 +2,9 @@
 
 pub mod auto_deposit_update;
 pub mod base_renerate_update;
+pub mod battle_plan_update;
+pub mod missile_launcher_building_update;
+pub mod point_defense_laser_update;
 pub mod assisted_targeting_update;
 pub mod auto_find_healing_update;
 pub mod command_button_hunt_update;
@@ -53,6 +56,36 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "BattlePlanUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::SPECIAL_POWER_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        battle_plan_update::parse_battle_plan_update_data,
+        battle_plan_update::create_battle_plan_update,
+    );
+    reg.register_module(
+        nk,
+        "MissileLauncherBuildingUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::SPECIAL_POWER_UPDATE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        missile_launcher_building_update::parse_missile_launcher_building_update_data,
+        missile_launcher_building_update::create_missile_launcher_building_update,
+    );
+    reg.register_module(
+        nk,
+        "PointDefenseLaserUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x001),
+        SleepyUpdatePhase::Normal,
+        false,
+        point_defense_laser_update::parse_point_defense_laser_update_data,
+        point_defense_laser_update::create_point_defense_laser_update,
+    );
     reg.register_module(
         nk,
         "HelicopterSlowDeathBehavior",

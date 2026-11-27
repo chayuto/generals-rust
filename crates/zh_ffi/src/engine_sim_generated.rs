@@ -4,6 +4,8 @@
 
 use crate::engine_sim::{not_wired, EngineSim};
 use zh_logic::sim::*;
+use zh_logic::combat::WhichTurretType;
+use zh_logic::modules::update::battle_plan_update::{self, PlayerBattlePlans};
 use zh_logic::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 use zh_logic::arena::{
@@ -27,7 +29,7 @@ use zh_logic::modules::update::spy_vision_update::SpyVisionUpdate;
 use zh_logic::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
-    ParkingPlaceInfo, StealthParams,
+    JetAiState, ParkingPlaceInfo, StealthParams,
 };
 use zh_logic::modules::module::SupplyTruckAiFacet;
 use zh_logic::ai::seams::{NoPathServices, PathServices};
@@ -120,6 +122,18 @@ impl SimView for EngineSim<'_> {
     }
     fn ai_attack_priority(&self, owner: ObjectSlot, victim: ObjectSlot) -> Option<Int> {
         not_wired("ai_attack_priority")
+    }
+    fn object_jet_ai(&self, owner: ObjectSlot) -> Option<JetAiState> {
+        not_wired("object_jet_ai")
+    }
+    fn ai_turret_for_cur_weapon(&self, owner: ObjectSlot) -> WhichTurretType {
+        not_wired("ai_turret_for_cur_weapon")
+    }
+    fn ai_turret_in_natural_position(&self, owner: ObjectSlot, turret: WhichTurretType) -> Bool {
+        not_wired("ai_turret_in_natural_position")
+    }
+    fn player_battle_plans(&self, player: Int) -> Option<&PlayerBattlePlans> {
+        not_wired("player_battle_plans")
     }
     fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot> {
         not_wired("find_special_ability_update")
@@ -616,6 +630,21 @@ impl SimView for EngineSim<'_> {
 }
 
 impl SimApi for EngineSim<'_> {
+    fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {
+        not_wired("ai_set_turret_enabled")
+    }
+    fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType) {
+        not_wired("ai_recenter_turret")
+    }
+    fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real) {
+        not_wired("apply_damage_scalar")
+    }
+    fn player_battle_plans_mut(&mut self, player: Int) -> &mut PlayerBattlePlans {
+        not_wired("player_battle_plans_mut")
+    }
+    fn record_battle_plan_selected(&mut self, owner: ObjectSlot) {
+        not_wired("record_battle_plan_selected")
+    }
     fn with_special_power_module( &mut self, module: ModuleSlot, f: &mut dyn FnMut(&mut dyn SpecialPowerFacet, &mut dyn SimApi, ModuleContext), ) {
         not_wired("with_special_power_module")
     }

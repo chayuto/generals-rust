@@ -390,3 +390,38 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 ### Device terrain code links but needs a render object
 
 - `libz_gameenginedevice.a` links into a headless harness (headers under both `Core/GameEngineDevice/Include` and `GeneralsMD/Code/GameEngineDevice/Include`; pass them with `--extra-flag=-I...`). `W3DTerrainLogic::getGroundHeight` runs without map data; `isCliffCell` dereferences the null `TheTerrainRenderObject`.
+### The point defense velocity prediction does nothing
+
+- **Where:** `PointDefenseLaserUpdate::scanClosestTarget`.
+- **What happens:** it builds the predicted position, then measures the distance to the target itself again, so `PredictTargetVelocityFactor` has no effect. `fireWhenReady` also leaves `target` and `m_inRange` alone when it draws a delayed rescan, so it can still fire at the target it just gave up.
+- **Guard:** `golden_pkt341_350_309_support` has layouts with a non-zero factor and targets that leave the firing range.
+
+### A runway query for no aircraft names an empty space
+
+- **Where:** `ParkingPlaceBehavior::getRunwayIndex`.
+- **What happens:** unlike `getSpaceIndex`, it does not reject `INVALID_ID`, which matches the first empty space and returns that space's runway.
+- **Guard:** `golden_pkt286_parking_place` queries with `INVALID_ID`.
+
+### Observing FX lists and captures without a display
+
+- **Where:** `FXList::doFXPos`, `PartitionCell::addLooker`.
+- **What happens:** an FX list plays only where the observed player sees, so a recording nugget stays silent by default. When the observed player starts looking at a cell (a capture does this), `TheDisplay` is dereferenced and the headless oracle crashes.
+- **Rule:** `revealMapForPlayerPermanently` for an unused player, then make it the local player.
+
+### The AI draws after the other module constructors
+
+- **Where:** `AIUpdateInterface::onObjectCreated`.
+- **What happens:** the state machine, and its four idle draws, are made in `onObjectCreated`, after every constructor of the object. A `StealthDetectorUpdate` listed after the AI draws first.
+- **Rule:** a Rust AI stand-in draws in `on_object_created`, not `on_construct`.
+
+### A weapon set flag during creation builds the weapons
+
+- **Where:** `BattlePlanUpdate::onObjectCreated`, `Object::setWeaponSetFlag`.
+- **What happens:** the flag runs `updateWeaponSet`, so the weapons exist before `initObject` ends and the `setWeaponLock` that follows succeeds.
+- **Guard:** `golden_pkt341_350_309_support` compares the veteran flag and the lock.
+
+### An expired disable still pauses special powers
+
+- **Where:** `Object::setDisabledUntil`.
+- **What happens:** `pauseAllSpecialPowers(TRUE)` runs for every newly set type, even when the frame is not in the future and the object is not disabled. The port pauses on the disabled edge only, which differs for a zero duration or a second disable type.
+- **Guard:** none; `gen_pkt341_350_309_support.cpp` keeps zero paralyze times away from objects with special powers.

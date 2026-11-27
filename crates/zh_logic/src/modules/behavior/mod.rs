@@ -16,6 +16,7 @@ pub mod jet_slow_death_behavior;
 pub mod minefield_behavior;
 pub mod neuton_blast_behavior;
 pub mod overcharge_behavior;
+pub mod parking_place_behavior;
 pub mod poisoned_behavior;
 pub mod prison_behavior;
 pub mod propaganda_tower_behavior;
@@ -32,6 +33,16 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Registers `WP-5.3` concrete `Behavior` module factories into `reg`.
 pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "ParkingPlaceBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x003 | FacetMask::PARKING_PLACE.0 | FacetMask::EXIT_INTERFACE.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        parking_place_behavior::parse_parking_place_behavior_data,
+        parking_place_behavior::create_parking_place_behavior,
+    );
     reg.register_module(
         nk,
         "DumbProjectileBehavior",

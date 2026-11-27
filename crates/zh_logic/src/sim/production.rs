@@ -394,7 +394,7 @@ impl SimContext {
             let Some(parking) = payload.and_then(|m| m.as_parking_place()) else {
                 continue;
             };
-            if parking.should_reserve_door_when_queued(tmpl) != FALSE {
+            if parking.should_reserve_door_when_queued(self, tmpl) != FALSE {
                 reserve = TRUE;
                 if parking.has_available_space_for(self, tmpl) == FALSE {
                     full = TRUE;

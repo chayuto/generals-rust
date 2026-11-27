@@ -8,6 +8,8 @@
 
 mod production;
 
+use crate::combat::WhichTurretType;
+use crate::modules::update::battle_plan_update::{self, PlayerBattlePlans};
 use crate::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,7 +34,7 @@ use crate::modules::update::spy_vision_update::SpyVisionUpdate;
 use crate::modules::{
     AttitudeType, BehaviorModule, BridgeTowerType, CommandSourceType, ExitDoorType,
     MaxHealthChangeType, ModuleData, ModuleDataStore, ModuleRegistry, ModuleType,
-    ParkingPlaceInfo, StealthParams,
+    JetAiState, ParkingPlaceInfo, StealthParams,
 };
 use crate::modules::module::SupplyTruckAiFacet;
 use crate::ai::seams::{NoPathServices, PathServices};
@@ -1068,6 +1070,13 @@ pub trait SimView {
     fn ai_is_moving(&self, owner: ObjectSlot) -> Bool;
     /// The owner's `getAttackInfo()->getPriority(victim)`; `None` without attack info.
     fn ai_attack_priority(&self, owner: ObjectSlot, victim: ObjectSlot) -> Option<Int>;
+    /// The answers of the owner's `JetAIUpdate`.
+    fn object_jet_ai(&self, owner: ObjectSlot) -> Option<JetAiState>;
+    /// `AIUpdateInterface::getWhichTurretForCurWeapon`; invalid without an AI.
+    fn ai_turret_for_cur_weapon(&self, owner: ObjectSlot) -> WhichTurretType;
+    fn ai_turret_in_natural_position(&self, owner: ObjectSlot, turret: WhichTurretType) -> Bool;
+    /// The battle plan members of the player with this index.
+    fn player_battle_plans(&self, player: Int) -> Option<&PlayerBattlePlans>;
     /// `Object::findSpecialAbilityUpdate`. Reads module data, so it also finds a running module.
     fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot>;
     /// `SpecialPowerUpdateInterface::isActive`.
@@ -1377,6 +1386,13 @@ pub trait SimView {
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
 pub trait SimApi: SimView {
+    fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool);
+    fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType);
+    /// `BodyModuleInterface::applyDamageScalar`.
+    fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real);
+    fn player_battle_plans_mut(&mut self, player: Int) -> &mut PlayerBattlePlans;
+    /// `AcademyStats::recordBattlePlanSelected` for the owner's player.
+    fn record_battle_plan_selected(&mut self, owner: ObjectSlot);
     /// Runs `f` on the special power module in `module`.
     fn with_special_power_module(
         &mut self,
@@ -2244,6 +2260,8 @@ pub struct SimWorld {
     pub projectile_launches: Vec<(ObjectId, Option<ObjectId>, Coord3D)>,
     pub countermeasure_reports: Vec<(ObjectId, ObjectId)>,
     pub parking_reservations: BTreeMap<ObjectId, ObjectId>,
+    /// `Player`'s battle plan members by player index.
+    pub player_battle_plans: BTreeMap<Int, PlayerBattlePlans>,
     pub passenger_orders: Vec<(ObjectId, String)>,
     pub slow_death_scale: Real,
     pub hulk_max_lifetime_override: Int,
@@ -2398,6 +2416,7 @@ impl SimWorld {
             projectile_launches: Vec::new(),
             countermeasure_reports: Vec::new(),
             parking_reservations: BTreeMap::new(),
+            player_battle_plans: BTreeMap::new(),
             passenger_orders: Vec::new(),
             slow_death_scale: 1.0,
             hulk_max_lifetime_override: -1,
@@ -3954,6 +3973,24 @@ impl SimContext {
 
     /// Spawns an object from `tmpl` with explicit `initial_status` flags matching
     /// `ThingFactory::newObject(tmpl, team, statusBits)`.
+    fn build_first_weapon_set(&mut self, owner: ObjectSlot) {
+        let frame = self.world.frame;
+        let Some(obj) = self.world.objects.get_mut(owner) else {
+            return;
+        };
+        if obj.weapon_set.cur_weapon_template_set.is_some() {
+            return;
+        }
+        let set = obj
+            .thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
+            .and_then(|t| t.find_weapon_template_set(&obj.weapon_set_flags));
+        if let Some(set) = set {
+            obj.weapon_set.init_from_template_set(set, frame);
+        }
+    }
+
     pub fn spawn_object_with_status(
         &mut self,
         tmpl: ThingTemplateId,
@@ -4107,12 +4144,18 @@ impl SimContext {
         // modules and before `initObject`.
         self.world.partition.register(id);
 
+        // `initObject`: a new object takes its player's active battle plan bonuses.
+        battle_plan_update::battle_plan_team_member(self, team, slot, TRUE);
+
         // C++ builds the weapon set last (`updateWeaponSet` closes `initObject`), so module
         // constructors neither see its weapons nor share a reload with them.
         if let Some(ref set) = wts {
             let frame = self.world.frame;
             if let Some(o) = self.world.objects.get_mut(slot) {
-                o.weapon_set.init_from_template_set(set, frame);
+                // A weapon set flag set while the object was being made built it already.
+                if o.weapon_set.cur_weapon_template_set.is_none() {
+                    o.weapon_set.init_from_template_set(set, frame);
+                }
             }
         }
 
@@ -4373,6 +4416,37 @@ impl SimView for SimContext {
             .payload(module)
             .and_then(|m| m.as_special_power_update())
             .map_or(FALSE, |f| f.is_active())
+    }
+
+    fn object_jet_ai(&self, owner: ObjectSlot) -> Option<JetAiState> {
+        let obj = self.world.objects.get(owner)?;
+        obj.behaviors.iter().find_map(|&(ms, _)| {
+            self.world.modules.payload(ms)?.as_ai()?.jet_ai()
+        })
+    }
+
+    fn ai_turret_for_cur_weapon(&self, owner: ObjectSlot) -> WhichTurretType {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return WhichTurretType::Invalid;
+        };
+        let Some(ai) = self.world.modules.payload(ms).and_then(|m| m.as_ai()) else {
+            return WhichTurretType::Invalid;
+        };
+        let ctx = self.world.modules.meta(ms).context(ms);
+        ai.which_turret_for_cur_weapon(self, ctx)
+    }
+
+    fn ai_turret_in_natural_position(&self, owner: ObjectSlot, turret: WhichTurretType) -> Bool {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms)?.as_ai())
+            .map_or(FALSE, |ai| ai.is_turret_in_natural_position(turret))
+    }
+
+    fn player_battle_plans(&self, player: Int) -> Option<&PlayerBattlePlans> {
+        self.world.player_battle_plans.get(&player)
     }
 
     fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
@@ -7510,6 +7584,11 @@ impl SimApi for SimContext {
                 }
             }
         }
+        // `updateWeaponSet` builds the weapons at the first flag, also from a module's
+        // `onObjectCreated`. Later changes of set are not modelled.
+        if !has_drawable {
+            self.build_first_weapon_set(owner);
+        }
     }
 
     fn set_max_health(
@@ -8348,6 +8427,10 @@ impl SimApi for SimContext {
         }) else {
             return;
         };
+        // `Player::becomingTeamMember(obj, false)`.
+        if old_team != TeamId::INVALID {
+            battle_plan_update::battle_plan_team_member(self, old_team, owner, FALSE);
+        }
         self.world.team_member_remove(old_team, owner);
         // `TeamId::INVALID` is a null `Team*`: `setTeam` runs `onCapture` only between two
         // teams.
@@ -8357,6 +8440,7 @@ impl SimApi for SimContext {
         self.world.team_member_prepend(new_team, owner);
         // `Player::becomingTeamMember(obj, true)`, before `onCapture`.
         self.award_capture_bonus(owner);
+        battle_plan_update::battle_plan_team_member(self, new_team, owner, TRUE);
         if old_team == TeamId::INVALID {
             return;
         }
@@ -9998,6 +10082,61 @@ impl SimApi for SimContext {
         }
     }
 
+    fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, _, _| {
+            if let Some(ai) = m.as_ai_mut() {
+                ai.set_turret_enabled(turret, enabled);
+            }
+        });
+    }
+
+    fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType) {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, _, _| {
+            if let Some(ai) = m.as_ai_mut() {
+                ai.recenter_turret(turret);
+            }
+        });
+    }
+
+    fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real) {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return;
+        };
+        if self.world.modules.is_executing(ms) {
+            let _ = self
+                .world
+                .modules
+                .push_deferred_op(ms, DeferredSelfOp::ApplyDamageScalar(scalar));
+            return;
+        }
+        let _ = self.dispatch_module(ms, |m, _, _| {
+            if let Some(body) = m.as_body_mut() {
+                body.apply_damage_scalar(scalar);
+            }
+        });
+    }
+
+    fn player_battle_plans_mut(&mut self, player: Int) -> &mut PlayerBattlePlans {
+        self.world.player_battle_plans.entry(player).or_default()
+    }
+
+    fn record_battle_plan_selected(&mut self, owner: ObjectSlot) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        self.world
+            .player_academy
+            .entry(team)
+            .or_default()
+            .record_battle_plan_selected();
+    }
+
     fn with_special_power_module(
         &mut self,
         module: ModuleSlot,
@@ -10252,6 +10391,22 @@ impl MockSimApi {
 }
 
 impl SimView for MockSimApi {
+    fn object_jet_ai(&self, owner: ObjectSlot) -> Option<JetAiState> {
+        self.ctx.object_jet_ai(owner)
+    }
+
+    fn ai_turret_for_cur_weapon(&self, owner: ObjectSlot) -> WhichTurretType {
+        self.ctx.ai_turret_for_cur_weapon(owner)
+    }
+
+    fn ai_turret_in_natural_position(&self, owner: ObjectSlot, turret: WhichTurretType) -> Bool {
+        self.ctx.ai_turret_in_natural_position(owner, turret)
+    }
+
+    fn player_battle_plans(&self, player: Int) -> Option<&PlayerBattlePlans> {
+        self.ctx.player_battle_plans(player)
+    }
+
     fn draw_icon_ui(&self) -> Bool {
         self.ctx.draw_icon_ui()
     }
@@ -11008,6 +11163,26 @@ impl SimView for MockSimApi {
 }
 
 impl SimApi for MockSimApi {
+    fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {
+        self.ctx.ai_set_turret_enabled(owner, turret, enabled);
+    }
+
+    fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType) {
+        self.ctx.ai_recenter_turret(owner, turret);
+    }
+
+    fn apply_damage_scalar(&mut self, owner: ObjectSlot, scalar: Real) {
+        self.ctx.apply_damage_scalar(owner, scalar);
+    }
+
+    fn player_battle_plans_mut(&mut self, player: Int) -> &mut PlayerBattlePlans {
+        self.ctx.player_battle_plans_mut(player)
+    }
+
+    fn record_battle_plan_selected(&mut self, owner: ObjectSlot) {
+        self.ctx.record_battle_plan_selected(owner);
+    }
+
     fn with_special_power_module(
         &mut self,
         module: ModuleSlot,
