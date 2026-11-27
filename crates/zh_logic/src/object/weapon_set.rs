@@ -385,21 +385,25 @@ impl WeaponSet {
         }
         TRUE
     }
+    /// `getModelConditionForWeaponSlot`: the slot's flag for the condition, and
+    /// its using-weapon flag for any condition.
     pub fn get_model_condition_for_weapon_slot(wslot: WeaponSlotType, condition: WeaponSetConditionType) -> ModelConditionFlags {
+        use ModelConditionFlagType as M;
         let mut f = ModelConditionFlags::new();
-        let base = match wslot {
-            WeaponSlotType::Primary => 34,
-            WeaponSlotType::Secondary => 39,
-            WeaponSlotType::Tertiary => 43,
+        let slot = wslot as usize;
+        let flags = match condition {
+            WeaponSetConditionType::Firing => [M::FiringA, M::FiringB, M::FiringC],
+            WeaponSetConditionType::Between => [
+                M::BetweenFiringShotsA,
+                M::BetweenFiringShotsB,
+                M::BetweenFiringShotsC,
+            ],
+            WeaponSetConditionType::Reloading => [M::ReloadingA, M::ReloadingB, M::ReloadingC],
+            WeaponSetConditionType::Preattack => [M::PreAttackA, M::PreAttackB, M::PreAttackC],
+            _ => return f,
         };
-        let bit = match condition {
-            WeaponSetConditionType::Firing => base + 2,
-            WeaponSetConditionType::Between => base + 3,
-            WeaponSetConditionType::Reloading => base + 4,
-            WeaponSetConditionType::Preattack => base + 1,
-            _ => -1,
-        };
-        if bit >= 0 { f.set(bit, 1); }
+        f.set(flags[slot].as_i32(), 1);
+        f.set([M::UsingWeaponA, M::UsingWeaponB, M::UsingWeaponC][slot].as_i32(), 1);
         f
     }
     pub fn rebuild_masks(&mut self) {
@@ -431,8 +435,10 @@ pub const ATTACK_CONTINUED_TARGET: UnsignedInt = 0x02;
 pub const ATTACK_CONTINUED_TARGET_FORCED: UnsignedInt = 0x03;
 pub const ATTACK_TUNNEL_NETWORK_GUARD: UnsignedInt = 0x04;
 
-/// `CMD_DEFAULT_SWITCH_WEAPON` as a bit of the command source mask.
-const DEFAULT_SWITCH_WEAPON_BIT: UnsignedInt = 1 << 4;
+/// The reference tests the command source mask against the value of the
+/// `CMD_DEFAULT_SWITCH_WEAPON` enumerator, not its bit: it is the bit of
+/// `FROM_AI`.
+const DEFAULT_SWITCH_WEAPON_BIT: UnsignedInt = CommandSourceType::DefaultSwitchWeapon as UnsignedInt;
 
 fn is_kind(sim: &dyn SimView, slot: ObjectSlot, kind: KindOfType) -> bool {
     sim.object_is_kind_of(slot, kind) != FALSE

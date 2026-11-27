@@ -167,6 +167,8 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `ai_attack_object`, `ai_force_attack_object`, `ai_attack_position`, `ai_hunt`, `is_attacking`, `get_current_victim`, `get_current_victim_pos`, `is_weapon_slot_enabled`, `ai_go_prone`, `order_slaves_*`, `FiringTracker`.
 - Risks: aim angle math, hunt, squad, area and turret draws.
 - Seen: **units fight and die**.
+- **First half done.** `ai/ai_states/attack.rs` has the attack state and its pursue, approach, aim and fire states, in the AI's machine and in the attack-move sub machine; `object/weapon_set.rs` has the weapon choice and the able-to-attack questions. `golden_s14_attack_states` traces 80 scenes of duels frame by frame (position, state, weapons, health, AI save bytes, CRC, RNG seed); `attack_sim` has an attack order alone destroy a target. Squad, hunt and attack area are not ported.
+- Left for the second half: turrets (every turret question is an `AiSeams` method that answers nothing, so a turreted unit turns its body to aim) and the weapon half of the AI update. Gaps: `OPEN_DECISIONS.md`.
 
 ### S15. Supply, dock, transport and hacker AI
 - C++: SupplyTruck (580), `AIDock.cpp` (460), Transport (130), HackInternet (370). About 1,500: one worker, or move HackInternet and Transport out.

@@ -26,7 +26,8 @@ use crate::object::weapon::{Weapon, NO_MAX_SHOTS_LIMIT};
 use crate::object::weapon_actions;
 use crate::object::weapon_queries;
 use crate::object::weapon_set::{
-    self, CanAttackResult, WeaponChoiceCriteria, WeaponSet, WeaponSetConditionType, WeaponSlotType, ATTACK_CONTINUED_TARGET, ATTACK_CONTINUED_TARGET_FORCED, ATTACK_NEW_TARGET,
+    self, CanAttackResult, WeaponChoiceCriteria, WeaponSet, WeaponSetConditionType, WeaponSlotType,
+    ATTACK_CONTINUED_TARGET, ATTACK_CONTINUED_TARGET_FORCED, ATTACK_NEW_TARGET,
 };
 use crate::pathfinder::pathfind_constants::PATHFIND_CELL_SIZE_F;
 use crate::rules::combat_types::{DamageType, WeaponStatus};
@@ -1464,10 +1465,10 @@ fn fire_update(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateRet
 
 /// Whether the victim is done with, so a continuing weapon looks for the next.
 fn is_finished_off(sim: &dyn SimApi, victim: ObjectSlot) -> bool {
-    sim.object(victim)
-        .map_or(true, |o| o.is_destroyed() || o.is_effectively_dead() != FALSE)
-        || is_kind(sim, victim, KindOfType::Mine)
-            && has_status(sim, victim, ObjectStatusType::Masked)
+    sim.object(victim).map_or(true, |o| {
+        o.is_destroyed() || o.is_effectively_dead() != FALSE
+    }) || is_kind(sim, victim, KindOfType::Mine)
+        && has_status(sim, victim, ObjectStatusType::Masked)
 }
 
 /// A weapon with a continue range goes on to the next of the same player near
@@ -1485,35 +1486,46 @@ fn take_next_victim(
     let Some(player) = sim.object(victim).map(|o| sim.player_index(o.team_id)) else {
         return;
     };
-    let off_map = |sim: &dyn SimApi, slot| {
-        sim.object(slot)
-            .map_or(0, |o| o.private_status & PRIVATE_STATUS_OFF_MAP)
-    };
-    let mine = off_map(sim, owner);
-    let found = {
-        let sim: &dyn SimApi = sim;
-        sim.closest_object_to_position(
-            &origin,
-            range,
-            DistanceCalculationType::FromCenter2d,
-            &mut |other| {
-                let result =
-                    sim.able_to_attack_specific_object(owner, ATTACK_NEW_TARGET, other, source);
-                (result == CanAttackResult::Possible
-                    || result == CanAttackResult::PossibleAfterMoving)
-                    && sim
-                        .object(other)
-                        .is_some_and(|o| sim.player_index(o.team_id) == player)
-                    && off_map(sim, other) == mine
-            },
-        )
-    };
+    let found = closest_possible_victim(sim, owner, &origin, range, source, Some(player));
     if let Some(next) = found {
         set_goal_object(sim, ctx, host, Some(next));
         // `notifyNewVictimChosen`.
         set_host_goal_object(sim, ctx, host, next);
         set_goal_object(sim, ctx, host, Some(next));
     }
+}
+
+/// The closest object to `origin` the unit may attack that shares its map
+/// status (`PartitionFilterPossibleToAttack`, `PartitionFilterSameMapStatus`
+/// and, with `player`, `PartitionFilterSamePlayer`).
+pub(crate) fn closest_possible_victim(
+    sim: &dyn SimApi,
+    owner: ObjectSlot,
+    origin: &Coord3D,
+    range: Real,
+    source: CommandSourceType,
+    player: Option<i32>,
+) -> Option<ObjectSlot> {
+    let off_map = |slot| {
+        sim.object(slot)
+            .map_or(0, |o| o.private_status & PRIVATE_STATUS_OFF_MAP)
+    };
+    let mine = off_map(owner);
+    sim.closest_object_to_position(
+        origin,
+        range,
+        DistanceCalculationType::FromCenter2d,
+        &mut |other| {
+            let result =
+                sim.able_to_attack_specific_object(owner, ATTACK_NEW_TARGET, other, source);
+            (result == CanAttackResult::Possible || result == CanAttackResult::PossibleAfterMoving)
+                && player.map_or(true, |p| {
+                    sim.object(other)
+                        .is_some_and(|o| sim.player_index(o.team_id) == p)
+                })
+                && off_map(other) == mine
+        },
+    )
 }
 
 fn fire_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext) {
@@ -1792,8 +1804,7 @@ fn current_slot_and_lock(sim: &dyn SimApi, owner: ObjectSlot) -> (Option<WeaponS
     sim.object(owner).map_or((None, false), |o| {
         let set = &o.weapon_set;
         let slot = set.get_cur_weapon_slot();
-        let held =
-            set.has_any_weapon() != FALSE && set.get_weapon_in_weapon_slot(slot).is_some();
+        let held = set.has_any_weapon() != FALSE && set.get_weapon_in_weapon_slot(slot).is_some();
         (held.then_some(slot), set.is_cur_weapon_locked() != FALSE)
     })
 }
@@ -1901,9 +1912,7 @@ pub fn update(sim: &mut dyn SimApi, ctx: ModuleContext, host: Host) -> StateRetu
         };
         set_current_victim(sim, ctx, victim);
         let team = sim.object(victim).map(|o| o.team_id);
-        if team != attack_state(sim, ctx, host).victim_team
-            && !still_attackable(sim, ctx, victim)
-        {
+        if team != attack_state(sim, ctx, host).victim_team && !still_attackable(sim, ctx, victim) {
             release_victim(sim, ctx, victim);
             return StateReturnType::Failure;
         }

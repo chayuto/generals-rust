@@ -68,15 +68,19 @@ fn world() -> SimContext {
         .expect("weapon");
     sim.rules.weapon_store.add_template(rifle);
     let gun = "  WeaponSet\n    Conditions = None\n    Weapon = PRIMARY Rifle\n  End\n";
-    let ini = object_ini("Soldier", "SELECTABLE INFANTRY CAN_ATTACK", "Legs", 4.0, gun)
-        + &object_ini(
-            "Gunner",
-            "SELECTABLE VEHICLE CAN_ATTACK ATTACK_NEEDS_LINE_OF_SIGHT",
-            "Treads",
-            7.0,
-            gun,
-        )
-        + &object_ini("Dummy", "SELECTABLE VEHICLE", "Treads", 7.0, "")
+    let ini = object_ini(
+        "Soldier",
+        "SELECTABLE INFANTRY CAN_ATTACK",
+        "Legs",
+        4.0,
+        gun,
+    ) + &object_ini(
+        "Gunner",
+        "SELECTABLE VEHICLE CAN_ATTACK ATTACK_NEEDS_LINE_OF_SIGHT",
+        "Treads",
+        7.0,
+        gun,
+    ) + &object_ini("Dummy", "SELECTABLE VEHICLE", "Treads", 7.0, "")
         + &object_ini("Bunker", "STRUCTURE IMMOBILE", "", 14.0, "");
     let mut reader = IniReader::new("object.ini", ini.as_bytes(), IniLoadType::Overwrite);
     sim.rules
@@ -192,7 +196,10 @@ fn run_to_idle(sim: &mut SimContext, unit: ObjectSlot) {
             return;
         }
     }
-    panic!("still in state {}", ai(sim, unit).machine.current_state_id());
+    panic!(
+        "still in state {}",
+        ai(sim, unit).machine.current_state_id()
+    );
 }
 
 fn destroys(name: &str, from: (Real, Real), to: (Real, Real)) {
@@ -225,9 +232,9 @@ fn destroys(name: &str, from: (Real, Real), to: (Real, Real)) {
     assert_eq!(hits, 7, "fifteen damage a shot on a hundred health");
     run_to_idle(&mut sim, attacker);
     let end = position(&sim, attacker);
-    let moved = (end.x - start.x).hypot(end.y - start.y);
+    let moved = Coord3D::new(end.x - start.x, end.y - start.y, 0.0).length();
     assert!(moved > 60.0, "closed in: {moved}");
-    let from_victim = (end.x - to.0).hypot(end.y - to.1);
+    let from_victim = Coord3D::new(end.x - to.0, end.y - to.1, 0.0).length();
     assert!(from_victim > 40.0, "stopped at range: {from_victim}");
     assert_eq!(sim.ai_current_victim(attacker), None);
 }
@@ -268,7 +275,13 @@ fn an_attack_on_a_spot_keeps_firing_until_ordered_to_stop() {
     let attacker = spawn(&mut sim, "Soldier", ATTACKERS, 45.0, 345.0);
     settle(&mut sim);
     let spot = Coord3D::new(245.0, 345.0, 0.0);
-    order(&mut sim, attacker, AiCommandType::AttackPosition, None, spot);
+    order(
+        &mut sim,
+        attacker,
+        AiCommandType::AttackPosition,
+        None,
+        spot,
+    );
     assert_eq!(
         ai(&mut sim, attacker).machine.current_state_id(),
         state_id::ATTACK_POSITION
@@ -292,9 +305,12 @@ fn an_attack_on_a_spot_keeps_firing_until_ordered_to_stop() {
         Coord3D::default(),
     );
     assert_eq!(sim.ai_current_victim_pos(attacker), None);
-    assert!(ai(&mut sim, attacker).machine.attacks.main.machine.is_none());
-    let status: Bool = sim
-        .object(attacker)
-        .map_or(FALSE, |o| o.status.test(23));
+    assert!(ai(&mut sim, attacker)
+        .machine
+        .attacks
+        .main
+        .machine
+        .is_none());
+    let status: Bool = sim.object(attacker).map_or(FALSE, |o| o.status.test(23));
     assert_eq!(status, FALSE, "no longer attacking");
 }

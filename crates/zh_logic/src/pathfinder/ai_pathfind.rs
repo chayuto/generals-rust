@@ -628,7 +628,7 @@ impl Pathfinder {
     /// objects that were standing on it and take falling damage.
     ///
     /// `removeUnitFromPathfindMap`, which the original calls first on removal,
-    /// clears reservations and is not ported.
+    /// is the caller's to call.
     pub fn classify_object_footprint(
         &mut self,
         obj: &Footprint,

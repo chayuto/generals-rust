@@ -1044,10 +1044,13 @@ impl ObjectRecord {
 
         for i in 0..WEAPONSLOT_COUNT {
             let slot = WeaponSlotType::from_i32(i as Int).unwrap_or(WeaponSlotType::Primary);
-            let Some(w) = self.weapon_set.get_weapon_in_weapon_slot(slot) else {
+            let Some(w) = self.weapon_set.get_weapon_in_weapon_slot_mut(slot) else {
                 self.last_weapon_condition[i] = WeaponSetConditionType::None;
                 continue;
             };
+            // The drawable's clip display asks every weapon its remaining ammo,
+            // so each one's status is brought up to date and stored.
+            let current_status = w.get_status(now);
 
             let condition_to_set = if slot != cur_slot {
                 WeaponSetConditionType::None
@@ -1056,7 +1059,7 @@ impl ObjectRecord {
             } else if !is_attacking {
                 WeaponSetConditionType::None
             } else {
-                let status = w.status;
+                let status = current_status;
                 let base = match status {
                     crate::rules::combat_types::WeaponStatus::ReadyToFire
                     | crate::rules::combat_types::WeaponStatus::OutOfAmmo
@@ -4130,6 +4133,9 @@ impl SimContext {
             self.world
                 .sleepy_updates
                 .erase_for_owner(modules, |m, ms| m.meta(ms).owner_slot == slot);
+
+            // `Object::~Object` takes the object off the pathfind map first.
+            self.remove_object_from_pathfind_map(slot);
 
             // `Object::~Object` leaves its team before it deletes the modules.
             if let Some(team) = self.world.objects.get(slot).map(|o| o.team_id) {

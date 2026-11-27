@@ -165,6 +165,15 @@ impl SimContext {
         let Some(footprint) = self.footprint(slot) else {
             return;
         };
+        // A removal first clears the cells the object holds as a unit.
+        let kept = footprint.mine
+            || footprint.projectile
+            || footprint.bridge_tower
+            || footprint.blast_crater
+            || (footprint.fence_width > 0.0 && !footprint.defensive_wall);
+        if !insert && !kept {
+            self.remove_unit_from_pathfind_map(slot);
+        }
         let Some(mut pathfinder) = self.world.pathfinder.take() else {
             return;
         };

@@ -2048,9 +2048,16 @@ fn private_attack_position(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiC
     let continue_range = weapon(sim).map_or(0.0, |w| w.0);
     if continue_range > 0.0 {
         sim.set_status(owner, ObjectStatusType::IgnoringStealth);
-        let victim =
-            ai_seams(sim).closest_attack_victim(ctx.owner_id, &pos, continue_range, source);
+        let victim = crate::ai::ai_states::attack::closest_possible_victim(
+            sim,
+            owner,
+            &pos,
+            continue_range,
+            source,
+            None,
+        );
         sim.clear_status(owner, ObjectStatusType::IgnoringStealth);
+        let victim = victim.and_then(|slot| sim.object(slot).map(|o| o.id));
         if let Some(victim) = victim {
             let mut attack = AiCommandParms::new(AiCommandType::AttackObject, source);
             attack.obj = Some(victim);

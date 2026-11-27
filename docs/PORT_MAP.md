@@ -380,6 +380,7 @@
 | `zh_ffi` | `crates/zh_ffi/src/sleepy_heap.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/supply_warehouse_create.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/test_engine.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/ai/ai_states/attack.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/ai_states/movement.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/mood.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
@@ -496,6 +497,7 @@
 | `docs/golden_vectors/S10_MovementStates.json` | 60 | no |
 | `docs/golden_vectors/S12_Targeting.json` | - | no |
 | `docs/golden_vectors/S13_WeaponFiring.json` | 3000 | no |
+| `docs/golden_vectors/S14_AttackStates.json` | 80 | no |
 | `docs/golden_vectors/S16_DozerWorker.json` | 160 | no |
 | `docs/golden_vectors/S1_Terrain.json` | - | no |
 | `docs/golden_vectors/S1_Terrain_Retail.json` | - | no |
@@ -621,6 +623,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s10_movement_states.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s12_targeting.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s13_weapon_firing.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s14_attack_states.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s16_dozer_worker.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s1_terrain.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s2_pathfind_map.rs` | `active` |

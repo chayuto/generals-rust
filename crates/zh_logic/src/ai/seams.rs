@@ -264,17 +264,6 @@ pub trait AiSeams: Send {
     fn closest_repulsor(&mut self, _owner: ObjectId, _range: Real) -> Option<ObjectId> {
         None
     }
-    /// The partition search of `privateAttackPosition` for a weapon that keeps
-    /// attacking around the spot (S12).
-    fn closest_attack_victim(
-        &mut self,
-        _owner: ObjectId,
-        _pos: &Coord3D,
-        _range: Real,
-        _source: CommandSourceType,
-    ) -> Option<ObjectId> {
-        None
-    }
     /// `ActionManager` (S19).
     fn can_act_on(
         &mut self,
@@ -495,7 +484,6 @@ forward! {
     turret_xfer(owner: ObjectId, turret: usize, xfer: &mut dyn Xfer) -> Result<(), XferError>;
     next_mood_target(owner: ObjectId, called_by_ai: Bool, during_idle: Bool) -> Option<ObjectId>;
     closest_repulsor(owner: ObjectId, range: Real) -> Option<ObjectId>;
-    closest_attack_victim(owner: ObjectId, pos: &Coord3D, range: Real, source: CommandSourceType) -> Option<ObjectId>;
     can_act_on(query: AiActionQuery, owner: ObjectId, target: ObjectId, source: CommandSourceType) -> Bool;
     closest_edge_point(pos: &Coord3D) -> Coord3D;
     group_order(owner: ObjectId, parms: &AiCommandParms) -> Bool;
