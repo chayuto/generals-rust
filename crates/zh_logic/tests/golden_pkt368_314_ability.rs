@@ -1047,10 +1047,9 @@ impl Scene<'_> {
                 .unwrap_or(0),
             self.sim
                 .world
-                .buildings_captured
+                .player_academy
                 .get(&1)
-                .copied()
-                .unwrap_or(0),
+                .map_or(0, |a| a.structures_captured),
         );
 
         let events = {

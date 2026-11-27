@@ -581,8 +581,8 @@ impl Run {
         }
         let score = sim
             .world
-            .player_score_keepers
-            .get(&TEAM)
+            .score_keepers
+            .get(&TEAM.0)
             .map_or((0, 0, 0), |k| {
                 (
                     k.total_money_spent,
@@ -594,7 +594,7 @@ impl Run {
         let a = sim
             .world
             .player_academy
-            .get(&TEAM)
+            .get(&TEAM.0)
             .cloned()
             .unwrap_or_default();
         for v in [

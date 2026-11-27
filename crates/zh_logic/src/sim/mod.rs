@@ -23,7 +23,8 @@ use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
-use crate::economy::score_keeper::{ScoreKeeper, ScoreObjectView, ScoreTemplateDesc};
+use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
+use crate::economy::score_keeper::ScoreKeeper;
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
@@ -2267,14 +2268,10 @@ pub struct SimWorld {
     pub hulk_max_lifetime_override: Int,
     pub deselected_objects: Vec<(ObjectId, UnsignedShort, Bool)>,
     pub stealth_detected_events: Vec<(ObjectId, UnsignedInt)>,
-    /// `AcademyStats::m_vehiclesDisguised` by player index (academy stats are not in the world).
-    pub vehicles_disguised: BTreeMap<Int, UnsignedInt>,
     /// Footprints registered by `createAWallFromMyFootprint`.
     pub pathfind_walls: BTreeSet<ObjectId>,
     /// Unported detonation damage: source, weapon, position, extra bonus flags.
     pub projectile_detonations: Vec<(ObjectId, String, Coord3D, UnsignedInt)>,
-    /// `AcademyStats::m_clearedGarrisonedBuildings` by player index.
-    pub cleared_garrisons: BTreeMap<Int, UnsignedInt>,
     /// `Player::m_color` by team.
     pub team_colors: BTreeMap<TeamId, Int>,
     /// `PlayerTemplate::getSide` by team.
@@ -2311,8 +2308,6 @@ pub struct SimWorld {
     pub control_bar_overrides: BTreeMap<ControlBarOverrideKey, Option<CommandButtonId>>,
     /// Skill points awarded by modules, by player index.
     pub skill_points_awarded: BTreeMap<Int, Int>,
-    /// `AcademyStats::recordBuildingCapture` calls, by player index.
-    pub buildings_captured: BTreeMap<Int, UnsignedInt>,
     /// `Player::m_upgradesInProgress`.
     pub player_upgrades_in_progress: BTreeMap<TeamId, UpgradeMaskType>,
     /// `Player::m_handicap`; absent means every handicap is 1.
@@ -2325,8 +2320,8 @@ pub struct SimWorld {
     pub teams_cannot_build_base: BTreeSet<TeamId>,
     /// Teams whose player has `m_canBuildUnits` cleared.
     pub teams_cannot_build_units: BTreeSet<TeamId>,
-    pub player_score_keepers: BTreeMap<TeamId, crate::economy::score_keeper::ScoreKeeper>,
-    pub player_academy: BTreeMap<TeamId, crate::economy::academy_stats::AcademyStats>,
+    /// `Player::getAcademyStats()` by player index.
+    pub player_academy: BTreeMap<Int, crate::economy::academy_stats::AcademyStats>,
     /// `GameLogic::m_thingTemplateBuildableOverrides` by template name.
     pub buildable_overrides: BTreeMap<String, crate::object::thing_template::BuildableStatus>,
     /// `GameLogic::getSuperweaponRestriction`.
@@ -2422,10 +2417,8 @@ impl SimWorld {
             hulk_max_lifetime_override: -1,
             deselected_objects: Vec::new(),
             stealth_detected_events: Vec::new(),
-            vehicles_disguised: BTreeMap::new(),
             pathfind_walls: BTreeSet::new(),
             projectile_detonations: Vec::new(),
-            cleared_garrisons: BTreeMap::new(),
             team_colors: BTreeMap::new(),
             team_sides: BTreeMap::new(),
             slaved_die_notifications: Vec::new(),
@@ -2454,14 +2447,12 @@ impl SimWorld {
             action_permissions: BTreeSet::new(),
             control_bar_overrides: BTreeMap::new(),
             skill_points_awarded: BTreeMap::new(),
-            buildings_captured: BTreeMap::new(),
             player_upgrades_in_progress: BTreeMap::new(),
             player_handicaps: BTreeMap::new(),
             player_cost_change_percent: BTreeMap::new(),
             player_time_change_percent: BTreeMap::new(),
             teams_cannot_build_base: BTreeSet::new(),
             teams_cannot_build_units: BTreeSet::new(),
-            player_score_keepers: BTreeMap::new(),
             player_academy: BTreeMap::new(),
             buildable_overrides: BTreeMap::new(),
             superweapon_restriction: 0,
@@ -3200,6 +3191,7 @@ impl SimContext {
                     .player_captured_objects
                     .entry(new_owner_team)
                     .or_insert(0) += 1;
+                self.record_object_captured(slot, new_owner_team);
                 for ms in beh_slots {
                     if self.world.modules.is_alive(ms) {
                         let _ = self.dispatch_module(ms, |m, sim, ctx| {
@@ -3208,6 +3200,7 @@ impl SimContext {
                     }
                 }
                 self.handle_partition_cell_maintenance(slot);
+                self.clear_unsellable(slot);
             }
         }
     }
@@ -3393,6 +3386,12 @@ impl SimContext {
             return;
         }
         self.ai_idle(owner, CommandSourceType::FromAi);
+    }
+
+    fn clear_unsellable(&mut self, owner: ObjectSlot) {
+        if let Some(obj) = self.world.objects.get_mut(owner) {
+            obj.script_status &= !OBJECT_STATUS_SCRIPT_UNSELLABLE;
+        }
     }
 
     fn behavior_slots(&self, owner: ObjectSlot) -> Vec<ModuleSlot> {
@@ -3721,6 +3720,11 @@ impl SimContext {
             self.world
                 .sleepy_updates
                 .erase_for_owner(modules, |m, ms| m.meta(ms).owner_slot == slot);
+
+            // `Object::~Object` leaves its team before it deletes the modules.
+            if let Some(team) = self.world.objects.get(slot).map(|o| o.team_id) {
+                self.adjust_team_power(slot, team, FALSE);
+            }
 
             for &ms in &beh_slots {
                 if self.world.modules.is_alive(ms) {
@@ -4067,6 +4071,7 @@ impl SimContext {
         // sleep frames are preserved when pushing UPDATE facets into SleepyUpdateHeap.
         let slot = self.world.objects.spawn(id, record, false);
         self.world.team_member_prepend(team, slot);
+        self.adjust_team_power(slot, team, TRUE);
         crate::modules::helper::attach_object_helpers(self, slot);
 
         for nug in &nuggets {
@@ -4222,6 +4227,33 @@ impl SimContext {
             energy_bonus: tmpl.get_energy_bonus(),
             is_disabled: obj.is_disabled(),
         })
+    }
+
+    /// The energy half of `Player::becomingTeamMember`, which every `Object::setTeam`
+    /// runs (also at construction and destruction): unless under construction,
+    /// `Object::friend_adjustPowerForPlayer`. A disabled producer is not counted.
+    /// `Player::onPowerBrownOutChange` is unported.
+    fn adjust_team_power(&mut self, owner: ObjectSlot, team_id: TeamId, incoming: Bool) {
+        let under_construction = self.world.objects.get(owner).is_none_or(|o| {
+            o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE
+        });
+        let Some(info) = self.energy_object_info(owner) else {
+            return;
+        };
+        if under_construction
+            || team_id == TeamId::INVALID
+            || info.energy_production == 0
+            || (info.is_disabled != FALSE && info.energy_production > 0)
+        {
+            return;
+        }
+        let frame = self.world.frame;
+        let energy = self.world.player_energy.entry(team_id).or_default();
+        if incoming != FALSE {
+            energy.object_entering_influence(Some(info), frame, &mut NoopEnergyCallbacks);
+        } else {
+            energy.object_leaving_influence(Some(info), frame, &mut NoopEnergyCallbacks);
+        }
     }
 
     fn adjust_power_on_disabled_edge(&mut self, owner: ObjectSlot, becoming_disabled: Bool) {
@@ -6319,9 +6351,7 @@ impl SimApi for SimContext {
     }
 
     fn record_building_capture(&mut self, team_id: TeamId) {
-        let player = self.player_index_for_team(team_id);
-        let count = self.world.buildings_captured.entry(player).or_insert(0);
-        *count = count.wrapping_add(1);
+        self.academy(team_id).record_building_capture();
     }
 
     fn sticky_bomb_init(&mut self, charge: ObjectSlot, target: ObjectSlot, bomber: ObjectSlot) {
@@ -6952,11 +6982,17 @@ impl SimApi for SimContext {
     }
 
     fn grant_upgrade(&mut self, owner: ObjectSlot, upgrade_name: &str, record_stats: Bool) {
-        let Some((upgrade_type, upgrade_mask)) = self
+        let Some((upgrade_type, upgrade_mask, classification)) = self
             .rules
             .upgrade_center
             .find_upgrade(upgrade_name, &mut self.rules.name_keys)
-            .map(|ut| (ut.upgrade_type(), ut.upgrade_mask().clone()))
+            .map(|ut| {
+                (
+                    ut.upgrade_type(),
+                    ut.upgrade_mask().clone(),
+                    ut.academy_classification_type(),
+                )
+            })
         else {
             return;
         };
@@ -6995,6 +7031,8 @@ impl SimApi for SimContext {
             self.update_upgrade_modules(owner);
         }
         if record_stats != FALSE {
+            // `AcademyStats::recordUpgrade`, granted.
+            self.academy(team_id).record_upgrade(classification, TRUE);
             self.world
                 .upgrades_recorded
                 .push((team_id, upgrade_name.to_owned()));
@@ -7416,11 +7454,9 @@ impl SimApi for SimContext {
     }
 
     fn add_player_money(&mut self, team_id: TeamId, amount: Int) -> Int {
-        let entry = self.world.player_money.entry(team_id).or_insert(0);
-        let cur = *entry as i64;
-        let next = (cur + amount as i64).max(0).min(u32::MAX as i64);
-        *entry = next as UnsignedInt;
-        (next - cur) as Int
+        // The same `Money::deposit`; a negative amount converts as in C++.
+        self.deposit_money(team_id, amount as UnsignedInt);
+        amount
     }
 
     fn withdraw_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) -> UnsignedInt {
@@ -8416,6 +8452,12 @@ impl SimApi for SimContext {
     }
 
     fn capture_object(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        // `Player::becomingTeamMember(obj, false)`, while the old team still controls it.
+        if let Some(old) = self.world.objects.get(owner).map(|o| o.team_id) {
+            if old != new_team {
+                self.adjust_team_power(owner, old, FALSE);
+            }
+        }
         let Some((old_team, beh_slots)) = self.world.objects.get_mut(owner).and_then(|obj| {
             if obj.team_id == new_team {
                 return None;
@@ -8439,6 +8481,7 @@ impl SimApi for SimContext {
         }
         self.world.team_member_prepend(new_team, owner);
         // `Player::becomingTeamMember(obj, true)`, before `onCapture`.
+        self.adjust_team_power(owner, new_team, TRUE);
         self.award_capture_bonus(owner);
         battle_plan_update::battle_plan_team_member(self, new_team, owner, TRUE);
         if old_team == TeamId::INVALID {
@@ -8446,6 +8489,7 @@ impl SimApi for SimContext {
         }
         self.idle_on_capture(owner, old_team, new_team);
         *self.world.player_captured_objects.entry(new_team).or_insert(0) += 1;
+        self.record_object_captured(owner, new_team);
         for ms in beh_slots {
             if self.world.modules.is_alive(ms) {
                 let _ = self.dispatch_module(ms, |m, sim, ctx| {
@@ -8454,6 +8498,7 @@ impl SimApi for SimContext {
             }
         }
         self.handle_partition_cell_maintenance(owner);
+        self.clear_unsellable(owner);
     }
 
     fn set_crushed(&mut self, owner: ObjectSlot, front: Option<Bool>, back: Option<Bool>) {
@@ -9232,9 +9277,7 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        let player = self.player_index_for_team(team);
-        let count = self.world.vehicles_disguised.entry(player).or_insert(0);
-        *count = count.wrapping_add(1);
+        self.academy(team).record_vehicle_disguised();
     }
 
     fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot) {
@@ -9290,57 +9333,12 @@ impl SimApi for SimContext {
     }
 
     fn new_object_from_template(&mut self, name: &str, team: TeamId) -> Option<ObjectSlot> {
-        let mut tmpl = self.rules.thing_factory.find_template_id(name)?;
-        let variations = self
-            .rules
-            .thing_factory
-            .find_by_template_id_final(tmpl.0 as u16)
-            .map_or_else(Vec::new, |t| t.get_build_variations().to_vec());
-        if !variations.is_empty() {
-            let which = self.rng_logic_int(0, variations.len() as Int - 1);
-            if let Some(found) = variations
-                .get(which as usize)
-                .and_then(|n| self.rules.thing_factory.find_template_id(n))
-            {
-                tmpl = found;
-            }
-        }
-        Some(self.spawn_object(tmpl, team, Coord3D::default(), 0.0))
+        let tmpl = self.rules.thing_factory.find_template_id(name)?;
+        Some(self.factory_new_object_of(tmpl, team))
     }
 
-    fn on_unit_created(&mut self, _factory: ObjectSlot, unit: ObjectSlot) {
-        // The script engine and the AI player's `onUnitProduced` are unported.
-        let Some((team, tmpl, under_construction)) = self.world.objects.get(unit).map(|o| {
-            (
-                o.team_id,
-                o.thing.template_override(),
-                o.status.test(ObjectStatusType::UnderConstruction.as_i32()),
-            )
-        }) else {
-            return;
-        };
-        let Some(t) = tmpl.get_final(&self.rules.thing_factory) else {
-            return;
-        };
-        let id = UnsignedInt::from(t.get_template_id());
-        let desc = ScoreTemplateDesc {
-            id,
-            name: t.get_name().to_owned(),
-            kind_of: t.kindof.clone(),
-            equivalent_root_id: t.reskinned_from_id.map_or(id, UnsignedInt::from),
-        };
-        let player = self.player_index_for_team(team);
-        let view = ScoreObjectView {
-            template: &desc,
-            controlling_player_idx: player,
-            under_construction,
-        };
-        // `GameLogic::isScoringEnabled` is only cleared by scripts, which are unported.
-        self.world
-            .score_keepers
-            .entry(player)
-            .or_default()
-            .add_object_built(&view, TRUE);
+    fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+        self.unit_created(factory, unit);
     }
 
     fn exit_object_by_budding(
@@ -9686,9 +9684,7 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        let player = self.player_index_for_team(team);
-        let count = self.world.cleared_garrisons.entry(player).or_default();
-        *count = count.wrapping_add(1);
+        self.academy(team).record_cleared_garrisoned_building();
     }
 
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
@@ -10130,11 +10126,7 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        self.world
-            .player_academy
-            .entry(team)
-            .or_default()
-            .record_battle_plan_selected();
+        self.academy(team).record_battle_plan_selected();
     }
 
     fn with_special_power_module(

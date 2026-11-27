@@ -215,6 +215,7 @@ impl SalvageCrateCollide {
         if money > 0 {
             if let Some(other_team) = sim.object(other).map(|o| o.team_id) {
                 let _ = sim.add_player_money(other_team, money);
+                sim.add_money_earned(other_team, money);
             }
         }
     }

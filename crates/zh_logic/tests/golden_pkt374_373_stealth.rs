@@ -298,7 +298,7 @@ impl Scene {
             }
             out.push(s);
         }
-        let count = |p: i32| sim.world.vehicles_disguised.get(&p).copied().unwrap_or(0);
+        let count = |p: i32| sim.world.player_academy.get(&p).map_or(0, |a| a.vehicles_disguised);
         out.push(format!(
             "{} {} {}",
             sim.world.rng.get_game_logic_random_seed_crc(),
@@ -409,6 +409,8 @@ fn apply(sim: &mut SimContext, sc: &Scene, frame: &mut u32, code: u32, a: u32, b
             if let Some(p) = record.physics.as_mut() {
                 let v = VELOCITIES[a as usize];
                 p.vel = Coord3D::new(v[0], v[1], v[2]);
+                // As the harness does: the cached magnitude is stale.
+                p.vel_mag.set(-1.0);
             }
         }
         4 => {

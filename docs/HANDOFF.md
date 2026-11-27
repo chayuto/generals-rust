@@ -34,6 +34,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | after `5da9d25` | `PKT-354 ProductionUpdate` |
 | after `4fc8921` | AI plan slice S0: logic frame step, resident AI seams, frame oracle; two disabled-state differences fixed |
 | after `8eabb2f` | `PKT-286 ParkingPlaceBehavior`, `PKT-341`, `PKT-350`, `PKT-309 BattlePlanUpdate`; `Anti* = No` now clears the weapon bit |
+| after `889e46a` | Joined oracle over ported modules; fixed energy counting, split score and academy tables, money deposits, capture records and the stealth velocity cache |
 | `047c3d6`, `86b3415` | Sleepy-update heap swapped into the engine; fixed the Rust finish step, which repaired the heap where C++ does not |
 | `d3aa737` and next | Engine swap build, replay check, CRC baseline; fixed the tracker FFI calling back before storing the new level |
 

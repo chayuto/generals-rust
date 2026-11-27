@@ -425,3 +425,13 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 - **Where:** `Object::setDisabledUntil`.
 - **What happens:** `pauseAllSpecialPowers(TRUE)` runs for every newly set type, even when the frame is not in the future and the object is not disabled. The port pauses on the disabled edge only, which differs for a zero duration or a second disable type.
 - **Guard:** none; `gen_pkt341_350_309_support.cpp` keeps zero paralyze times away from objects with special powers.
+### A stand-in AI must still behave like `AIUpdateInterface` towards the engine
+
+- **Where:** `AIUpdateInterface`'s constructor and `processCollision`; used by `gen_joins_modules.cpp`.
+- **What happens:** the constructor ends with `setWakeFrame(UPDATE_SLEEP_NONE)`, so the AI first runs a frame after the object appears. A stand-in that wakes at the creation frame sits at the sleepy heap's root and hides modules created during an update (see the rebalance quirk above). `processCollision` is not routed through `aiDoCommand`: overlapping units send themselves `aiMoveToPosition`.
+- **How the oracle handles it:** the C++ stand-in overrides `processCollision`; the Rust stand-in calls `set_wake_frame` in `on_construct`.
+
+### `getVelocityMagnitude` writes saved state
+
+- **Where:** `PhysicsBehavior::getVelocityMagnitude` (mutable `m_velMag`), called by `StealthUpdate` for `MOVING`.
+- **What happens:** the const getter fills a cache that `PhysicsBehavior::xfer` saves, so asking changes the save. A harness that writes `m_vel` directly must set `m_velMag = -1`, and so must the Rust test.

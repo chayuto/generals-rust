@@ -389,6 +389,7 @@ pub fn sabotage_steal_cash(
         if withdrawn > 0 {
             let deposit = withdrawn.min(Int::MAX as UnsignedInt) as Int;
             let _ = sim.add_player_money(owner_team, deposit);
+            sim.add_money_earned(owner_team, deposit);
         }
     }
 }

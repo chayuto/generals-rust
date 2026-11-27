@@ -17,6 +17,7 @@ use crate::modules::module::{
     BehaviorModule, CommandSourceType, ModuleData, StealthFacet, StealthParams, UpdateFacet,
 };
 use crate::modules::module_factory::ModuleParseContext;
+use crate::modules::update::physics_update;
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSTEALTHED;
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
 use crate::rules::kind_of::KindOfType;
@@ -27,7 +28,7 @@ use crate::rules::object_status_types::{
 use crate::sim::{SimApi, SimView};
 use std::any::Any;
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
-use zh_common::math::{gm_sqrtf, PI};
+use zh_common::math::PI;
 use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UpdateSleepTime, FALSE, TRUE,
 };
@@ -427,11 +428,12 @@ impl StealthUpdate {
             return false;
         }
 
-        if flags & STEALTH_NOT_WHILE_MOVING != 0 && sim.has_physics(owner) != FALSE {
-            let v = sim.physics_velocity(owner);
-            if gm_sqrtf(v.x * v.x + v.y * v.y + v.z * v.z) > self.data.stealth_speed {
-                return false;
-            }
+        // `getVelocityMagnitude`, which fills the magnitude `PhysicsBehavior` saves.
+        if flags & STEALTH_NOT_WHILE_MOVING != 0
+            && sim.has_physics(owner) != FALSE
+            && physics_update::velocity_magnitude(sim, owner) > self.data.stealth_speed
+        {
+            return false;
         }
 
         !sim.object(owner)

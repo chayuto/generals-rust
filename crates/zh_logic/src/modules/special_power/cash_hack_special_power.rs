@@ -167,6 +167,7 @@ impl SpecialPowerBehaviorImpl for CashHackSpecialPower {
         if cash > 0 {
             let stolen = sim.withdraw_player_money(target_team, cash);
             let _ = sim.add_player_money(self_team, stolen as Int);
+            sim.add_money_earned(self_team, stolen as Int);
         }
     }
 }

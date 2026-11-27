@@ -474,18 +474,59 @@ impl SimContext {
         }
     }
 
-    fn academy(&mut self, team: TeamId) -> &mut AcademyStats {
-        self.world.player_academy.entry(team).or_default()
+    /// `getControllingPlayer()->getAcademyStats()` of a team.
+    pub(super) fn academy(&mut self, team: TeamId) -> &mut AcademyStats {
+        let player = self.player_index_for_team(team);
+        self.world.player_academy.entry(player).or_default()
     }
 
-    fn score_keeper(&mut self, team: TeamId) -> &mut ScoreKeeper {
+    /// `getControllingPlayer()->getScoreKeeper()` of a team.
+    pub(super) fn score_keeper(&mut self, team: TeamId) -> &mut ScoreKeeper {
+        let player = self.player_index_for_team(team);
         self.world
-            .player_score_keepers
-            .entry(team)
+            .score_keepers
+            .entry(player)
             .or_insert_with(ScoreKeeper::new)
     }
 
-    /// `Money::deposit` without income tracking.
+    /// What the score keeper counts an object by.
+    fn score_desc(&self, owner: ObjectSlot) -> Option<ScoreTemplateDesc> {
+        let t = self.object_template(owner)?;
+        let id = u32::from(t.get_template_id());
+        Some(ScoreTemplateDesc {
+            id,
+            name: t.get_name().to_owned(),
+            kind_of: t.kindof.clone(),
+            equivalent_root_id: t.reskinned_from_id.map_or(id, u32::from),
+        })
+    }
+
+    /// `getScoreKeeper()->addObjectCaptured` of `Object::onCapture`.
+    pub(super) fn record_object_captured(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        let Some(under_construction) = self
+            .world
+            .objects
+            .get(owner)
+            .map(|o| o.status.test(ObjectStatusType::UnderConstruction.as_i32()))
+        else {
+            return;
+        };
+        let Some(desc) = self.score_desc(owner) else {
+            return;
+        };
+        let scoring = self.world.scoring_enabled;
+        let controlling_player_idx = self.player_index_for_team(new_team);
+        self.score_keeper(new_team).add_object_captured(
+            &ScoreObjectView {
+                template: &desc,
+                controlling_player_idx,
+                under_construction,
+            },
+            scoring,
+        );
+    }
+
+    /// `Money::deposit`: the balance and the academy income record.
     pub(super) fn deposit_money(&mut self, team: TeamId, amount: UnsignedInt) {
         if amount == 0 {
             return;
@@ -601,12 +642,7 @@ impl SimContext {
         }) else {
             return;
         };
-        let Some(desc) = self.object_template(unit).map(|t| ScoreTemplateDesc {
-            id: u32::from(t.get_template_id()),
-            name: t.name_string.clone(),
-            kind_of: t.kindof.clone(),
-            equivalent_root_id: u32::from(t.get_template_id()),
-        }) else {
+        let Some(desc) = self.score_desc(unit) else {
             return;
         };
         let scoring = self.world.scoring_enabled;

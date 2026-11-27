@@ -163,6 +163,7 @@ impl CrateCollideImpl for MoneyCrateCollide {
         money = money.wrapping_add(boost as UnsignedInt);
         if let Some(other_team) = sim.object(other).map(|o| o.team_id) {
             let _ = sim.add_player_money(other_team, money as Int);
+            sim.add_money_earned(other_team, money as Int);
         }
         TRUE
     }

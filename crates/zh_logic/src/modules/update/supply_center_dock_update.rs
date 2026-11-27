@@ -3,7 +3,6 @@
 //! Packet: `packets/phase5/PKT-378_SupplyCenterDockUpdate.md`.
 //! Golden test: `crates/zh_logic/tests/golden_pkt320_381_378_363_docks.rs`.
 //!
-//! The floating cash text is client only and left out.
 
 use super::dock_update::{
     dock_behavior_common, dock_module_data, DockUpdateModuleData, DockUpdateState,
@@ -108,6 +107,13 @@ impl DockFacet for SupplyCenterDockUpdate {
             let _ = sim.add_player_money(team, value as Int);
             sim.add_money_earned(team, value as Int);
             self.grant_stealth(sim, owner, docker);
+        }
+        // The cash text over the docker, at ground height.
+        if value > 0 && sim.object_is_logically_visible(owner) != FALSE {
+            if let Some(mut pos) = sim.object(docker).map(|o| *o.thing.get_position()) {
+                pos.z = sim.terrain().get_ground_height(pos.x, pos.y, None);
+                sim.add_floating_money_text(owner, &pos, value as Int);
+            }
         }
         FALSE
     }

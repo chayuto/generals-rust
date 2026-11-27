@@ -991,10 +991,9 @@ fn run_projectile(sim: &mut SimContext, v: &Vector) {
         for player in 0..3 {
             row += &sim
                 .world
-                .cleared_garrisons
+                .player_academy
                 .get(&player)
-                .copied()
-                .unwrap_or(0)
+                .map_or(0, |a| a.cleared_garrisoned_buildings)
                 .to_string();
         }
         row += &format!(" {} {}", take_fx(sim), seed_of(sim));

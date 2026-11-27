@@ -190,8 +190,8 @@ End
 
     let team = TeamId(1);
     let o = sim.spawn_object(id_of("PPPlant", &sim), team, Coord3D::default(), 0.0);
-    // Base EnergyProduction (10) vs bonus (7):
-    sim.adjust_player_power(team, 10, TRUE);
+    // Base EnergyProduction (10), counted when the object joins its team, vs bonus (7):
+    assert_eq!(sim.player_energy_production(team), 10);
     sim.grant_upgrade(o, "UpgA", FALSE);
     assert_eq!(sim.player_energy_production(team), 17);
 
