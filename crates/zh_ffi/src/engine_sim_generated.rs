@@ -48,6 +48,7 @@ use zh_logic::object::thing_template::{
     DefaultModuleMaskLookup, GameTextLookup, ThingTemplate, ThingTemplateParseContext,
 };
 use zh_logic::object::weapon::WeaponStore;
+use zh_logic::object::weapon_effects::WeaponStoreState;
 use zh_logic::object::weapon_set::{
     CanAttackResult, WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType,
     WEAPONSLOT_COUNT,
@@ -70,6 +71,8 @@ use zh_logic::rules::upgrade::{UpgradeCenter, UpgradeMaskType, UpgradeType};
 use zh_logic::scheduler::{
     should_process_disabled_update, ScheduleStore, SleepyUpdateHeap, SleepyUpdatePhase,
 };
+use zh_logic::modules::die::special_power_completion_die::SpecialPowerCompletionDie;
+use zh_logic::modules::update::projectile_stream_update::ProjectileStreamUpdate;
 use zh_logic::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use zh_logic::spatial::crate_system::CrateSystem;
 use zh_logic::spatial::partition_collide::{
@@ -78,7 +81,9 @@ use zh_logic::spatial::partition_collide::{
 use zh_logic::spatial::partition_grid::{PartitionGrid, PartitionObject};
 use zh_logic::modules::module::{SpecialPowerCaller, SpecialPowerFacet};
 use zh_logic::modules::update::horde_update::TerrainDecalType;
-use zh_logic::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
+use zh_logic::spatial::partition_query::{
+    measure_distance_squared, DistanceCalculationType, IterOrderType, QueryCenter,
+};
 use zh_logic::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
@@ -391,6 +396,15 @@ impl SimView for EngineSim<'_> {
     }
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
         not_wired("player_mask")
+    }
+    fn partition_distance_squared( &self, owner: ObjectSlot, other: Option<ObjectSlot>, pos: &Coord3D, rule: DistanceCalculationType, ) -> Real {
+        not_wired("partition_distance_squared")
+    }
+    fn damage_candidates(&self, pos: &Coord3D, radius: Real) -> Vec<(ObjectSlot, Real)> {
+        not_wired("damage_candidates")
+    }
+    fn projectile_launcher_id(&self, projectile: ObjectSlot) -> Option<ObjectId> {
+        not_wired("projectile_launcher_id")
     }
     fn ai_is_in_dead_state(&self, owner: ObjectSlot) -> Bool {
         not_wired("ai_is_in_dead_state")
@@ -1088,8 +1102,17 @@ impl SimApi for EngineSim<'_> {
     fn reveal_map_for_player(&mut self, team_id: TeamId) {
         not_wired("reveal_map_for_player")
     }
-    fn fire_weapon_template( &mut self, owner: ObjectSlot, weapon_name: &str, target: Option<ObjectSlot>, target_pos: &Coord3D, ) {
-        not_wired("fire_weapon_template")
+    fn record_weapon_fire( &mut self, owner: ObjectSlot, weapon_name: &str, target: Option<ObjectSlot>, target_pos: &Coord3D, detonation: Option<UnsignedInt>, ) -> Bool {
+        not_wired("record_weapon_fire")
+    }
+    fn weapon_store_state(&mut self) -> &mut WeaponStoreState {
+        not_wired("weapon_store_state")
+    }
+    fn notify_special_power_completion(&mut self, owner: ObjectSlot) -> Bool {
+        not_wired("notify_special_power_completion")
+    }
+    fn add_to_projectile_stream( &mut self, stream: ObjectSlot, source_pos: &Coord3D, source_id: ObjectId, projectile_id: ObjectId, victim_id: ObjectId, victim_pos: &Coord3D, ) {
+        not_wired("add_to_projectile_stream")
     }
     fn create_crate_at( &mut self, crate_tmpl_name: &str, killer: Option<ObjectSlot>, victim: ObjectSlot, ) {
         not_wired("create_crate_at")
@@ -1381,9 +1404,6 @@ impl SimApi for EngineSim<'_> {
     }
     fn pathfinder_remove_wall(&mut self, owner: ObjectSlot) {
         not_wired("pathfinder_remove_wall")
-    }
-    fn fire_projectile_detonation(&mut self, owner: ObjectSlot, weapon_name: &str, pos: &Coord3D, bonus_flags: UnsignedInt) {
-        not_wired("fire_projectile_detonation")
     }
     fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {
         not_wired("record_cleared_garrisoned_building")

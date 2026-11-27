@@ -149,6 +149,17 @@ fn measure(
     }
 }
 
+/// `PartitionManager::getDistanceSquared` between an object and another object or, when the
+/// other has no geometry, a bare position.
+pub fn measure_distance_squared(
+    rule: DistanceCalculationType,
+    center_pos: &Coord3D,
+    center: Option<&PartitionObject>,
+    other: &PartitionObject,
+) -> Real {
+    measure(rule, center_pos, center, other).0
+}
+
 /// Takes `total` off a distance given squared. Returns the new squared distance
 /// and the factor for the vector.
 pub(crate) fn shrink(dist_sqr: Real, total: Real) -> (Real, Real) {

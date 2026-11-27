@@ -53,6 +53,7 @@ use crate::object::thing_template::{
     DefaultModuleMaskLookup, GameTextLookup, ThingTemplate, ThingTemplateParseContext,
 };
 use crate::object::weapon::WeaponStore;
+use crate::object::weapon_effects::WeaponStoreState;
 use crate::object::weapon_set::{
     CanAttackResult, WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType,
     WEAPONSLOT_COUNT,
@@ -75,6 +76,8 @@ use crate::rules::upgrade::{UpgradeCenter, UpgradeMaskType, UpgradeType};
 use crate::scheduler::{
     should_process_disabled_update, ScheduleStore, SleepyUpdateHeap, SleepyUpdatePhase,
 };
+use crate::modules::die::special_power_completion_die::SpecialPowerCompletionDie;
+use crate::modules::update::projectile_stream_update::ProjectileStreamUpdate;
 use crate::spatial::cave_system::{CaveSystem, CaveTunnelTracker};
 use crate::spatial::crate_system::CrateSystem;
 use crate::spatial::partition_collide::{
@@ -83,7 +86,9 @@ use crate::spatial::partition_collide::{
 use crate::spatial::partition_grid::{PartitionGrid, PartitionObject};
 use crate::modules::module::{SpecialPowerCaller, SpecialPowerFacet};
 use crate::modules::update::horde_update::TerrainDecalType;
-use crate::spatial::partition_query::{DistanceCalculationType, IterOrderType, QueryCenter};
+use crate::spatial::partition_query::{
+    measure_distance_squared, DistanceCalculationType, IterOrderType, QueryCenter,
+};
 use crate::spatial::partition_shroud::{ShroudStatusStoreRestore, SightingInfo};
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::ini::{IniError, IniReader};
@@ -428,6 +433,15 @@ pub trait ClientSink: Send {
     fn on_terrain_decal_size(&mut self, _id: ObjectId, _x: Real, _y: Real) {}
     /// `Drawable::setTerrainDecalFadeTarget`. A drawable ignores the target it has.
     fn on_terrain_decal_fade_target(&mut self, _id: ObjectId, _target: Real, _rate: Real) {}
+    /// The fire FX and recoil of `fireWeaponTemplate`; the client looks the weapon up.
+    fn on_weapon_fire(
+        &mut self,
+        _source: ObjectId,
+        _weapon_name: &str,
+        _victim_pos: &Coord3D,
+        _is_detonation: Bool,
+    ) {
+    }
     /// `LaserUpdate::initLaser` on the drawable of `laser`.
     fn on_laser_init(
         &mut self,
@@ -1238,6 +1252,18 @@ pub trait SimView {
     fn neutral_team_id(&self) -> TeamId;
     fn player_index(&self, team_id: TeamId) -> Int;
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort;
+    /// `PartitionManager::getDistanceSquared` from `owner` to `other`, or to `pos`.
+    fn partition_distance_squared(
+        &self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+        pos: &Coord3D,
+        rule: DistanceCalculationType,
+    ) -> Real;
+    /// `iterateObjectsInRange(pos, radius, FROM_BOUNDINGSPHERE_3D)` with squared distances.
+    fn damage_candidates(&self, pos: &Coord3D, radius: Real) -> Vec<(ObjectSlot, Real)>;
+    /// `ProjectileUpdateInterface::projectileGetLauncherID`, if it has that interface.
+    fn projectile_launcher_id(&self, projectile: ObjectSlot) -> Option<ObjectId>;
     fn ai_is_in_dead_state(&self, owner: ObjectSlot) -> Bool;
     fn object_ai_enter_target(&self, owner: ObjectSlot) -> Option<ObjectSlot>;
     fn object_height_above_terrain(&self, owner: ObjectSlot) -> Real;
@@ -1774,12 +1800,30 @@ pub trait SimApi: SimView {
         add: Bool,
     );
     fn reveal_map_for_player(&mut self, team_id: TeamId);
-    fn fire_weapon_template(
+    /// Notes a shot where `Weapon::privateFireWeapon` calls `fireWeaponTemplate`. `detonation`
+    /// carries the bonus flags of a projectile's warhead. `FALSE` means the template is not to
+    /// be run: differential suites whose oracle replaces `fireWeaponTemplate` ask for that.
+    fn record_weapon_fire(
         &mut self,
         owner: ObjectSlot,
         weapon_name: &str,
         target: Option<ObjectSlot>,
         target_pos: &Coord3D,
+        detonation: Option<UnsignedInt>,
+    ) -> Bool;
+    /// The delayed damage queue and historic damage of `WeaponStore`.
+    fn weapon_store_state(&mut self) -> &mut WeaponStoreState;
+    /// `findSpecialPowerCompletionDie` and its `notifyScriptEngine`. `FALSE` if there is none.
+    fn notify_special_power_completion(&mut self, owner: ObjectSlot) -> Bool;
+    /// `ProjectileStreamUpdate::setPosition` then `addProjectile` on `stream`.
+    fn add_to_projectile_stream(
+        &mut self,
+        stream: ObjectSlot,
+        source_pos: &Coord3D,
+        source_id: ObjectId,
+        projectile_id: ObjectId,
+        victim_id: ObjectId,
+        victim_pos: &Coord3D,
     );
     fn create_crate_at(
         &mut self,
@@ -2001,8 +2045,6 @@ pub trait SimApi: SimView {
     fn pathfinder_create_wall(&mut self, owner: ObjectSlot);
     /// `Pathfinder::removeWallFromMyFootprint`.
     fn pathfinder_remove_wall(&mut self, owner: ObjectSlot);
-    /// `fireWeaponTemplate` with `isProjectileDetonation`, which is unported: recorded.
-    fn fire_projectile_detonation(&mut self, owner: ObjectSlot, weapon_name: &str, pos: &Coord3D, bonus_flags: UnsignedInt);
     /// `AcademyStats::recordClearedGarrisonedBuilding` on the controlling player.
     fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot);
     fn physics_set_is_in_free_fall(&mut self, owner: ObjectSlot, in_free_fall: Bool);
@@ -2294,6 +2336,9 @@ pub struct SimWorld {
     pub pathfind_walls: BTreeSet<ObjectId>,
     /// Unported detonation damage: source, weapon, position, extra bonus flags.
     pub projectile_detonations: Vec<(ObjectId, String, Coord3D, UnsignedInt)>,
+    /// Set only by differential suites whose C++ oracle replaces `fireWeaponTemplate`.
+    pub weapon_templates_stubbed: bool,
+    pub weapon_store_state: WeaponStoreState,
     /// `Player::m_color` by team.
     pub team_colors: BTreeMap<TeamId, Int>,
     /// `PlayerTemplate::getSide` by team.
@@ -2441,6 +2486,8 @@ impl SimWorld {
             stealth_detected_events: Vec::new(),
             pathfind_walls: BTreeSet::new(),
             projectile_detonations: Vec::new(),
+            weapon_templates_stubbed: false,
+            weapon_store_state: WeaponStoreState::default(),
             team_colors: BTreeMap::new(),
             team_sides: BTreeMap::new(),
             slaved_die_notifications: Vec::new(),
@@ -3963,6 +4010,40 @@ impl SimContext {
     /// armor/scalar/subdual adjustment, [`ModuleSidecar::Body`] immediate sync, and typed
     /// [`DeferredSelfOp`] queueing.
     pub fn attempt_damage_on(&mut self, target: ObjectSlot, dmg: &mut DamageInfo) {
+        self.attempt_body_damage(target, dmg);
+        self.apply_shock_wave(target, dmg);
+    }
+
+    /// The shock wave half of `Object::attemptDamage`: units on the ground are thrown.
+    fn apply_shock_wave(&mut self, target: ObjectSlot, dmg: &DamageInfo) {
+        let input = &dmg.input;
+        if !(input.shock_wave_amount > 0.0 && input.shock_wave_radius > 0.0) {
+            return;
+        }
+        let airborne = self.world.objects.get(target).is_none_or(|o| {
+            o.status.test(ObjectStatusType::AirborneTarget.as_i32()) != FALSE
+        });
+        if airborne
+            || self.has_physics(target) == FALSE
+            || self.object_is_kind_of(target, KindOfType::Projectile) != FALSE
+        {
+            return;
+        }
+        let ratio = input.shock_wave_vector.length() / input.shock_wave_radius;
+        // `min(1.0f, ratio)`.
+        let from_center = if 1.0 < ratio { 1.0 } else { ratio };
+        let taper = from_center * (1.0 - input.shock_wave_taper_off);
+        let mut force = input.shock_wave_vector;
+        force.normalize();
+        force.scale(input.shock_wave_amount * (1.0 - taper));
+        force.z = force.length();
+        physics_update::apply_shock(self, target, &force);
+        physics_update::apply_random_rotation(self, target);
+        physics_update::set_stunned(self, target);
+        self.set_model_condition_state(target, ModelConditionFlagType::StunnedFlailing);
+    }
+
+    fn attempt_body_damage(&mut self, target: ObjectSlot, dmg: &mut DamageInfo) {
         let Some(body_slot) = self.world.objects.get(target).and_then(|o| o.body_slot) else {
             return;
         };
@@ -5588,6 +5669,59 @@ impl SimView for SimContext {
 
     fn player_index(&self, team_id: TeamId) -> Int {
         self.player_index_for_team(team_id)
+    }
+
+    fn partition_distance_squared(
+        &self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+        pos: &Coord3D,
+        rule: DistanceCalculationType,
+    ) -> Real {
+        let info = |slot| {
+            let id = self.world.objects.id_of(slot)?;
+            partition_object(&self.world.objects, &self.rules.thing_factory, id)
+        };
+        let Some(from) = info(owner) else { return 0.0 };
+        match other.and_then(info) {
+            Some(to) => measure_distance_squared(rule, &from.pos, Some(&from), &to),
+            None => {
+                // A bare position has no geometry.
+                let point = PartitionObject {
+                    id: ObjectId::INVALID,
+                    pos: *pos,
+                    angle: 0.0,
+                    geometry: GeometryInfo::new(GeometryType::Sphere, TRUE, 0.0, 0.0, 0.0),
+                    is_immobile: FALSE,
+                    build_cost: 0,
+                };
+                measure_distance_squared(rule, &from.pos, Some(&from), &point)
+            }
+        }
+    }
+
+    fn damage_candidates(&self, pos: &Coord3D, radius: Real) -> Vec<(ObjectSlot, Real)> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        self.world
+            .partition
+            .iterate_objects_in_range(
+                QueryCenter::Position(*pos),
+                radius,
+                DistanceCalculationType::FromBoundingSphere3d,
+                IterOrderType::Fastest,
+                &|id| partition_object(objects, factory, id),
+                &mut |_| true,
+            )
+            .into_iter()
+            .filter_map(|(id, d)| objects.slot_by_id(id).map(|s| (s, d)))
+            .collect()
+    }
+
+    fn projectile_launcher_id(&self, projectile: ObjectSlot) -> Option<ObjectId> {
+        let ms = self.world.objects.get(projectile)?.projectile_slot?;
+        let module = self.world.modules.payload(ms)?;
+        module.as_projectile().map(|p| p.projectile_get_launcher_id())
     }
 
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
@@ -8468,18 +8602,89 @@ impl SimApi for SimContext {
         }
     }
 
-    fn fire_weapon_template(
+    fn record_weapon_fire(
         &mut self,
         owner: ObjectSlot,
         weapon_name: &str,
         target: Option<ObjectSlot>,
         target_pos: &Coord3D,
-    ) {
+        detonation: Option<UnsignedInt>,
+    ) -> Bool {
         let owner_id = self.world.objects.id_of(owner).unwrap_or(ObjectId::INVALID);
-        let target_id = target.and_then(|s| self.world.objects.id_of(s));
-        self.world
-            .weapon_fires
-            .push((owner_id, weapon_name.to_owned(), target_id, *target_pos));
+        match detonation {
+            Some(flags) => self.world.projectile_detonations.push((
+                owner_id,
+                weapon_name.to_owned(),
+                *target_pos,
+                flags,
+            )),
+            None => {
+                let target_id = target.and_then(|s| self.world.objects.id_of(s));
+                self.world.weapon_fires.push((
+                    owner_id,
+                    weapon_name.to_owned(),
+                    target_id,
+                    *target_pos,
+                ));
+            }
+        }
+        Bool::from(!self.world.weapon_templates_stubbed)
+    }
+
+    fn weapon_store_state(&mut self) -> &mut WeaponStoreState {
+        &mut self.world.weapon_store_state
+    }
+
+    fn notify_special_power_completion(&mut self, owner: ObjectSlot) -> Bool {
+        let die = self.world.objects.get(owner).and_then(|o| {
+            o.behaviors
+                .iter()
+                .filter(|(_, m)| m.contains(FacetMask::DIE))
+                .map(|&(s, _)| s)
+                .find(|&s| {
+                    self.world.modules.payload(s).is_some_and(|m| {
+                        m.as_any()
+                            .is_some_and(|a| a.is::<SpecialPowerCompletionDie>())
+                    })
+                })
+        });
+        let Some(die) = die else { return FALSE };
+        let _ = self.dispatch_module(die, |m, sim, ctx| {
+            if let Some(d) = m.as_die_mut() {
+                d.notify_script_engine(sim, ctx);
+            }
+        });
+        TRUE
+    }
+
+    fn add_to_projectile_stream(
+        &mut self,
+        stream: ObjectSlot,
+        source_pos: &Coord3D,
+        source_id: ObjectId,
+        projectile_id: ObjectId,
+        victim_id: ObjectId,
+        victim_pos: &Coord3D,
+    ) {
+        let slots: Vec<ModuleSlot> = self.world.objects.get(stream).map_or_else(Vec::new, |o| {
+            o.behaviors.iter().map(|&(s, _)| s).collect()
+        });
+        for ms in slots {
+            let found = self.dispatch_module(ms, |m, sim, ctx| {
+                let Some(update) = m
+                    .as_any_mut()
+                    .and_then(|a| a.downcast_mut::<ProjectileStreamUpdate>())
+                else {
+                    return false;
+                };
+                update.set_position(sim, ctx, source_pos);
+                update.add_projectile(source_id, projectile_id, victim_id, Some(victim_pos));
+                true
+            });
+            if found == Ok(true) {
+                break;
+            }
+        }
     }
 
     fn create_crate_at(
@@ -9869,22 +10074,6 @@ impl SimApi for SimContext {
         }
     }
 
-    fn fire_projectile_detonation(
-        &mut self,
-        owner: ObjectSlot,
-        weapon_name: &str,
-        pos: &Coord3D,
-        bonus_flags: UnsignedInt,
-    ) {
-        let owner_id = self.world.objects.id_of(owner).unwrap_or(ObjectId::INVALID);
-        self.world.projectile_detonations.push((
-            owner_id,
-            weapon_name.to_owned(),
-            *pos,
-            bonus_flags,
-        ));
-    }
-
     fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
@@ -11049,6 +11238,24 @@ impl SimView for MockSimApi {
 
     fn player_index(&self, team_id: TeamId) -> Int {
         self.ctx.player_index(team_id)
+    }
+
+    fn partition_distance_squared(
+        &self,
+        owner: ObjectSlot,
+        other: Option<ObjectSlot>,
+        pos: &Coord3D,
+        rule: DistanceCalculationType,
+    ) -> Real {
+        self.ctx.partition_distance_squared(owner, other, pos, rule)
+    }
+
+    fn damage_candidates(&self, pos: &Coord3D, radius: Real) -> Vec<(ObjectSlot, Real)> {
+        self.ctx.damage_candidates(pos, radius)
+    }
+
+    fn projectile_launcher_id(&self, projectile: ObjectSlot) -> Option<ObjectId> {
+        self.ctx.projectile_launcher_id(projectile)
     }
 
     fn player_mask(&self, team_id: TeamId) -> UnsignedShort {
@@ -12224,15 +12431,43 @@ impl SimApi for MockSimApi {
         self.ctx.reveal_map_for_player(team_id);
     }
 
-    fn fire_weapon_template(
+    fn record_weapon_fire(
         &mut self,
         owner: ObjectSlot,
         weapon_name: &str,
         target: Option<ObjectSlot>,
         target_pos: &Coord3D,
-    ) {
+        detonation: Option<UnsignedInt>,
+    ) -> Bool {
         self.ctx
-            .fire_weapon_template(owner, weapon_name, target, target_pos);
+            .record_weapon_fire(owner, weapon_name, target, target_pos, detonation)
+    }
+
+    fn weapon_store_state(&mut self) -> &mut WeaponStoreState {
+        self.ctx.weapon_store_state()
+    }
+
+    fn notify_special_power_completion(&mut self, owner: ObjectSlot) -> Bool {
+        self.ctx.notify_special_power_completion(owner)
+    }
+
+    fn add_to_projectile_stream(
+        &mut self,
+        stream: ObjectSlot,
+        source_pos: &Coord3D,
+        source_id: ObjectId,
+        projectile_id: ObjectId,
+        victim_id: ObjectId,
+        victim_pos: &Coord3D,
+    ) {
+        self.ctx.add_to_projectile_stream(
+            stream,
+            source_pos,
+            source_id,
+            projectile_id,
+            victim_id,
+            victim_pos,
+        );
     }
 
     fn create_crate_at(
@@ -12655,10 +12890,6 @@ impl SimApi for MockSimApi {
 
     fn pathfinder_remove_wall(&mut self, owner: ObjectSlot) {
         self.ctx.pathfinder_remove_wall(owner);
-    }
-
-    fn fire_projectile_detonation(&mut self, owner: ObjectSlot, weapon_name: &str, pos: &Coord3D, bonus_flags: UnsignedInt) {
-        self.ctx.fire_projectile_detonation(owner, weapon_name, pos, bonus_flags);
     }
 
     fn record_cleared_garrisoned_building(&mut self, owner: ObjectSlot) {

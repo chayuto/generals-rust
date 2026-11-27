@@ -4,9 +4,9 @@
 //! owner's weapon set is fired on a copy which the caller writes back; the shared-reload updates
 //! that reach the weapon itself only restate values it already holds.
 //!
-//! `WeaponTemplate::fireWeaponTemplate` is unported: [`SimApi::fire_weapon_template`] is called
-//! where C++ calls it. Also unported: `DAMAGE_DEPLOY`'s assault order, `processRequestAssistance`
-//! and the victim effects of `DAMAGE_DISARM`.
+//! `WeaponTemplate::fireWeaponTemplate` and the damage it deals are in
+//! [`super::weapon_effects`]. Unported: `DAMAGE_DEPLOY`'s assault order,
+//! `processRequestAssistance` and the victim effects of `DAMAGE_DISARM`.
 //!
 //! Golden test: `crates/zh_logic/tests/golden_wp55_fire.rs`.
 
@@ -19,6 +19,7 @@ use super::weapon::{
     WEAPON_COLLIDE_ENEMIES, WEAPON_COLLIDE_PROJECTILES, WEAPON_COLLIDE_SHRUBBERY,
     WEAPON_COLLIDE_SMALL_MISSILES, WEAPON_COLLIDE_STRUCTURES, WEAPON_COLLIDE_WALLS,
 };
+use super::weapon_effects::{self, Shot};
 use super::weapon_set::WeaponSlotType;
 use crate::arena::ObjectSlot;
 use crate::gamelogic::global_data::{WeaponBonus, WeaponBonusField};
@@ -141,16 +142,29 @@ fn position_of(sim: &dyn SimView, slot: ObjectSlot) -> Coord3D {
         .unwrap_or_default()
 }
 
-/// `Weapon::privateFireWeapon`. Returns `TRUE` when the clip was reloaded by this shot.
-/// Exactly one of `victim` and `victim_pos` is given.
+/// What a shot is: aimed by the weapon's own rules, forced past the range checks, or the
+/// detonation of a projectile with the launcher's bonus flags.
+#[derive(Clone, Copy)]
+enum FireMode {
+    Normal,
+    IgnoreRanges,
+    Detonation(UnsignedInt),
+}
+
+/// `Weapon::privateFireWeapon`. Returns `TRUE` when the clip was reloaded by this shot, and
+/// the projectile it launched. Exactly one of `victim` and `victim_pos` is given.
 fn private_fire_weapon(
     weapon: &mut Weapon,
     sim: &mut dyn SimApi,
     owner: ObjectSlot,
     victim: Option<ObjectSlot>,
     victim_pos: Option<Coord3D>,
-    detonation: Option<UnsignedInt>,
-) -> Bool {
+    mode: FireMode,
+) -> (Bool, Option<ObjectSlot>) {
+    let detonation = match mode {
+        FireMode::Detonation(flags) => Some(flags),
+        _ => None,
+    };
     if weapon.template.leech_range_weapon != FALSE {
         weapon.set_leech_range_active(TRUE);
     }
@@ -162,15 +176,15 @@ fn private_fire_weapon(
         weapon.ammo_in_clip = weapon.ammo_in_clip.wrapping_sub(1);
         if weapon.ammo_in_clip == 0 && auto_reloads {
             reload_ammo(weapon, sim, owner);
-            return TRUE;
+            return (TRUE, None);
         }
-        return FALSE;
+        return (FALSE, None);
     }
 
     let bonus = compute_bonus(weapon, sim, owner, detonation.unwrap_or(0));
     let now = sim.frame();
     if weapon.get_status(now) != WeaponStatus::ReadyToFire || weapon.ammo_in_clip == 0 {
-        return FALSE;
+        return (FALSE, None);
     }
 
     let barrel_count = sim.weapon_barrel_count(owner, weapon.wslot);
@@ -204,9 +218,17 @@ fn private_fire_weapon(
         pos.z = sim.terrain().get_ground_height(pos.x, pos.y, None);
         weapon.scatter_targets_unused.swap_remove(pick);
     }
-    match detonation {
-        Some(flags) => sim.fire_projectile_detonation(owner, &weapon.template.name, &pos, flags),
-        None => sim.fire_weapon_template(owner, &weapon.template.name, target, &pos),
+    let mut projectile = None;
+    if sim.record_weapon_fire(owner, &weapon.template.name, target, &pos, detonation) != FALSE {
+        let shot = Shot {
+            victim: target,
+            victim_pos: pos,
+            bonus: &bonus,
+            is_detonation: Bool::from(detonation.is_some()),
+            ignore_ranges: Bool::from(matches!(mode, FireMode::IgnoreRanges)),
+            inflict_damage: TRUE,
+        };
+        projectile = weapon_effects::fire_weapon_template(sim, weapon, owner, &shot);
     }
 
     weapon.last_fire_frame = now;
@@ -221,7 +243,7 @@ fn private_fire_weapon(
     if weapon.ammo_in_clip == 0 {
         if auto_reloads {
             reload_ammo(weapon, sim, owner);
-            return TRUE;
+            return (TRUE, projectile);
         }
         weapon.status = WeaponStatus::OutOfAmmo;
         weapon.when_we_can_fire_again = NO_MAX_SHOTS_LIMIT as UnsignedInt;
@@ -238,7 +260,7 @@ fn private_fire_weapon(
             );
         }
     }
-    FALSE
+    (FALSE, projectile)
 }
 
 /// `Weapon::fireWeapon(source, target)`.
@@ -248,7 +270,7 @@ pub fn fire_weapon_at_object(
     owner: ObjectSlot,
     victim: ObjectSlot,
 ) -> Bool {
-    private_fire_weapon(weapon, sim, owner, Some(victim), None, None)
+    private_fire_weapon(weapon, sim, owner, Some(victim), None, FireMode::Normal).0
 }
 
 /// `Weapon::fireWeapon(source, pos)`.
@@ -258,18 +280,17 @@ pub fn fire_weapon_at_position(
     owner: ObjectSlot,
     pos: &Coord3D,
 ) -> Bool {
-    private_fire_weapon(weapon, sim, owner, None, Some(*pos), None)
+    private_fire_weapon(weapon, sim, owner, None, Some(*pos), FireMode::Normal).0
 }
 
-/// `Weapon::forceFireWeapon`. The projectile it returns in C++ comes from the unported
-/// `fireWeaponTemplate`.
+/// `Weapon::forceFireWeapon`: no range checks. Returns the projectile it launched.
 pub fn force_fire_weapon(
     weapon: &mut Weapon,
     sim: &mut dyn SimApi,
     owner: ObjectSlot,
     pos: &Coord3D,
-) {
-    private_fire_weapon(weapon, sim, owner, None, Some(*pos), None);
+) -> Option<ObjectSlot> {
+    private_fire_weapon(weapon, sim, owner, None, Some(*pos), FireMode::IgnoreRanges).1
 }
 
 fn allocate_temp_weapon(sim: &dyn SimView, name: &str) -> Option<Weapon> {
@@ -324,7 +345,7 @@ pub fn handle_projectile_detonation(
         owner,
         None,
         Some(*pos),
-        Some(extra_bonus_flags),
+        FireMode::Detonation(extra_bonus_flags),
     );
 }
 

@@ -14,6 +14,7 @@
 //! Not ported: the bounce sound (`setBounceSound`, `doBounceSound`; client audio only),
 //! `TheScriptEngine->transferObjectName` and the AI's side of `processCollision`.
 
+use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext, ModuleSlot, ObjectSlot};
 use crate::combat::damage::{DamageInfo, HUGE_DAMAGE_AMOUNT};
 use crate::combat::locomotor_set::LocomotorSetType;
@@ -467,6 +468,13 @@ pub fn apply_shock(sim: &mut dyn SimApi, owner: ObjectSlot, force: &Coord3D) {
     let mut resisted = *force;
     resisted.scale(1.0 - clamped);
     apply_force(sim, owner, &resisted);
+}
+
+/// `setStunned(true)`.
+pub fn set_stunned(sim: &mut dyn SimApi, owner: ObjectSlot) {
+    if let Some(p) = physics_mut(sim, owner) {
+        p.set_flag(IS_STUNNED, TRUE);
+    }
 }
 
 /// `applyRandomRotation`: three integer logic draws from `-1..=1`. It does not set
@@ -1312,14 +1320,7 @@ fn fire_crash_weapon(sim: &mut dyn SimApi, owner: ObjectSlot, building: bool, po
     }) else {
         return;
     };
-    if sim
-        .rules()
-        .weapon_store
-        .find_weapon_template(&name)
-        .is_some()
-    {
-        sim.fire_weapon_template(owner, &name, None, pos);
-    }
+    weapon_fire::create_and_fire_temp_weapon(sim, owner, &name, pos);
 }
 
 fn perps_logically_equal(a: Real, b: Real) -> bool {

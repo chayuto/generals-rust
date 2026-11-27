@@ -118,6 +118,10 @@ impl SpecialPowerCompletionDie {
 }
 
 impl BehaviorModule for SpecialPowerCompletionDie {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn module_name_key(&self) -> NameKeyType {
         self.base.module_name_key
     }

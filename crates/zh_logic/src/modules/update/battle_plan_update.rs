@@ -128,7 +128,7 @@ impl PlayerBattlePlans {
 }
 
 /// `localApplyBattlePlanBonusesToObject`.
-fn apply_bonuses_to_object(sim: &mut dyn SimApi, obj: ObjectSlot, bonus: &BattlePlanBonuses) {
+pub(crate) fn apply_bonuses_to_object(sim: &mut dyn SimApi, obj: ObjectSlot, bonus: &BattlePlanBonuses) {
     let Some((projectile, producer)) = sim.object(obj).map(|o| {
         let projectile = o
             .thing

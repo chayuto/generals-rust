@@ -431,6 +431,8 @@ fn context() -> SimContext {
 
 fn reset(sim: &mut SimContext) {
     sim.world = SimWorld::new();
+    // The oracle intercepts `fireWeaponTemplate`; `golden_pkt399_weapon_effects` runs it.
+    sim.world.weapon_templates_stubbed = true;
     sim.init_partition(
         20.0,
         Region3D {

@@ -1,5 +1,6 @@
 //! `PKT-216`: `FireWeaponPower` (`FireWeaponPower.h` / `FireWeaponPower.cpp`).
 
+use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::modules::module::{BehaviorModule, ModuleData, SpecialPowerFacet};
 use crate::modules::module_factory::ModuleParseContext;
@@ -118,7 +119,7 @@ impl SpecialPowerBehaviorImpl for FireWeaponPower {
             .map(|o| *o.thing.get_position())
             .unwrap_or_default();
         let wpn = Self::resolve_primary_weapon_name(sim, ctx);
-        sim.fire_weapon_template(ctx.owner_slot, &wpn, None, &pos);
+        weapon_fire::create_and_fire_temp_weapon(sim, ctx.owner_slot, &wpn, &pos);
     }
 
     fn do_special_power_at_location(
@@ -141,7 +142,7 @@ impl SpecialPowerBehaviorImpl for FireWeaponPower {
             command_options,
         );
         let wpn = Self::resolve_primary_weapon_name(sim, ctx);
-        sim.fire_weapon_template(ctx.owner_slot, &wpn, None, loc);
+        weapon_fire::create_and_fire_temp_weapon(sim, ctx.owner_slot, &wpn, loc);
     }
 
     fn do_special_power_at_object(
@@ -161,12 +162,8 @@ impl SpecialPowerBehaviorImpl for FireWeaponPower {
             target,
             command_options,
         );
-        let target_pos = sim
-            .object(target)
-            .map(|o| *o.thing.get_position())
-            .unwrap_or_default();
         let wpn = Self::resolve_primary_weapon_name(sim, ctx);
-        sim.fire_weapon_template(ctx.owner_slot, &wpn, Some(target), &target_pos);
+        weapon_fire::create_and_fire_temp_weapon_at_object(sim, ctx.owner_slot, &wpn, target);
     }
 }
 

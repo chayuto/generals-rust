@@ -7,6 +7,7 @@
 //! stats collector, the client frame number and profiling, and the empty
 //! `LocomotorStore::update`.
 
+use crate::object::weapon_effects;
 use crate::arena::ObjectSlot;
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::rules::disabled_types::{DisabledType, DISABLED_COUNT};
@@ -66,6 +67,8 @@ pub fn run_frame(sim: &mut SimContext, seams: &mut dyn FrameSeams) {
     seams.build_assistant(sim);
     sim.update_partition();
     sim.process_destroy_list();
+    // `TheWeaponStore->UPDATE()`.
+    weapon_effects::update_delayed_damage(sim);
     seams.weapon_store(sim);
     seams.victory_conditions(sim);
     check_disabled_statuses(sim);

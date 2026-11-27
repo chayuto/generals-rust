@@ -429,7 +429,7 @@ fn apply(sim: &mut SimContext, s: &mut Shooter, op: &[u32], frame: &mut u32) -> 
             }))
         }
         5 => s.with_weapon(sim, a, |w, sim| {
-            weapon_fire::force_fire_weapon(w, sim, owner, &target)
+            weapon_fire::force_fire_weapon(w, sim, owner, &target);
         }),
         6 => {
             let now = *frame;
@@ -578,6 +578,8 @@ fn run(golden: &Json, v: &Json) -> Option<String> {
     };
 
     sim.world.rng.init_random_with_seed(seed);
+    // The oracle intercepts `fireWeaponTemplate`; `golden_pkt399_weapon_effects` runs it.
+    sim.world.weapon_templates_stubbed = true;
     sim.world.weapon_fires.clear();
     let ops = v.get("ops").list();
     let rows = v.get("rows").list();

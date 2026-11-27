@@ -16,7 +16,7 @@ use crate::modules::behavior::behavior_module::{
 use crate::modules::contain::open_contain::kill_object;
 use crate::modules::module::{BehaviorModule, ModuleData, ProjectileFacet, UpdateFacet};
 use crate::modules::module_factory::ModuleParseContext;
-use crate::object::weapon_fire;
+use crate::object::{weapon_effects, weapon_fire};
 use crate::object::weapon_set::WeaponSlotType;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::rules::combat_types::{DamageType, DeathType};
@@ -348,13 +348,10 @@ impl DumbProjectileBehavior {
         let us = ctx.owner_slot;
         if let Some(weapon) = self.detonation_weapon.clone() {
             let pos = position_of(sim, us);
-            weapon_fire::handle_projectile_detonation(
-                sim,
-                us,
-                &weapon,
-                &pos,
-                self.extra_bonus_flags,
-            );
+            let flags = self.extra_bonus_flags;
+            weapon_effects::while_detonating(sim, us, self.launcher_id, |sim| {
+                weapon_fire::handle_projectile_detonation(sim, us, &weapon, &pos, flags);
+            });
             if self.data.detonate_calls_kill != FALSE {
                 unresistable_detonation_damage(sim, us);
             } else {
