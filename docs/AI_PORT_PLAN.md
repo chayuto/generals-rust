@@ -42,6 +42,9 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Direct on synthetic height grids. Linking `libz_gameenginedevice.a` headless is untried; check it first. Map files: Dump of heights and cliff flags (local only, retail data).
 - Seams: `ThingTerrainAccess` (ground and layer height, underwater, cliff), `CliffMap`, waypoints. Risks: float interpolation, waypoint list order.
 - Seen: sloped and wet ground; waypoints can be looked up.
+- **Done.** `zh_logic::terrain` (`TerrainLogic`, `HeightMap`) and `zh_common::io::map_object` load a map file and answer ground and layer height, cliff, line of sight, water and waypoint questions, with water changes, flattening, craters and the snapshot. Dump and Direct: `golden_s1_terrain` (synthetic maps of every height and blend chunk version, written by the reference; digests of the 116 maps in `MapsZH.big`, local only).
+  - Seams: `ElevatedLayers` (bridges and the wall, S2), `WaterGrid` (the deformable water mesh), `TerrainEffects` (pathfind recalculation, water damage). `set_active_boundary` changes the boundary only.
+  - Not done: `Bridge` and the bridge functions (S2), loading bridges and roads, the water grid settings, `loadPostProcess`, the `SidesList` chunk (parsed elsewhere). `GameLogic` does not own a `TerrainLogic` yet.
 
 ### S2. Pathfind map: classification, footprints, layers, bridges
 - C++: `AIPathfind.cpp` map half (850), `PathfindLayer.cpp` (550), bridge code in `TerrainLogic.cpp` (about 600). Two workers: ground cells, then bridges and walls.

@@ -674,6 +674,37 @@ static void query_rows(Terrain& t, const Spec& s, std::vector<std::string>& rows
     }
 }
 
+// ---- map objects and reset ---------------------------------------------------
+
+// A map object made without a property sheet gets the default one.
+static std::string row_default_object(float angle) {
+    Coord3D at;
+    at.x = 1.0f;
+    at.y = 2.0f;
+    at.z = 3.0f;
+    MapObject* o = newInstance(MapObject)(at, AsciiString("Default"), angle, 5, nullptr, nullptr);
+    Dict* d = o->getProperties();
+    std::string r = "DEF " + f32(angle) + " = " + f32(o->getAngle()) + " " +
+                    num(d->getInt(NAMEKEY("objectInitialHealth")));
+    static const char* const keys[] = {"objectEnabled",    "objectIndestructible",
+                                       "objectUnsellable", "objectPowered",
+                                       "objectRecruitableAI", "objectTargetable"};
+    for (const char* key : keys) r += " " + num(d->getBool(NAMEKEY(key)) ? 1 : 0);
+    r += " " + num(d->getPairCount()) + " " + num(o->isWaypoint()) + " " + num(o->isLight()) + " " +
+         num(o->isScorch()) + " " + num(o->isSelected());
+    deleteInstance(o);
+    return r;
+}
+
+static std::string row_reset(Terrain& t) {
+    int waypoints = 0, triggers = 0, objects = 0;
+    for (Waypoint* w = t.logic->getFirstWaypoint(); w; w = w->getNext()) ++waypoints;
+    for (PolygonTrigger* p = PolygonTrigger::getFirstPolygonTrigger(); p; p = p->getNext()) ++triggers;
+    for (MapObject* o = MapObject::getFirstMapObject(); o; o = o->getNext()) ++objects;
+    return "RESET = " + num(waypoints) + " " + num(triggers) + " " + num(objects) + " " +
+           row_extents(t) + " " + oracle_wp51::World::snapshot_save_hex(t.logic);
+}
+
 // ---- water changes -----------------------------------------------------------
 
 static const int kVictims = 24;
@@ -765,7 +796,7 @@ static void water_rows(Terrain& t, oracle_wp51::World& w, Water& water,
         if (op == 0) {
             float height = between(-10.0f, 160.0f);
             if (pick(3) == 0) height = TheTerrainLogic->getWaterHeight(h) + between(0.0f, 0.9f);
-            const float damage = pick(2) ? between(1.0f, 5.0f) : 0.0f;
+            const float damage = pick(2) ? between(0.2f, 3.0f) : 0.0f;
             const Bool force = pick(4) == 0;
             const std::string name = water_name(h);
             TheTerrainLogic->setWaterHeight(h, height, damage, force);
@@ -774,7 +805,7 @@ static void water_rows(Terrain& t, oracle_wp51::World& w, Water& water,
         } else if (op <= 2) {
             const float final_height = between(-20.0f, 170.0f);
             const float seconds = pick(4) == 0 ? 0.05f : between(0.1f, 2.0f);
-            const float damage = pick(2) ? between(1.0f, 5.0f) : 0.0f;
+            const float damage = pick(2) ? between(0.2f, 3.0f) : 0.0f;
             const std::string name = water_name(h);
             TheTerrainLogic->changeWaterHeightOverTime(h, final_height, seconds, damage);
             rows.push_back("CHG " + name + " " + f32(final_height) + " " + f32(seconds) + " " +
@@ -805,15 +836,21 @@ static void shape_rows(Terrain& t, oracle_wp51::World& w, const Spec& s,
         float major = between(1.0f, 45.0f), minor = between(1.0f, 30.0f);
         if (pick(8) == 0) major = between(0.0f, 3.0f);
         if (pick(8) == 0) major = static_cast<float>(10 * (1 + pick(3)));
+        // A box without a width or a length has triangles that are lines or points.
+        const bool flat_x = pick(8) == 0, flat_y = pick(5) == 0;
+        if (flat_x) major = 0.0f;
+        if (flat_y) minor = 0.0f;
         o->setGeometryInfo(GeometryInfo(static_cast<GeometryType>(type), small, 10.0f, major, minor));
         at.x = between(-30.0f, wx + 30.0f);
         at.y = between(-30.0f, wy + 30.0f);
-        if (pick(4) == 0) {
+        const bool on_grid = pick(4) == 0 || ((flat_x || flat_y) && pick(2) == 0);
+        if (on_grid) {
             at.x = static_cast<float>(10 * static_cast<int>(at.x / 10.0f));
             at.y = static_cast<float>(10 * static_cast<int>(at.y / 10.0f));
         }
         o->setPosition(&at);
-        o->setOrientation(pick(4) == 0 ? 0.0f : between(-4.0f, 4.0f));
+        const bool square = pick(4) == 0 || (on_grid && (flat_x || flat_y));
+        o->setOrientation(square ? 0.0f : between(-4.0f, 4.0f));
         const std::string args = num(type) + " " + num(small) + " " + c3(*o->getPosition()) + " " +
                                  f32(o->getOrientation()) + " " + f32(major) + " " + f32(minor);
         const bool crater = pick(3) == 0;
@@ -1032,6 +1069,9 @@ int main(int argc, char** argv) {
             const float x = between(-40.0f, 400.0f), y = between(-40.0f, 350.0f);
             rows.push_back(row_height(t, x, y));
         }
+        rows.push_back(row_default_object(between(-20.0f, 20.0f)));
+        t.logic->reset();
+        rows.push_back(row_reset(t));
 
         total += rows.size();
         out += std::string(i ? "," : "") + "\n  {\"wall\": \"" + num(i % 2) + "\", \"hex\": \"" +
@@ -1040,7 +1080,6 @@ int main(int argc, char** argv) {
             out += std::string(r ? "," : "") + "\n    \"" + rows[r] + "\"";
         }
         out += "\n   ]}";
-        t.logic->reset();
         std::fprintf(stderr, "map %d: %zu rows\n", i, rows.size());
     }
     out += "\n ]\n}\n";

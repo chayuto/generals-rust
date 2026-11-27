@@ -12,6 +12,8 @@ use std::rc::Rc;
 
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::golden_json::{decode_hex_bytes, encode_hex_bytes};
+use zh_common::io::data_chunk::DataChunkOutput;
+use zh_common::io::map_object::MapObject;
 use zh_common::io::{BigFileSystem, FileInfo};
 use zh_common::math::geometry::GeometryType;
 use zh_common::math::{Coord3D, ICoord2D, Matrix3D};
@@ -20,8 +22,8 @@ use zh_common::xfer::{Snapshot, XferLoad, XferSave};
 use zh_logic::object::thing::ThingTerrainAccess;
 use zh_logic::pathfinder::pathfind_constants::PathfindLayerEnum;
 use zh_logic::terrain::{
-    BridgeDeck, ElevatedLayers, HeightMap, TerrainEffects, TerrainLogic, TerrainShape, WaterRef,
-    Waypoint,
+    BridgeDeck, ElevatedLayers, HeightMap, TerrainEffects, TerrainLogic, TerrainShape, WaterGrid,
+    WaterRef, Waypoint,
 };
 
 const VECTORS: &str = include_str!("../../../docs/golden_vectors/S1_Terrain.json");
@@ -517,6 +519,47 @@ impl Run {
                 format!("{head}{tape} = {out}")
             }
             "EDGE" => row_edges(terrain, &t.point()),
+            "DEF" => {
+                let mut keys = NameKeyGenerator::new();
+                let angle = t.real();
+                let at = Coord3D::new(1.0, 2.0, 3.0);
+                let o = MapObject::new(at, "Default", angle, 5, None, &mut keys);
+                let d = o.properties();
+                let mut r = format!(
+                    "{head} = {} {}",
+                    f(o.angle()),
+                    d.get_int(keys.name_to_key("objectInitialHealth"), None)
+                );
+                for key in [
+                    "objectEnabled",
+                    "objectIndestructible",
+                    "objectUnsellable",
+                    "objectPowered",
+                    "objectRecruitableAI",
+                    "objectTargetable",
+                ] {
+                    r += &format!(" {}", d.get_bool(keys.name_to_key(key), None));
+                }
+                format!(
+                    "{r} {} {} {} {} {}",
+                    d.get_pair_count(),
+                    o.is_waypoint(),
+                    o.is_light(),
+                    o.is_scorch(),
+                    o.is_selected()
+                )
+            }
+            "RESET" => {
+                terrain.reset();
+                format!(
+                    "{head} = {} {} {} {} {}",
+                    terrain.waypoints().count(),
+                    terrain.triggers().triggers().len(),
+                    terrain.map_objects().len(),
+                    row_extents(terrain),
+                    encode_hex_bytes(&save_bytes(terrain))
+                )
+            }
             "WPN" => format!("{head} = {}", id_of(terrain.waypoint_by_name(t.text()))),
             "WPI" => format!("{head} = {}", id_of(terrain.waypoint_by_id(t.int() as u32))),
             "NEAR" => {
@@ -771,6 +814,164 @@ fn a_wall_is_a_layer_only_on_the_wall() {
         t.get_layer_height(at.x, at.y, PathfindLayerEnum::Wall, None, TRUE),
         ground
     );
+
+    // A wall exactly as far from the point as the ground does not win. Such a
+    // wall lies below the ground.
+    *run.tape.0.borrow_mut() = Tape {
+        wall: ground - 8.0,
+        on_wall: TRUE,
+        ..Tape::default()
+    };
+    let level = Coord3D::new(at.x, at.y, ground - 4.0);
+    assert_eq!(
+        t.get_layer_for_destination(&level),
+        PathfindLayerEnum::Ground
+    );
+    let lower = Coord3D::new(at.x, at.y, ground - 5.0);
+    assert_eq!(t.get_layer_for_destination(&lower), PathfindLayerEnum::Wall);
+    run.tape.0.borrow_mut().on_wall = FALSE;
+
+    // A deck exactly as far from the point as the ground does not win.
+    run.tape.0.borrow_mut().decks = vec![BridgeDeck {
+        layer: PathfindLayerEnum::Bridge1,
+        height: ground + 20.0,
+        rubble: FALSE,
+    }];
+    let between = Coord3D::new(at.x, at.y, ground + 10.0);
+    assert_eq!(
+        t.get_layer_for_destination(&between),
+        PathfindLayerEnum::Ground
+    );
+    let above = Coord3D::new(at.x, at.y, ground + 11.0);
+    assert_eq!(
+        t.get_layer_for_destination(&above),
+        PathfindLayerEnum::Bridge1
+    );
+}
+
+/// A water mesh over `x < 100`.
+struct HalfGrid {
+    height: Rc<RefCell<Real>>, // determinism-ok: test double, single thread
+}
+
+impl WaterGrid for HalfGrid {
+    fn height_at(&self, x: Real, _y: Real) -> Option<Real> {
+        (x < 100.0).then(|| *self.height.borrow())
+    }
+    fn set_height(&mut self, height: Real) -> Real {
+        std::mem::replace(&mut *self.height.borrow_mut(), height)
+    }
+    fn corners(&self) -> [Coord3D; 4] {
+        [
+            Coord3D::new(0.0, 0.0, 0.0),
+            Coord3D::new(100.0, 0.0, 0.0),
+            Coord3D::new(100.0, 80.0, 0.0),
+            Coord3D::new(0.0, 80.0, 0.0),
+        ]
+    }
+}
+
+#[test]
+fn the_water_grid_is_water_where_it_lies() {
+    let mut terrain = TerrainLogic::new();
+    let size = vec![ICoord2D { x: 16, y: 16 }];
+    terrain.set_height_map(HeightMap::from_samples(16, 16, 0, size, vec![16; 256]));
+    let level = Rc::new(RefCell::new(12.0)); // determinism-ok: test double, single thread
+    terrain.set_water_grid(Some(Box::new(HalfGrid {
+        height: level.clone(),
+    })));
+
+    assert_eq!(terrain.water_at(50.0, 50.0), Some(WaterRef::Grid));
+    assert_eq!(terrain.water_at(150.0, 50.0), None);
+    assert_eq!(terrain.water_by_name("Water Grid"), Some(WaterRef::Grid));
+    let (mut water, mut ground) = (0.0, 0.0);
+    let under = terrain.is_underwater(50.0, 50.0, Some(&mut water), Some(&mut ground));
+    assert_eq!((under, water, ground), (TRUE, 12.0, 10.0));
+    let region = terrain.water_bounding_rect(WaterRef::Grid);
+    assert_eq!((region.lo.x, region.lo.y), (0.0, 0.0));
+    assert_eq!((region.hi.x, region.hi.y), (100.0, 80.0));
+
+    let mut effects = Effects {
+        victims: vec![(50.0, 40.0), (150.0, 40.0)],
+        damaged: vec![false; 2],
+        ..Effects::default()
+    };
+    terrain.set_water_height(Some(WaterRef::Grid), 20.0, 1.0, FALSE, &mut effects);
+    assert_eq!(*level.borrow(), 20.0);
+    assert!(effects.recalculated);
+    assert_eq!(effects.damaged, [true, false]);
+    // Falling water damages nothing.
+    effects.damaged.fill(false);
+    terrain.set_water_height(Some(WaterRef::Grid), 15.0, 1.0, FALSE, &mut effects);
+    assert_eq!(effects.damaged, [false, false]);
+    // A level below the ground is not water over it.
+    *level.borrow_mut() = -1.0;
+    assert_eq!(terrain.water_at(50.0, 50.0), None);
+}
+
+#[test]
+fn a_new_terrain_is_flat_and_empty() {
+    let terrain = TerrainLogic::new();
+    let extent = terrain.extent();
+    assert_eq!((extent.hi.x, extent.lo.z, extent.hi.z), (0.0, 0.0, 1.0));
+    assert_eq!(terrain.extent_including_border().lo.x, 0.0);
+    let mut normal = Coord3D::default();
+    assert_eq!(terrain.get_ground_height(5.0, 5.0, Some(&mut normal)), 0.0);
+    assert_eq!(normal, Coord3D::new(0.0, 0.0, 1.0));
+    assert_eq!(terrain.is_cliff_cell(5.0, 5.0), FALSE);
+}
+
+#[test]
+fn map_object_flags_set_and_clear() {
+    let mut keys = NameKeyGenerator::new();
+    let mut o = MapObject::new(Coord3D::default(), "A", 0.0, 0, None, &mut keys);
+    o.set_selected(TRUE);
+    o.set_is_light();
+    assert_eq!((o.is_selected(), o.is_light()), (TRUE, TRUE));
+    o.set_selected(FALSE);
+    assert_eq!((o.is_selected(), o.is_light()), (FALSE, TRUE));
+    o.set_flag(6);
+    o.clear_flag(2);
+    assert_eq!((o.flags(), o.flag(4), o.flag(2)), (4, TRUE, FALSE));
+    o.set_waypoint_id(7, &mut keys);
+    o.set_waypoint_name("Here", &mut keys);
+    assert_eq!(o.waypoint_id(&mut keys), 7);
+    assert_eq!(o.waypoint_name(&mut keys), "Here");
+}
+
+/// A map file holding only a height map chunk of the given size.
+fn height_only_map(width: i32, height: i32, border: i32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut out = DataChunkOutput::new(&mut bytes);
+    out.open_data_chunk("HeightMapData", 4).expect("open");
+    for v in [width, height, border, 0, width * height] {
+        out.write_int(v).expect("int");
+    }
+    out.write_array_of_bytes(&vec![0; (width * height) as usize])
+        .expect("samples");
+    out.close_data_chunk().expect("close");
+    out.finish().expect("finish");
+    bytes
+}
+
+#[test]
+fn map_sizes_are_checked() {
+    let load = |bytes: &[u8]| {
+        let mut keys = NameKeyGenerator::new();
+        TerrainLogic::new().load_map(bytes, "map", &mut keys, ICoord2D { x: 0, y: 0 }, FALSE)
+    };
+    // The border may take all but the middle sample of each side.
+    for (width, height, border, ok) in [
+        (9, 9, 4, true),
+        (9, 9, 5, false),
+        (10, 9, 4, true),
+        (9, 10, 5, false),
+        (9, 9, -1, false),
+    ] {
+        let got = load(&height_only_map(width, height, border));
+        assert_eq!(got.is_ok(), ok, "{width}x{height} border {border}");
+    }
+    assert!(load(b"not a map").is_err());
 }
 
 // ---- retail maps ---------------------------------------------------------------

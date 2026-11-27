@@ -410,6 +410,19 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 ### Device terrain code links but needs a render object
 
 - `libz_gameenginedevice.a` links into a headless harness (headers under both `Core/GameEngineDevice/Include` and `GeneralsMD/Code/GameEngineDevice/Include`; pass them with `--extra-flag=-I...`). `W3DTerrainLogic::getGroundHeight` runs without map data; `isCliffCell` dereferences the null `TheTerrainRenderObject`.
+- `gen_s1_terrain.cpp` loads whole maps: real `W3DTerrainLogic` and `W3DTerrainVisual` objects, `TheFileSystem`, `TheLocalFileSystem`, an empty `TheTerrainTypes`, a non-null `TheMapCache`, and a zeroed render object whose virtual calls do nothing.
+- Objects spawned after `ThePartitionManager->init()` are in no cell until `ThePartitionManager->update()`; range queries find nothing and the harness silently records no damage.
+- `Pathfinder::classifyMap` keeps `CELL_OBSTACLE` cells, so plant another type to see whether it ran.
+- A `BridgeInfo` needs `fromLeft`, `fromRight`, `toLeft` and `toRight`; with only `from` and `to` nothing is ever on the bridge.
+
+### Terrain and map quirks
+
+- `getHeightMapHeight` takes the fourth x difference of the normal from `d6-d0`, the same pair as the second.
+- `loadMap` reads waypoint heights before the new height map is installed; `newMap` corrects them.
+- The water area added to a version 1 trigger chunk reuses the highest trigger id, so a save with moving water on it cannot be loaded.
+- `MapObject` angles go through the looping `normalizeAngle` of `GameCommon.cpp`, not `WWMath::Normalize_Angle`.
+- **Guard:** `golden_s1_terrain`.
+
 ### The point defense velocity prediction does nothing
 
 - **Where:** `PointDefenseLaserUpdate::scanClosestTarget`.
