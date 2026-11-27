@@ -19,7 +19,8 @@ use std::sync::{Arc, Mutex};
 use zh_common::core::state_machine::{StateExitType, StateId, StateReturnType};
 use zh_common::golden_json::{get_str, get_u32};
 use zh_common::ini::{IniLoadType, IniReader};
-use zh_common::math::{Coord3D, Region3D};
+use zh_common::math::gamemath::real_to_int_floor;
+use zh_common::math::{Coord3D, Matrix3D, Region3D};
 use zh_common::types::{Bool, Int, ObjectId, Real, Relationship, TeamId, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferCrc, XferError, XferSave};
 use zh_logic::ai::seams::{shared, AiSeams};
@@ -33,6 +34,7 @@ use zh_logic::modules::update::ai_update::{
 use zh_logic::modules::update::dozer_ai_update::DozerBrain;
 use zh_logic::modules::update::physics_update;
 use zh_logic::modules::CommandSourceType;
+use zh_logic::object::thing::ThingTerrainAccess;
 use zh_logic::object::weapon::{WeaponTemplate, NO_MAX_SHOTS_LIMIT};
 use zh_logic::object::weapon_set::CanAttackResult;
 use zh_logic::pathfinder::pathfind_constants::PathfindLayerEnum;
@@ -45,7 +47,10 @@ use zh_logic::rules::model_state::{
 use zh_logic::rules::object_status_types::{
     ObjectStatusMaskType, ObjectStatusType, OBJECT_STATUS_COUNT,
 };
-use zh_logic::sim::{AttackAbility, SimApi, SimContext, SimView};
+use zh_logic::sim::{
+    AttackAbility, FindPositionOptions, FlatTerrain, SimApi, SimContext, SimView,
+    FPF_IGNORE_ALL_OBJECTS,
+};
 
 const VECTORS: &str = include_str!("../../../docs/golden_vectors/S16_DozerWorkerFrames.json");
 
@@ -286,7 +291,53 @@ fn text(key: &str) -> String {
     get_str(VECTORS, key).expect("text").replace("\\n", "\n")
 }
 
-fn world(tape: &SharedTape, cells: Int) -> SimContext {
+/// Flat ground with cliff cells.
+struct Terrain {
+    cells: Int,
+    cliff: Vec<u8>,
+}
+
+impl ThingTerrainAccess for Terrain {
+    fn get_ground_height(&self, _x: Real, _y: Real, normal: Option<&mut Coord3D>) -> Real {
+        if let Some(normal) = normal {
+            *normal = Coord3D::new(0.0, 0.0, 1.0);
+        }
+        0.0
+    }
+    fn align_on_terrain(
+        &self,
+        angle: Real,
+        pos: &Coord3D,
+        stick_to_ground: Bool,
+        mtx: &mut Matrix3D,
+    ) -> PathfindLayerEnum {
+        FlatTerrain.align_on_terrain(angle, pos, stick_to_ground, mtx)
+    }
+    fn is_cliff_cell(&self, x: Real, y: Real) -> Bool {
+        let cell = |v: Real| real_to_int_floor(v / 10.0).clamp(0, self.cells - 1);
+        Bool::from(self.cliff[(cell(y) * self.cells + cell(x)) as usize] == b'1')
+    }
+    fn is_underwater(
+        &self,
+        _x: Real,
+        _y: Real,
+        water_z: Option<&mut Real>,
+        terrain_z: Option<&mut Real>,
+    ) -> Bool {
+        if let Some(z) = water_z {
+            *z = 0.0;
+        }
+        if let Some(z) = terrain_z {
+            *z = 0.0;
+        }
+        FALSE
+    }
+    fn playable_extent(&self) -> Option<Region3D> {
+        Some(extent(self.cells))
+    }
+}
+
+fn world(tape: &SharedTape, cells: Int, cliff: &str) -> SimContext {
     let mut sim = SimContext::new();
     for block in text("locomotors").split_inclusive("End\n") {
         let mut t = LocomotorTemplate::new();
@@ -306,11 +357,18 @@ fn world(tape: &SharedTape, cells: Int) -> SimContext {
         .expect("templates");
     sim.rules.global_data.gravity = -1.0;
     sim.rules.global_data.partition_cell_size = 20.0;
+    sim.rules.global_data.max_low_energy_production_speed = 0.8;
+    sim.rules.global_data.min_low_energy_production_speed = 0.5;
+    sim.rules.global_data.low_energy_penalty_modifier = 0.4;
     sim.rules.global_data.movement_penalty_damage_state = BodyDamageType::ReallyDamaged;
     sim.rules.ai_data.force_idle_frames_count = 45;
     sim.rules.ai_data.repulsed_distance = 50.0;
     sim.rules.ai_data.ai_dozer_bored_radius_modifier = 2.0;
     sim.ai_seams = shared(Seams(tape.clone()));
+    sim.terrain = Box::new(Terrain {
+        cells,
+        cliff: cliff.as_bytes().to_vec(),
+    });
     sim.init_partition(20.0, extent(cells));
     let w = &mut sim.world;
     for (player, team) in TEAMS.into_iter().enumerate() {
@@ -670,8 +728,11 @@ fn spawn(sim: &mut SimContext, text: &str) -> (usize, ObjectSlot) {
     let team = TEAMS[1 + number(f[1]) as usize];
     let mode = number(f[6]);
     let mut status = ObjectStatusMaskType::new();
-    if mode == 2 {
+    if mode >= 2 {
         status.set(ObjectStatusType::UnderConstruction as Int, 1);
+    }
+    if mode == 3 {
+        status.set(ObjectStatusType::Reconstructing as Int, 1);
     }
     // The reference creates the object at the origin, then places it.
     let slot = sim.factory_new_object_with_status(template, team, status);
@@ -680,7 +741,7 @@ fn spawn(sim: &mut SimContext, text: &str) -> (usize, ObjectSlot) {
     if kind != DOZER && kind != WORKER && kind != UNIT {
         sim.add_object_to_pathfind_map(slot);
     }
-    if mode == 2 {
+    if mode >= 2 {
         sim.set_object_construction_percent(slot, 0.0);
         let health = sim.object_health(slot);
         sim.body_internal_change_health(slot, -health + 1.0);
@@ -717,7 +778,7 @@ fn check_tape(tape: &SharedTape, context_text: &str) {
 fn run(scene: &str, frames: &[&str], cells: Int) {
     let index = get_u32(scene, "s").expect("scene");
     let tape: SharedTape = Arc::default();
-    let mut sim = world(&tape, cells);
+    let mut sim = world(&tape, cells, get_str(scene, "cliff").expect("cliff"));
     sim.world.frame = get_u32(scene, "frame").expect("frame");
     sim.world
         .rng
@@ -744,6 +805,25 @@ fn run(scene: &str, frames: &[&str], cells: Int) {
         }
     }
     check_tape(&tape, &format!("scene {index} spawns"));
+    let probes = get_str(scene, "probes").expect("probes");
+    for probe in probes.split(';').filter(|p| !p.is_empty()) {
+        let f: Vec<&str> = probe.split(',').collect();
+        let options = FindPositionOptions {
+            flags: FPF_IGNORE_ALL_OBJECTS,
+            max_radius: 20.0,
+            start_angle: Some(real(f[3])),
+            ..FindPositionOptions::default()
+        };
+        let found = sim.find_position_around(&coord(&f[0..3]), &options);
+        assert_eq!(
+            found.map_or_else(
+                || "0,00000000,00000000,00000000".to_owned(),
+                |p| format!("1,{}", c3(&p))
+            ),
+            f[4..].join(","),
+            "scene {index}: findPositionAround {probe}"
+        );
+    }
 
     let mut seen = vec![Vec::new(); ids.len()];
     for row in frames {

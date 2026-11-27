@@ -15,6 +15,7 @@ use zh_logic::modules::update::ai_update::{
 };
 use zh_logic::modules::update::dozer_ai_update::{DozerBrain, DOZER_TASK_INVALID};
 use zh_logic::modules::CommandSourceType;
+use zh_logic::rules::model_state::ModelConditionFlagType;
 use zh_logic::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
 use zh_logic::sim::{SimApi, SimContext, SimView};
 
@@ -48,7 +49,8 @@ fn world() -> SimContext {
         + "Object Barracks\n  KindOf = STRUCTURE IMMOBILE SCORE\n  Geometry = BOX\n  \
            GeometryMajorRadius = 20.0\n  GeometryMinorRadius = 14.0\n  GeometryHeight = 10.0\n  \
            GeometryIsSmall = No\n  BuildTime = 3.0\n  \
-           Body = ActiveBody ModuleTag_Body\n    MaxHealth = 200\n    InitialHealth = 200\n  End\n\
+           Body = ActiveBody ModuleTag_Body\n    MaxHealth = 200\n    InitialHealth = 200\n  End\n  \
+           Behavior = PreorderCreate ModuleTag_Pre\n  End\n\
            End\n";
     let mut reader = IniReader::new("object.ini", ini.as_bytes(), IniLoadType::Overwrite);
     sim.rules
@@ -67,6 +69,7 @@ fn world() -> SimContext {
     sim.init_partition(20.0, extent);
     sim.new_pathfind_map(&extent, 0.0);
     sim.world.team_players.insert(TEAM, 1);
+    sim.world.player_preorder.insert(TEAM, TRUE);
     sim.world.player_default_teams.insert(1, TEAM);
     sim.world.player_is_human.insert(TEAM, TRUE);
     sim.world
@@ -160,6 +163,12 @@ fn builds_to_completion(builder: &str) {
     );
     assert_eq!(sim.object_construction_percent(building), -1.0);
     assert_eq!(sim.object_health(building), 200.0);
+    // The building's create modules heard that it is complete.
+    let condition = &sim.object(building).expect("building").model_condition;
+    assert_ne!(
+        condition.test(ModelConditionFlagType::Preorder as i32),
+        FALSE
+    );
     let id = sim.object(unit).expect("builder").id;
     assert_eq!(sim.object(building).expect("building").producer_id, id);
     assert_eq!(sim.world.score_keepers[&1].total_buildings_built, 1);

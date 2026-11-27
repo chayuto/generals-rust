@@ -11,7 +11,8 @@
 // replaced by a state that records its calls, the searches of slice S6 and
 // getMoveAwayFromPath are answered with synthetic paths, and getNextMoodTarget
 // outside idle answers a random enemy. Calls and answers are in the row's tape.
-// Both playing sides see the whole map.
+// Both playing sides see the whole map. Some scenes have cliffs, and ask
+// findPositionAround about the terrain alone.
 //
 // oracle-wrap: GeneralsMD/Code/GameEngine/libz_gameengine.a AIUpdate.cpp.o __ZN17AIUpdateInterface10doPathfindEP25PathfindServicesInterface
 // oracle-wrap: GeneralsMD/Code/GameEngine/libz_gameengine.a AIPathfind.cpp.o __ZN10Pathfinder19getMoveAwayFromPathEP6ObjectS1_P4PathS1_S3_
@@ -373,6 +374,14 @@ static const int kCells = 32;
 
 class S16Terrain : public oracle_wp51::OracleTerrainLogic {
 public:
+    std::string cliff = std::string(kCells * kCells, '0');
+    Bool isCliffCell(Real x, Real y) const override {
+        int i = static_cast<int>(std::floor(x / 10.0f));
+        int j = static_cast<int>(std::floor(y / 10.0f));
+        i = i < 0 ? 0 : (i >= kCells ? kCells - 1 : i);
+        j = j < 0 ? 0 : (j >= kCells ? kCells - 1 : j);
+        return cliff[j * kCells + i] == '1';
+    }
     S16Terrain() {
         extent.lo = {0.0f, 0.0f, 0.0f};
         extent.hi = {kCells * 10.0f, kCells * 10.0f, 100.0f};
@@ -439,9 +448,9 @@ static std::string objects_ini() {
                     "    SupplyWarehouseActionDelay = 400\n",
                     "S16_Legs", 4) +
            unit_ini("S16_Unit", "PRELOAD SELECTABLE VEHICLE", "AIUpdateInterface", "", "S16_Wheels", 6) +
-           building_ini("S16_House", "BOX", 22, 14, "2.0", 200, 0) +
+           building_ini("S16_House", "BOX", 22, 14, "1.0", 200, 0) +
            building_ini("S16_Quick", "CYLINDER", 12, 12, "0.4", 150, 0) +
-           building_ini("S16_Reactor", "CYLINDER", 18, 18, "1.1", 300, 5) +
+           building_ini("S16_Reactor", "CYLINDER", 18, 18, "0.7", 300, 5) +
            "Object S16_Mine\n  KindOf = PRELOAD MINE IMMOBILE\n  Geometry = CYLINDER\n  GeometryMajorRadius = 3\n"
            "  GeometryHeight = 2\n  VisionRange = 0\n"
            "  Body = ActiveBody ModuleTag_Body\n    MaxHealth = 10\n    InitialHealth = 10\n  End\nEnd\n";
@@ -616,7 +625,7 @@ static std::vector<std::string> g_ops;
 struct Spawn {
     int kind, team;
     float x, y, angle;
-    int mode;  // 0 built, 1 damaged, 2 under construction
+    int mode;  // 0 built, 1 damaged, 2 under construction, 3 under reconstruction
 };
 static std::vector<Spawn> g_spawns;
 
@@ -687,7 +696,7 @@ static int some_building(bool unbuilt, int team) {
         const size_t i = (start + k) % n;
         Object* o = unit(static_cast<int>(i));
         if (!o || !is_building(g_spawns[i].kind) || g_spawns[i].team != team) continue;
-        if (o->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION) == unbuilt) return static_cast<int>(i);
+        if (static_cast<bool>(o->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION)) == unbuilt) return static_cast<int>(i);
     }
     return -1;
 }
@@ -713,6 +722,13 @@ static void random_op() {
     const Coord3D to = at(x, y);
     if (roll < 22) {
         give_work(u, player);
+    } else if (roll < 25) {
+        // A damaged unit is no building to repair.
+        const int t = some([](int k) { return k == K_UNIT || k == K_DOZER || k == K_WORKER; });
+        if (t >= 0 && t != u) {
+            damage(t, between(5.0f, 40.0f));
+            order(u, "repair", AICMD_REPAIR, player, t, nullptr);
+        }
     } else if (roll < 28) {
         // Any building, of either side and in any state.
         const int t = some(is_building);
@@ -749,6 +765,31 @@ static void random_op() {
 }
 
 // --- scenes -----------------------------------------------------------------
+
+// Cliffs beside some buildings, clear of every spawn.
+static void add_cliffs(std::string& cliff) {
+    const size_t n = g_spawns.size();
+    for (size_t b = 0; b < n; ++b) {
+        if (!is_building(g_spawns[b].kind)) continue;
+        for (int blob = 0; blob < 3; ++blob) {
+            const int ci = static_cast<int>(g_spawns[b].x / 10.0f) + static_cast<int>(pick(9)) - 4;
+            const int cj = static_cast<int>(g_spawns[b].y / 10.0f) + static_cast<int>(pick(9)) - 4;
+            const int w = 1 + static_cast<int>(pick(3));
+            const int h = 1 + static_cast<int>(pick(3));
+            for (int i = ci; i < ci + w; ++i)
+                for (int j = cj; j < cj + h; ++j) {
+                    if (i < 0 || j < 0 || i >= kCells || j >= kCells) continue;
+                    bool clear = true;
+                    for (const Spawn& s : g_spawns) {
+                        const float reach = is_building(s.kind) ? 24.0f : 14.0f;
+                        if (std::fabs(s.x - (i * 10.0f + 5.0f)) < reach && std::fabs(s.y - (j * 10.0f + 5.0f)) < reach)
+                            clear = false;
+                    }
+                    if (clear) cliff[j * kCells + i] = '1';
+                }
+        }
+    }
+}
 
 static void spawn_buildings(int count, int team, int mode_a, int mode_b) {
     static const float kSlot[] = {60.0f, 160.0f, 260.0f};
@@ -805,6 +846,10 @@ int main(int argc, char** argv) {
     TheTerrainLogic->init();
     TheWritableGlobalData->m_gravity = -1.0f;
     TheWritableGlobalData->m_partitionCellSize = 20.0f;
+    // Retail's penalties for a side short of power, which most scenes are.
+    TheWritableGlobalData->m_MaxLowEnergyProductionSpeed = 0.8f;
+    TheWritableGlobalData->m_MinLowEnergyProductionSpeed = 0.5f;
+    TheWritableGlobalData->m_LowEnergyPenaltyModifier = 0.4f;
     ThePartitionManager = NEW PartitionManager;
     ThePartitionManager->init();
     const_cast<TAiData*>(TheAI->getAiData())->m_forceIdleFramesCount = 45;
@@ -889,6 +934,13 @@ int main(int argc, char** argv) {
             spawn_unit(K_UNIT, 0);
         }
 
+        // A building ordered again after it was destroyed.
+        for (Spawn& s : g_spawns)
+            if (s.mode == 2 && chance(40)) s.mode = 3;
+        std::string& cliff = terrain->cliff;
+        cliff.assign(kCells * kCells, '0');
+        if (scenario % 8 >= 4) add_cliffs(cliff);
+
         TheGameLogic->*access_member(Wp51GLFrameTag()) = frame;
         InitRandom(seed);
         TheGameLogic->setObjectIDCounter(static_cast<ObjectID>(1000));
@@ -909,9 +961,10 @@ int main(int argc, char** argv) {
             const Spawn& s = g_spawns[i];
             const ThingTemplate* tt = TheThingFactory->findTemplate(kTemplates[s.kind]);
             if (!tt) return 3;
-            const bool unbuilt = s.mode == 2;
+            const bool unbuilt = s.mode >= 2;
             ObjectStatusMaskType status;
             if (unbuilt) status.set(OBJECT_STATUS_UNDER_CONSTRUCTION);
+            if (s.mode == 3) status.set(OBJECT_STATUS_RECONSTRUCTING);
             Object* o = TheThingFactory->newObject(tt, s.team ? w.team_b : w.team_a, status);
             if (o->getAI()) replace_states(o->getAI());
             const Coord3D p = at(s.x, s.y);
@@ -938,11 +991,34 @@ int main(int argc, char** argv) {
         }
         const int units = static_cast<int>(g_ids.size());
 
-        std::fprintf(out, "%s{\"s\":%d,\"frame\":%u,\"seed\":%u,\"spawns\":\"%s\",\"tape\":\"%s\"}",
+        // `findPositionAround` for no unit, over the terrain alone: the cliffs.
+        std::string probes;
+        if (scenario % 8 >= 4) {
+            for (int n = 0; n < 24; ++n) {
+                const float x = between(20.0f, 300.0f);
+                const float y = between(20.0f, 300.0f);
+                const Coord3D center = at(x, y);
+                FindPositionOptions options;
+                options.flags = FPF_IGNORE_ALL_OBJECTS;
+                options.minRadius = 0.0f;
+                options.maxRadius = 20.0f;
+                options.startAngle = between(0.0f, 6.0f);
+                Coord3D found;
+                found.zero();
+                const Bool ok = ThePartitionManager->findPositionAround(&center, &options, &found);
+                probes += (n ? ";" : "") + c3(center) + "," + fx(options.startAngle) + "," + num(ok ? 1 : 0) + "," +
+                          c3(found);
+            }
+        }
+
+        std::fprintf(out,
+                     "%s{\"s\":%d,\"frame\":%u,\"seed\":%u,\"spawns\":\"%s\",\"cliff\":\"%s\",\"probes\":\"%s\",\"tape\":\"%s\"}",
                      first_row ? "" : ",\n", scenario, static_cast<unsigned>(frame), static_cast<unsigned>(seed),
-                     spawn_text.str().c_str(), g_tape.c_str());
+                     spawn_text.str().c_str(), cliff.c_str(), probes.c_str(), g_tape.c_str());
         first_row = false;
 
+        // Most construction scenes only keep the builders at work.
+        const bool quiet = layout == 0 && (scenario / 4) % 3 != 2;
         std::vector<std::vector<std::string>> last(units);
         for (int f = 0; f < kFrames; ++f) {
             g_ops.clear();
@@ -950,6 +1026,11 @@ int main(int argc, char** argv) {
             if (f == 1 && (layout == 0 || layout == 3)) {
                 for (int u = 0; u < units; ++u)
                     if (is_builder(g_spawns[u].kind) && chance(90)) give_work(u, chance(70));
+            } else if (f > 1 && quiet) {
+                if (f % 7 == 0)
+                    for (int u = 0; u < units; ++u)
+                        if (is_builder(g_spawns[u].kind) && unit(u) && !unit(u)->getAI()->getDozerAIInterface()->isAnyTaskPending() && chance(60))
+                            give_work(u, chance(70));
             } else if (f > 1) {
                 const int rate = layout == 3 ? 9 : (layout == 0 ? 3 : (layout == 1 ? 2 : 1));
                 if (chance(rate)) random_op();
