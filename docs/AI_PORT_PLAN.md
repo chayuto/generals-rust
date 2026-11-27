@@ -61,6 +61,11 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Direct on hand-built paths and S2 maps; path save bytes. Stubbed: none beyond terrain.
 - Seams: `valid_movement_terrain`. Risks: segment math (`sqrt`), cell visit order along a line.
 - Seen: "can this unit stand or pass here" answers match.
+- **Done.** `pathfinder::Path` and `PathNode`, and the queries in `pathfinder/ai_pathfind/queries.rs`: surface validity, destination and movement checks, line and ground passability, view lines, the quick zone test, tall buildings and the aircraft path. Direct: `golden_s3_path` (maps without bridges; occupancy written with the cell setters).
+  - Wired: `SimView::pathfinder`, `valid_movement_terrain`, the locomotor's terrain question and the AI's locomotor choice use the map once it exists.
+  - Units and buildings are asked through `PathUnits` and `TallBuildings`, which the sim does not implement yet.
+  - Left: `clip`, `slowDoesPathExist` (S5). Gaps: `OPEN_DECISIONS.md`.
+  - Found: `INFANTRY_MOVES_THROUGH_INFANTRY` is defined; `validMovementPosition` at a world position truncates where the rest floors; `Object::setLayer` rewrites unit occupancy.
 
 ### S4. Goal reservations and destination adjustment
 - C++: the rest of the query half of `AIPathfind.cpp` (about 1,200): goal and position updates, `adjust*`, spiral search, `moveAllies`. One worker.

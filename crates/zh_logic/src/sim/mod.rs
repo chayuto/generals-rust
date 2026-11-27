@@ -1343,6 +1343,8 @@ pub trait SimView {
     fn ai_current_victim_pos(&self, owner: ObjectSlot) -> Option<Coord3D>;
     fn ai_has_cur_locomotor(&self, owner: ObjectSlot) -> Bool;
     fn valid_movement_terrain(&self, layer: PathfindLayerEnum, rider: ObjectSlot, pos: &Coord3D) -> Bool;
+    /// `TheAI->pathfinder()`; `None` until `new_pathfind_map` has run.
+    fn pathfinder(&self) -> Option<&crate::pathfinder::Pathfinder>;
     fn pathfind_cell_type(
         &self,
         layer: PathfindLayerEnum,
@@ -6235,10 +6237,18 @@ impl SimView for SimContext {
         obj.ai_has_locomotor
     }
 
-    fn valid_movement_terrain(&self, layer: PathfindLayerEnum, _rider: ObjectSlot, pos: &Coord3D) -> Bool {
+    fn valid_movement_terrain(&self, layer: PathfindLayerEnum, rider: ObjectSlot, pos: &Coord3D) -> Bool {
         if let Some(ov) = self.world.valid_movement_terrain_override {
             return ov;
         }
+        if let (Some(pathfinder), Some(loco)) = (self.pathfinder(), self.cur_locomotor(rider)) {
+            return Bool::from(pathfinder.valid_movement_terrain(
+                layer,
+                loco.get_legal_surfaces(),
+                pos,
+            ));
+        }
+        // Without a map or a locomotor object: the cells scripted by a test.
         if pos.x < 0.0
             || pos.y < 0.0
             || pos.x > self.world.map_extent_hi.x
@@ -6249,6 +6259,10 @@ impl SimView for SimContext {
         let cell_x = real_to_int_floor(pos.x / 10.0_f32);
         let cell_y = real_to_int_floor(pos.y / 10.0_f32);
         Bool::from(self.pathfind_cell_type(layer, cell_x, cell_y) != PathfindCellType::Impassable)
+    }
+
+    fn pathfinder(&self) -> Option<&crate::pathfinder::Pathfinder> {
+        self.world.pathfinder.as_deref()
     }
 
     fn pathfind_cell_type(
@@ -11824,6 +11838,10 @@ impl SimView for MockSimApi {
         pos: &Coord3D,
     ) -> Bool {
         self.ctx.valid_movement_terrain(layer, rider, pos)
+    }
+
+    fn pathfinder(&self) -> Option<&crate::pathfinder::Pathfinder> {
+        self.ctx.pathfinder()
     }
 
     fn pathfind_cell_type(

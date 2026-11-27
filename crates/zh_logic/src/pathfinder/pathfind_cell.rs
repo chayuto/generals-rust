@@ -521,9 +521,13 @@ impl PathfindCellGrid {
     }
 
     pub fn release_info(&mut self, idx: CellIdx) {
-        if let Some(info_idx) = self.cells[idx.0].info_idx {
-            if let Some(info) = self.pool.get_mut(info_idx) {
-                info.path_parent = None;
+        // Retail compatible pathfinding keeps the parent link until the fixed
+        // code takes over: a cell that stays occupied keeps a dangling parent.
+        if self.mode.use_fixed_pathfinding {
+            if let Some(info_idx) = self.cells[idx.0].info_idx {
+                if let Some(info) = self.pool.get_mut(info_idx) {
+                    info.path_parent = None;
+                }
             }
         }
         let cell = &self.cells[idx.0];

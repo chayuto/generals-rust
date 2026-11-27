@@ -953,8 +953,7 @@ fn choose_locomotor_set_on(
         layer_of(sim, ctx.owner_slot),
         position_of(sim, ctx.owner_slot),
     );
-    let count = state.locomotor_set.locomotors().len();
-    let chosen = ai_seams(sim).choose_best_locomotor(ctx.owner_id, layer, count, &pos);
+    let chosen = best_locomotor(sim, ctx, &state.locomotor_set, layer, &pos);
     state.adopt_locomotor(chosen);
     mirror_locomotor(sim, ctx.owner_slot, wanted, state.cur_locomotor.is_some());
 }
@@ -973,6 +972,27 @@ fn mirror_locomotor(sim: &mut dyn SimApi, owner: ObjectSlot, set: LocomotorSetTy
         o.ai_locomotor_set = Some(set);
         o.cur_locomotor_set = set;
         o.ai_has_locomotor = Bool::from(has);
+    }
+}
+
+/// `chooseBestLocomotorForPosition`: the index in the set. Without a pathfind
+/// map the seam answers.
+fn best_locomotor(
+    sim: &mut dyn SimApi,
+    ctx: ModuleContext,
+    set: &LocomotorSet,
+    layer: PathfindLayerEnum,
+    pos: &Coord3D,
+) -> Option<usize> {
+    let surfaces = sim.pathfinder().map(|p| p.locomotor_surfaces_at(layer, pos));
+    let locomotors = set.locomotors();
+    match surfaces {
+        Some(mask) => locomotors
+            .iter()
+            .position(|l| l.get_legal_surfaces() & mask != 0),
+        None => {
+            ai_seams(sim).choose_best_locomotor(ctx.owner_id, layer, locomotors.len(), pos)
+        }
     }
 }
 
@@ -1002,8 +1022,8 @@ pub fn choose_good_locomotor(sim: &mut dyn SimApi, ctx: ModuleContext) {
         layer_of(sim, ctx.owner_slot),
         position_of(sim, ctx.owner_slot),
     );
-    let count = ai(sim, ctx).locomotor_set.locomotors().len();
-    let chosen = ai_seams(sim).choose_best_locomotor(ctx.owner_id, layer, count, &pos);
+    let set = ai(sim, ctx).locomotor_set.clone();
+    let chosen = best_locomotor(sim, ctx, &set, layer, &pos);
     ai(sim, ctx).adopt_locomotor(chosen);
 }
 

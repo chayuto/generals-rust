@@ -27,6 +27,9 @@ use crate::pathfinder::pathfind_zone_manager::{
 use crate::terrain::bridge::BridgeGeometry;
 use crate::terrain::{ElevatedLayers, TerrainEffects, TerrainLogic};
 
+mod queries;
+pub use queries::*;
+
 /// What the pathfinder reads from an object.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Footprint {

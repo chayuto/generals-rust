@@ -614,6 +614,18 @@ pub struct LocomotorWorld<'a> {
 }
 
 impl LocomotorWorld<'_> {
+    /// `Pathfinder::validMovementTerrain`: the sim's map, else the seam.
+    pub fn valid_movement_terrain(
+        &mut self,
+        layer: PathfindLayerEnum,
+        surfaces: LocomotorSurfaceTypeMask,
+        pos: &Coord3D,
+    ) -> Bool {
+        match self.sim.pathfinder() {
+            Some(map) => Bool::from(map.valid_movement_terrain(layer, surfaces, pos)),
+            None => self.seams.valid_movement_terrain(layer, surfaces, pos),
+        }
+    }
     fn has_physics(&self) -> bool {
         physics::physics(self.sim, self.owner).is_some()
     }
@@ -946,7 +958,7 @@ impl Locomotor {
         }
         if self.template.surfaces & LOCOMOTORSURFACE_AIR == 0 {
             let (layer, pos) = (w.layer(), w.position());
-            if w.seams
+            if w
                 .valid_movement_terrain(layer, self.template.surfaces, &pos)
                 == FALSE
                 && self.get_flag(LocomotorFlag::AllowInvalidPosition) == FALSE
@@ -1243,8 +1255,8 @@ impl Locomotor {
             };
             let layer = w.layer();
             let surfaces = self.template.surfaces;
-            if w.seams.valid_movement_terrain(layer, surfaces, &half) == FALSE
-                || w.seams.valid_movement_terrain(layer, surfaces, &next) == FALSE
+            if w.valid_movement_terrain(layer, surfaces, &half) == FALSE
+                || w.valid_movement_terrain(layer, surfaces, &next) == FALSE
             {
                 let turning = self.rotate_towards_position(w, goal, None);
                 w.set_turning(turning);
@@ -1332,7 +1344,7 @@ impl Locomotor {
                 pos.x += i as Real * PATHFIND_CELL_SIZE_F;
                 pos.y += j as Real * PATHFIND_CELL_SIZE_F;
                 let layer = w.layer();
-                if w.seams
+                if w
                     .valid_movement_terrain(layer, self.template.surfaces, &pos)
                     == FALSE
                 {

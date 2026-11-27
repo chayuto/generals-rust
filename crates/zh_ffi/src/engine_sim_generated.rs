@@ -539,6 +539,9 @@ impl SimView for EngineSim<'_> {
     fn valid_movement_terrain(&self, layer: PathfindLayerEnum, rider: ObjectSlot, pos: &Coord3D) -> Bool {
         not_wired("valid_movement_terrain")
     }
+    fn pathfinder(&self) -> Option<&zh_logic::pathfinder::Pathfinder> {
+        not_wired("pathfinder")
+    }
     fn pathfind_cell_type( &self, layer: PathfindLayerEnum, cell_x: Int, cell_y: Int, ) -> PathfindCellType {
         not_wired("pathfind_cell_type")
     }

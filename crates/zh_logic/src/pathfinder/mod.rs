@@ -6,6 +6,8 @@
 //! - `packets/phase6/PKT-418_PathfindZoneManager.md`
 
 pub mod ai_pathfind;
+pub mod path;
+pub mod path_node;
 pub mod pathfind_cell;
 pub mod pathfind_cell_info;
 pub mod pathfind_cell_list;
@@ -15,6 +17,8 @@ pub mod pathfind_zone_manager;
 pub mod zone_block;
 
 pub use ai_pathfind::*;
+pub use path::*;
+pub use path_node::*;
 pub use pathfind_cell::*;
 pub use pathfind_cell_info::*;
 pub use pathfind_cell_list::*;
