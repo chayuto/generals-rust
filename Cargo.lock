@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "zh_assets"
+version = "0.1.0"
+dependencies = [
+ "zh_common",
+]
+
+[[package]]
 name = "zh_common"
 version = "0.1.0"
 

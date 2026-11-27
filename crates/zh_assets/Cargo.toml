@@ -1,0 +1,10 @@
+[package]
+name = "zh_assets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Readers for retail model, texture and text files."
+
+[dependencies]
+zh_common = { path = "../zh_common" }

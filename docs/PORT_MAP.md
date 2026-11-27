@@ -287,6 +287,15 @@
 
 | Crate | Source File | Status |
 |---|---|---|
+| `zh_assets` | `crates/zh_assets/src/chunk.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/csf.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/dds.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/model.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/tga.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/w3d/anim.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/w3d/mesh.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/w3d/objects.rs` | `implemented` |
+| `zh_assets` | `crates/zh_assets/src/wwmath.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/golden_json.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/io/compression.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/math/gamemath.rs` | `implemented` |
@@ -322,6 +331,7 @@
 
 | Oracle JSON | Declared Vectors | `source_sha256` |
 |---|---:|---|
+| `docs/golden_vectors/AST_assets.json` | - | no |
 | `docs/golden_vectors/FIXES_ObjectWeapon.json` | - | no |
 | `docs/golden_vectors/JOINS2_Modules.json` | - | no |
 | `docs/golden_vectors/JOINS_Modules.json` | - | no |
@@ -418,6 +428,7 @@
 
 | Crate | Test Suite | Status |
 |---|---|---|
+| `zh_assets` | `crates/zh_assets/tests/golden_ast_assets.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_gamemath.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_pkt001_002.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_pkt004.rs` | `active` |

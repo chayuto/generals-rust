@@ -4,6 +4,7 @@ members = [
     "crates/zh_common",
     "crates/zh_logic",
     "crates/zh_ffi",
+    "crates/zh_assets",
 ]
 
 [workspace.package]
