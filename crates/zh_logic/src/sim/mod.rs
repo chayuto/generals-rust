@@ -4141,6 +4141,22 @@ impl SimContext {
             }
         }
         self.world.objects.link_into_world(slot);
+        // `sendObjectCreated` binds the drawable after the modules' `onObjectCreated`:
+        // `friend_bindToDrawable` gives it the weapon set flags held by then.
+        if let Some(obj) = self.world.objects.get_mut(slot) {
+            for i in 0..WeaponSetType::Count as Int {
+                let Some(flag) = WeaponSetType::from_i32(i) else {
+                    continue;
+                };
+                if let Some(condition) = weapon_set_model_condition(flag) {
+                    if obj.weapon_set_flags.test(i) != FALSE {
+                        obj.set_model_condition_state(condition);
+                    } else {
+                        obj.clear_model_condition_state(condition);
+                    }
+                }
+            }
+        }
         for &(ms, mask) in &behaviors {
             if mask.contains(FacetMask::UPDATE) {
                 self.world.sleepy_updates.register_update_module(

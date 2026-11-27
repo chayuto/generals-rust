@@ -452,3 +452,21 @@ It returns 0 and zeroes the normal, whatever `getGroundHeight` says. The shipped
 ### `DelayBetweenShots = Min:x` needs a second label
 
 `parseShotDelay` reads the next token unconditionally, so a lone `Min:x` throws. A second label other than `Max` leaves the maximum equal to the minimum.
+
+## Harness traps found by the second joined-module oracle (`gen_joins2_modules.cpp`)
+
+- **Unknown INI fields pass silently.** The release build ignores a misspelt field in an object
+  block (`KillWhenStartToppled` for `KillWhenStartToppling`), so the oracle runs with the default.
+  The Rust parser rejects it; keep a Rust suite reading the same fixture text.
+- **`Weapon`'s historic damage list is not a log of shots.** Each shot first trims it with
+  `m_historicDamageLimit` against the current frame, so only the last shot survives. Set the limit
+  to 1 and empty the list after every frame.
+- **The base `TerrainLogic` blocks lines of sight.** `SpecialAbilityUpdate` then walks toward a
+  target already in range; override `isClearLineOfSight`.
+- **`HelicopterSlowDeathBehavior` without `FinalRubbleObject` throws** at the final blow-up.
+- **Loading into a live module** needs the lists it requires empty to be emptied first
+  (`ProductionUpdate`'s queue, `SpawnBehavior::m_spawnIDs`,
+  `SpecialAbilityUpdate::m_specialObjectIDList`). Keep each update's heap index across the load.
+- **A load is not a round trip.** `ParkingPlaceBehavior::xfer` builds its spaces and runways while
+  loading, so a module saved before they exist saves more afterwards. Compare with what the
+  reference saves after the load, not with the bytes loaded.
