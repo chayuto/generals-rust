@@ -458,3 +458,72 @@ fn the_mood_search_heeds_walls_fog_and_the_teams_target() {
     assert_ne!(ask(&mut sim, TRUE), Some(far_id));
     assert_eq!(sim.team_common_target(gunner), Some(ObjectId::INVALID));
 }
+
+fn add_turret_tank(sim: &mut SimContext) {
+    let ini = object_ini(
+        "Turreted",
+        "SELECTABLE VEHICLE CAN_ATTACK",
+        "Treads",
+        7.0,
+        "  WeaponSet\n    Conditions = None\n    Weapon = PRIMARY Rifle\n  End\n",
+    )
+    .replace(
+        "ModuleTag_AI\n",
+        "ModuleTag_AI\n    Turret\n      TurretTurnRate = 180\n      \
+         ControlledWeaponSlots = PRIMARY\n      RecenterTime = 300\n      \
+         MinIdleScanInterval = 300\n      MaxIdleScanInterval = 600\n      \
+         MinIdleScanAngle = 30\n      MaxIdleScanAngle = 60\n    End\n",
+    );
+    let mut reader = IniReader::new("turret.ini", ini.as_bytes(), IniLoadType::Overwrite);
+    sim.rules
+        .load_thing_templates_from_ini(&mut reader)
+        .expect("templates");
+}
+
+fn turret_angle(sim: &mut SimContext, unit: ObjectSlot) -> Real {
+    ai(sim, unit).turrets[0].as_ref().expect("turret").angle
+}
+
+/// The turret looks around while idle, then turns to the victim behind and fires
+/// while the body stays put (held to the reference by the turret trace of
+/// `golden_s14_attack_states.rs`).
+#[test]
+fn a_turreted_vehicle_scans_when_idle_and_aims_with_its_turret() {
+    let mut sim = world();
+    add_turret_tank(&mut sim);
+    let tank = spawn(&mut sim, "Turreted", ATTACKERS, 205.0, 105.0);
+    let mut turned = false;
+    let mut returned = false;
+    for _ in 0..200 {
+        run_frame(&mut sim, &mut NoFrameSeams);
+        let angle = turret_angle(&mut sim, tank);
+        turned |= angle.abs() > 0.3;
+        returned |= turned && angle == 0.0;
+    }
+    assert!(turned && returned, "scanned {turned}, recentred {returned}");
+
+    let victim = spawn(&mut sim, "Dummy", DEFENDERS, 145.0, 105.0);
+    settle(&mut sim);
+    let heading = sim.object(tank).expect("tank").thing.get_orientation();
+    order(
+        &mut sim,
+        tank,
+        AiCommandType::AttackObject,
+        Some(victim),
+        Coord3D::default(),
+    );
+    let mut widest: Real = 0.0;
+    for _ in 0..300 {
+        run_frame(&mut sim, &mut NoFrameSeams);
+        widest = widest.max(turret_angle(&mut sim, tank).abs());
+        if health(&sim, victim).is_none() {
+            break;
+        }
+    }
+    assert_eq!(health(&sim, victim), None, "destroyed");
+    assert!(widest > 3.0, "the turret turned round: {widest}");
+    let body = sim.object(tank).expect("tank").thing.get_orientation();
+    assert_eq!(body, heading, "the body did not turn");
+    let pos = position(&sim, tank);
+    assert!((pos.x - 205.0).abs() < 5.0, "fired from where it stood");
+}
