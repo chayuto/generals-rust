@@ -60,6 +60,7 @@ use crate::object::thing_template::{
 use crate::object::weapon::WeaponStore;
 use crate::object::weapon_effects::WeaponStoreState;
 use crate::object::weapon_set::{
+    self,
     CanAttackResult, WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType,
     WEAPONSLOT_COUNT,
 };
@@ -1142,6 +1143,13 @@ pub trait SimView {
     fn closest_object_from(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot>;
     /// `iterateObjectsInRange(owner, radius, rule, filters, ITER_SORTED_NEAR_TO_FAR)`.
     fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot>;
+    /// `getClosestObject(pos, radius, rule, filters)`.
+    fn closest_object_to_position(&self, pos: &Coord3D, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot>;
+    /// `getSpawnBehaviorInterface()->getCanAnySlavesUseWeaponAgainstTarget`; `None`
+    /// without a spawn behaviour.
+    fn spawn_slaves_use_weapon_against_target(&self, owner: ObjectSlot, attack_type: UnsignedInt, victim: Option<ObjectSlot>, pos: &Coord3D, cmd_source: CommandSourceType) -> Option<CanAttackResult>;
+    /// `Pathfinder::isAttackViewBlockedByObstacle`; never without a pathfind map.
+    fn attack_view_blocked(&self, owner: ObjectSlot, from: &Coord3D, victim: Option<ObjectSlot>, to: &Coord3D) -> bool;
     /// `getClosestObject(center, FROM_CENTER_2D)` among the objects of `kind` that the player
     /// controlling `team_id` owns.
     fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot>;
@@ -1439,7 +1447,8 @@ pub trait SimView {
     fn slaved_is_self_tasking(&self, owner: ObjectSlot) -> Bool;
     /// The last node of `AIUpdateInterface::getPath`; `None` without a path.
     fn ai_path_destination(&self, owner: ObjectSlot) -> Option<Coord3D>;
-    /// `Object::getAbleToAttackSpecificObject`, from `SimWorld::attack_abilities`.
+    /// `Object::getAbleToAttackSpecificObject`. An entry in
+    /// `SimWorld::attack_abilities` answers instead.
     fn able_to_attack_specific_object(
         &self,
         owner: ObjectSlot,
@@ -1447,7 +1456,8 @@ pub trait SimView {
         target: ObjectSlot,
         cmd_source: CommandSourceType,
     ) -> CanAttackResult;
-    /// `Object::getAbleToUseWeaponAgainstTarget`, from `SimWorld::attack_abilities`.
+    /// `Object::getAbleToUseWeaponAgainstTarget`. An entry in
+    /// `SimWorld::attack_abilities` answers instead.
     fn able_to_use_weapon_against_target(
         &self,
         owner: ObjectSlot,
@@ -2823,12 +2833,10 @@ impl SimContext {
             .unwrap_or(team_id.0)
     }
 
-    fn attack_ability(&self, owner: ObjectSlot) -> AttackAbility {
-        self.world
-            .objects
-            .id_of(owner)
-            .and_then(|id| self.world.attack_abilities.get(&id).copied())
-            .unwrap_or_default()
+    /// The test's answers for this object's weapons, if it gave any.
+    fn scripted_attack_ability(&self, owner: ObjectSlot) -> Option<AttackAbility> {
+        let id = self.world.objects.id_of(owner)?;
+        self.world.attack_abilities.get(&id).copied()
     }
 
     /// `aiDoCommand` for a caller outside the world (`AIGroup`). `false` for an
@@ -5680,6 +5688,25 @@ impl SimView for SimContext {
         self.cur_locomotor(owner).map(|l| l.preferred_height)
     }
 
+    fn closest_object_to_position(&self, pos: &Coord3D, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot> {
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let lookup = |id| partition_object(objects, factory, id);
+        let mut allow = |id| objects.slot_by_id(id).is_some_and(&mut *filter);
+        let found = self.world.partition.get_closest_object(QueryCenter::Position(*pos), radius, rule, &lookup, &mut allow);
+        found.id.and_then(|id| objects.slot_by_id(id))
+    }
+
+    fn spawn_slaves_use_weapon_against_target(&self, owner: ObjectSlot, attack_type: UnsignedInt, victim: Option<ObjectSlot>, pos: &Coord3D, cmd_source: CommandSourceType) -> Option<CanAttackResult> {
+        let ms = self.world.objects.get(owner)?.spawn_slot?;
+        let spawn = self.world.modules.payload(ms)?.as_spawn_behavior()?;
+        Some(spawn.get_can_any_slaves_use_weapon_against_target(self, attack_type, victim, pos, cmd_source))
+    }
+
+    fn attack_view_blocked(&self, owner: ObjectSlot, from: &Coord3D, victim: Option<ObjectSlot>, to: &Coord3D) -> bool {
+        self.attack_view_blocked_by_obstacle(owner, from, victim, to)
+    }
+
     fn terrain_extent(&self) -> Region3D {
         *self.world.partition.world_extents()
     }
@@ -6309,6 +6336,9 @@ impl SimView for SimContext {
         let obj = self.world.objects.get(owner)?;
         if let Some(ai_ms) = obj.ai_slot {
             if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|m| m.as_ai()) {
+                if let Some(id) = ai.current_victim_id() {
+                    return self.world.objects.slot_by_id(id);
+                }
                 if let Some(v) = ai.get_current_victim() {
                     return Some(v);
                 }
@@ -6321,6 +6351,11 @@ impl SimView for SimContext {
         let obj = self.world.objects.get(owner)?;
         if let Some(ai_ms) = obj.ai_slot {
             if let Some(ai) = self.world.modules.payload(ai_ms).and_then(|m| m.as_ai()) {
+                // `getCurrentVictimPos`: attacking with no victim means a spot.
+                if let Some(id) = ai.current_victim_id() {
+                    let attacking = obj.status.test(ObjectStatusType::IsAttacking.as_i32()) != FALSE;
+                    return (attacking && id == ObjectId::INVALID).then(|| ai.goal_of().1);
+                }
                 if let Some(pos) = ai.get_current_victim_pos() {
                     return Some(pos);
                 }
@@ -6600,22 +6635,32 @@ impl SimView for SimContext {
     fn able_to_attack_specific_object(
         &self,
         owner: ObjectSlot,
-        _attack_type: UnsignedInt,
-        _target: ObjectSlot,
-        _cmd_source: CommandSourceType,
+        attack_type: UnsignedInt,
+        target: ObjectSlot,
+        cmd_source: CommandSourceType,
     ) -> CanAttackResult {
-        self.attack_ability(owner).specific_object
+        match self.scripted_attack_ability(owner) {
+            Some(entry) => entry.specific_object,
+            None => weapon_set::able_to_attack_specific_object(
+                self, owner, attack_type, target, cmd_source,
+            ),
+        }
     }
 
     fn able_to_use_weapon_against_target(
         &self,
         owner: ObjectSlot,
-        _attack_type: UnsignedInt,
-        _victim: Option<ObjectSlot>,
-        _pos: &Coord3D,
-        _cmd_source: CommandSourceType,
+        attack_type: UnsignedInt,
+        victim: Option<ObjectSlot>,
+        pos: &Coord3D,
+        cmd_source: CommandSourceType,
     ) -> CanAttackResult {
-        self.attack_ability(owner).weapon_against_target
+        match self.scripted_attack_ability(owner) {
+            Some(entry) => entry.weapon_against_target,
+            None => weapon_set::able_to_use_weapon_against_target(
+                self, owner, attack_type, victim, pos, cmd_source,
+            ),
+        }
     }
 
     fn shared_ai_seams(&self) -> SharedAiSeams {
@@ -11507,6 +11552,18 @@ impl SimView for MockSimApi {
 
     fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot> {
         self.ctx.objects_from_near_to_far(owner, radius, rule, filter)
+    }
+
+    fn closest_object_to_position(&self, pos: &Coord3D, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot> {
+        self.ctx.closest_object_to_position(pos, radius, rule, filter)
+    }
+
+    fn spawn_slaves_use_weapon_against_target(&self, owner: ObjectSlot, attack_type: UnsignedInt, victim: Option<ObjectSlot>, pos: &Coord3D, cmd_source: CommandSourceType) -> Option<CanAttackResult> {
+        self.ctx.spawn_slaves_use_weapon_against_target(owner, attack_type, victim, pos, cmd_source)
+    }
+
+    fn attack_view_blocked(&self, owner: ObjectSlot, from: &Coord3D, victim: Option<ObjectSlot>, to: &Coord3D) -> bool {
+        self.ctx.attack_view_blocked(owner, from, victim, to)
     }
 
     fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {

@@ -162,6 +162,11 @@ fn path_ends(path: Option<&Path>) -> String {
 }
 
 impl AiSeams for Seams {
+    /// The reference records these states instead of running them: the attack
+    /// states of both machines.
+    fn replaces_state(&mut self, _owner: ObjectId, state: StateId) -> Bool {
+        Bool::from(zh_logic::ai::ai_states::attack::is_attack_state(state))
+    }
     fn state_enter(&mut self, owner: ObjectId, state: StateId) -> StateReturnType {
         self.call(format!("E,{},{state}", owner.0));
         StateReturnType::Continue

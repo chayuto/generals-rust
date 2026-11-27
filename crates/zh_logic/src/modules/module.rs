@@ -2045,6 +2045,10 @@ pub trait AiUpdateFacet {
     fn get_current_victim_pos(&self) -> Option<Coord3D> {
         None
     }
+    /// `m_currentVictimID` of an AI that keeps it.
+    fn current_victim_id(&self) -> Option<ObjectId> {
+        None
+    }
     fn has_cur_locomotor(&self) -> Bool {
         FALSE
     }

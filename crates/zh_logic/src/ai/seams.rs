@@ -378,6 +378,59 @@ pub trait AiSeams: Send {
     /// `AssaultTransportAIInterface::beginAssault` (S15), asked of every owner
     /// with an AI; only an assault transport acts on it.
     fn begin_assault(&mut self, _owner: ObjectId, _victim: Option<ObjectId>) {}
+
+    // What the attack states ask of the turrets (`TurretAI`, wired by the second
+    // half of S14). They are asked only of a module whose data has a turret.
+    /// `getWhichTurretForCurWeapon`.
+    fn which_turret_for_cur_weapon(&mut self, _owner: ObjectId) -> Option<usize> {
+        None
+    }
+    fn set_turret_target_object(
+        &mut self,
+        _owner: ObjectId,
+        _turret: usize,
+        _victim: Option<ObjectId>,
+        _force: Bool,
+    ) {
+    }
+    fn set_turret_target_position(&mut self, _owner: ObjectId, _turret: usize, _pos: &Coord3D) {}
+    fn turret_turn_rate(&mut self, _owner: ObjectId, _turret: usize) -> Real {
+        0.0
+    }
+    /// `isWeaponSlotOnTurretAndAimingAtTarget`; asked of every unit choosing a
+    /// weapon.
+    fn weapon_slot_on_turret_aiming_at(
+        &mut self,
+        _owner: ObjectId,
+        _slot: usize,
+        _victim: ObjectId,
+    ) -> Bool {
+        FALSE
+    }
+
+    // Garrisons (S11) and teams.
+    /// `ContainModuleInterface::calcBestGarrisonPosition`.
+    fn garrison_fire_position(
+        &mut self,
+        _container: ObjectId,
+        _target_pos: &Coord3D,
+    ) -> Option<Coord3D> {
+        None
+    }
+    /// `ContainModuleInterface::attemptBestFirePointPosition`: moves the rider to
+    /// the fire point nearest the target and says whether it is in range.
+    fn attempt_best_fire_point(
+        &mut self,
+        _owner: ObjectId,
+        _victim: Option<ObjectId>,
+        _target_pos: &Coord3D,
+    ) -> Bool {
+        FALSE
+    }
+    /// A team that attacks a common target takes `victim` if it has none.
+    fn offer_team_target(&mut self, _owner: ObjectId, _victim: ObjectId) {}
+    /// The team forgets `victim` if it is its common target.
+    fn drop_team_target(&mut self, _owner: ObjectId, _victim: ObjectId) {}
 }
 
 /// A world without any of the code behind [`AiSeams`].
@@ -456,6 +509,15 @@ forward! {
     is_aircraft_that_adjusts_destination(owner: ObjectId) -> Bool;
     adjust_target_destination(owner: ObjectId, target: Option<ObjectId>, target_pos: &Coord3D, weapon: &str, approach: Coord3D) -> Coord3D;
     begin_assault(owner: ObjectId, victim: Option<ObjectId>);
+    which_turret_for_cur_weapon(owner: ObjectId) -> Option<usize>;
+    set_turret_target_object(owner: ObjectId, turret: usize, victim: Option<ObjectId>, force: Bool);
+    set_turret_target_position(owner: ObjectId, turret: usize, pos: &Coord3D);
+    turret_turn_rate(owner: ObjectId, turret: usize) -> Real;
+    weapon_slot_on_turret_aiming_at(owner: ObjectId, slot: usize, victim: ObjectId) -> Bool;
+    garrison_fire_position(container: ObjectId, target_pos: &Coord3D) -> Option<Coord3D>;
+    attempt_best_fire_point(owner: ObjectId, victim: Option<ObjectId>, target_pos: &Coord3D) -> Bool;
+    offer_team_target(owner: ObjectId, victim: ObjectId);
+    drop_team_target(owner: ObjectId, victim: ObjectId);
     can_do_special_power(owner: ObjectId, power: UnsignedInt, target: (Option<ObjectId>, Option<Coord3D>), options: UnsignedInt) -> Bool;
     sell_object(owner: ObjectId);
     override_special_power_destination(owner: ObjectId, power_type: Int, location: &Coord3D);

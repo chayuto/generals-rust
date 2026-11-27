@@ -33,7 +33,7 @@ fn is_kind(sim: &dyn SimApi, slot: ObjectSlot, kind: KindOfType) -> bool {
 
 /// `PartitionManager::getRelativeAngle2D`: the angle from where the object
 /// faces to `pos`.
-fn relative_angle_2d(sim: &dyn SimApi, slot: ObjectSlot, pos: &Coord3D) -> Real {
+pub(crate) fn relative_angle_2d(sim: &dyn SimApi, slot: ObjectSlot, pos: &Coord3D) -> Real {
     let from = position_of(sim, slot);
     let mut x = pos.x - from.x;
     let mut y = pos.y - from.y;

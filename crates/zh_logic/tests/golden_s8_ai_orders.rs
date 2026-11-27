@@ -706,10 +706,10 @@ impl AiSeams for OwnerSeams {
 #[test]
 fn world_orders_reach_the_module() {
     use zh_logic::ai::ai_state_machine::state_id as s;
-    use zh_logic::ai::seams::NoAiSeams;
     let tape: SharedTape = Arc::default();
     let mut sim = world(&tape, "00");
-    sim.ai_seams = shared(NoAiSeams);
+    // States of other slices only record, so that an order's state stays.
+    sim.ai_seams = shared(OwnerSeams(Arc::default()));
     sim.paths = Box::new(zh_logic::ai::seams::NoPathServices);
     sim.world.frame = 10;
     let spawn = |sim: &mut SimContext, name: &str, team: usize| {
@@ -841,7 +841,7 @@ fn world_orders_reach_the_module() {
     })
     .expect("dispatch");
     assert_eq!(*asked.lock().expect("log"), vec![owner_id]);
-    sim.ai_seams = shared(NoAiSeams);
+    sim.ai_seams = shared(zh_logic::ai::seams::NoAiSeams);
 
     // The setter other code calls through the facet.
     state(&mut sim, ms).set_goal_orientation(1.0);

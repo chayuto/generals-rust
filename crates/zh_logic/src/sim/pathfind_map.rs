@@ -20,8 +20,9 @@ use crate::gamelogic::global_data::BodyDamageType;
 use crate::modules::update::ai_update::AiUpdate;
 use crate::pathfinder::ai_pathfind::{
     AdjustUnit, Footprint, GoalMover, GoalObject, NoPathCost, PathAgent, PathUnit, PathUnits,
-    PathWorld, Pathfinder, TallBuilding, TallBuildings, ViewParty,
+    PathWorld, Pathfinder, TallBuilding, TallBuildings, TerrainSight, ViewParty,
 };
+use crate::object::weapon_queries;
 use crate::pathfinder::pathfind_constants::{PathfindLayerEnum, PATHFIND_CELL_SIZE_F};
 use crate::rules::combat_types::{DamageType, DeathType, LocomotorSurfaceTypeMask};
 use crate::rules::disabled_types::DisabledType;
@@ -556,5 +557,72 @@ impl SimContext {
             &unit,
             dest,
         ))
+    }
+}
+
+impl SimContext {
+    /// `Pathfinder::isAttackViewBlockedByObstacle`: whether `owner`, standing at
+    /// `from`, cannot see to shoot at `victim` (or the spot) at `to`. Never
+    /// blocked without a pathfind map.
+    pub(super) fn attack_view_blocked_by_obstacle(
+        &self,
+        owner: ObjectSlot,
+        from: &Coord3D,
+        victim: Option<ObjectSlot>,
+        to: &Coord3D,
+    ) -> bool {
+        let uses = self.rules.ai_data.attack_uses_line_of_sight != FALSE;
+        let (Some(map), Some(attacker)) = (self.world.pathfinder.as_ref(), self.view_party(owner))
+        else {
+            return false;
+        };
+        if !uses || !attacker.needs_line_of_sight {
+            return false;
+        }
+        let victim_party = victim.and_then(|slot| self.view_party(slot));
+        let weapon = self
+            .world
+            .objects
+            .get(owner)
+            .filter(|_| self.object_is_kind_of(owner, KindOfType::Immobile) == FALSE)
+            .and_then(|o| {
+                let set = &o.weapon_set;
+                set.get_weapon_in_weapon_slot(set.get_cur_weapon_slot())
+            });
+        let sight = weapon.map_or(TerrainSight::NoWeapon, |w| {
+            let clear = match victim {
+                Some(v) => weapon_queries::is_clear_goal_firing_los_terrain(self, owner, from, v),
+                None => weapon_queries::is_clear_goal_firing_los_terrain_to_position(
+                    self, owner, from, to,
+                ),
+            };
+            let terrain_blocked = clear == FALSE;
+            if w.template.is_contact_weapon() != FALSE {
+                TerrainSight::Contact { terrain_blocked }
+            } else {
+                TerrainSight::Weapon { terrain_blocked }
+            }
+        });
+        map.is_attack_view_blocked(uses, &attacker, from, victim_party.as_ref(), to, sight)
+    }
+
+    /// What a line of sight question reads from one end.
+    fn view_party(&self, slot: ObjectSlot) -> Option<ViewParty> {
+        let obj = self.world.objects.get(slot)?;
+        let id_of = |slot| self.world.objects.id_of(slot);
+        let slaver = obj
+            .slaved_slot
+            .and_then(|ms| self.world.modules.payload(ms)?.as_slaved_update())
+            .map(|slaved| slaved.get_slaver_id());
+        Some(ViewParty {
+            id: obj.id,
+            position: *obj.thing.get_position(),
+            layer: obj.layer,
+            container: obj.contained_by.and_then(id_of).unwrap_or(ObjectId::INVALID),
+            slaver: slaver.unwrap_or(ObjectId::INVALID),
+            needs_line_of_sight: self.object_is_kind_of(slot, KindOfType::AttackNeedsLineOfSight)
+                != FALSE,
+            significantly_above_terrain: self.object_is_significantly_above_terrain(slot) != FALSE,
+        })
     }
 }

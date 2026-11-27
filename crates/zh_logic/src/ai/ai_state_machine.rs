@@ -9,6 +9,7 @@
 //! data one statement at a time, so a state can order its own unit and the order
 //! reaches the machine while the state is still running.
 
+use crate::ai::ai_states::attack::{self, AttackStates};
 use crate::ai::ai_states::movement::{self, MoveStates};
 use crate::ai::ai_states::{self, IdleState};
 use crate::ai::seams::SeamsGuard;
@@ -101,7 +102,8 @@ pub struct AiStateMachine {
     pub goal_position: Coord3D,
     pub locked: Bool,
     pub default_state_inited: Bool,
-    transition_depth: u32,
+    /// The reference's count of nested transition checks.
+    pub(crate) transition_depth: u32,
     pub goal_path: Vec<Coord3D>,
     /// `m_goalWaypoint`: id and name.
     pub goal_waypoint: Option<(UnsignedInt, String)>,
@@ -116,6 +118,8 @@ pub struct AiStateMachine {
     pub attack_move_idle: [IdleState; 3],
     /// The movement state objects.
     pub moves: MoveStates,
+    /// The attack state objects.
+    pub attacks: AttackStates,
 }
 
 impl Default for AiStateMachine {
@@ -137,6 +141,7 @@ impl Default for AiStateMachine {
             idle: IdleState::new(TRUE),
             attack_move_idle: [IdleState::new(FALSE); 3],
             moves: MoveStates::default(),
+            attacks: AttackStates::default(),
         }
     }
 }
@@ -276,8 +281,17 @@ impl AiStateMachine {
                 xfer.xfer_version(&mut version, 1)
             }
             _ if movement::is_movement_state(id) && seams.replaces_state(owner, id) == FALSE => {
-                self.moves
-                    .xfer(id, &mut self.attack_move_idle[0], xfer, owner, seams)
+                self.moves.xfer(
+                    id,
+                    &mut self.attack_move_idle[0],
+                    &mut self.attacks.attack_move,
+                    xfer,
+                    owner,
+                    seams,
+                )
+            }
+            _ if attack::is_attack_state(id) && seams.replaces_state(owner, id) == FALSE => {
+                self.attacks.main.xfer(xfer)
             }
             _ => seams.state_xfer(owner, id, xfer),
         }

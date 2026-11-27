@@ -60,6 +60,7 @@ mod path_follow;
 
 use allies::{move_allies, move_allies_away_from_destination, private_move_away_from_unit};
 pub use collision::process_collision;
+pub(crate) use collision::relative_angle_2d;
 pub use path_follow::{
     can_compute_quick_path, compute_path, compute_quick_path, is_valid_locomotor_position,
     locomotor_distance_to_goal, request_approach_path, request_attack_path, request_path,
@@ -1488,7 +1489,7 @@ fn set_goal_object(sim: &mut dyn SimApi, ctx: ModuleContext, id: Option<ObjectId
 }
 
 /// `friend_setGoalObject`: past the lock.
-fn friend_set_goal_object(sim: &mut dyn SimApi, ctx: ModuleContext, id: Option<ObjectId>) {
+pub(crate) fn friend_set_goal_object(sim: &mut dyn SimApi, ctx: ModuleContext, id: Option<ObjectId>) {
     let locked = ai(sim, ctx).machine.locked;
     ai(sim, ctx).machine.unlock();
     set_goal_object(sim, ctx, id);
@@ -2340,6 +2341,10 @@ impl AiUpdateFacet for AiUpdate {
 
     fn is_attacking(&self) -> Bool {
         Bool::from(self.is_attacking_state())
+    }
+
+    fn current_victim_id(&self) -> Option<ObjectId> {
+        Some(self.current_victim_id)
     }
 
     fn is_idle(&self) -> Bool {

@@ -53,6 +53,7 @@ use zh_logic::object::thing_template::{
 use zh_logic::object::weapon::WeaponStore;
 use zh_logic::object::weapon_effects::WeaponStoreState;
 use zh_logic::object::weapon_set::{
+    self,
     CanAttackResult, WeaponLockType, WeaponSet, WeaponSetConditionType, WeaponSlotType,
     WEAPONSLOT_COUNT,
 };
@@ -171,6 +172,15 @@ impl SimView for EngineSim<'_> {
     }
     fn objects_from_near_to_far(&self, owner: ObjectSlot, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Vec<ObjectSlot> {
         not_wired("objects_from_near_to_far")
+    }
+    fn closest_object_to_position(&self, pos: &Coord3D, radius: Real, rule: DistanceCalculationType, filter: &mut dyn FnMut(ObjectSlot) -> bool) -> Option<ObjectSlot> {
+        not_wired("closest_object_to_position")
+    }
+    fn spawn_slaves_use_weapon_against_target(&self, owner: ObjectSlot, attack_type: UnsignedInt, victim: Option<ObjectSlot>, pos: &Coord3D, cmd_source: CommandSourceType) -> Option<CanAttackResult> {
+        not_wired("spawn_slaves_use_weapon_against_target")
+    }
+    fn attack_view_blocked(&self, owner: ObjectSlot, from: &Coord3D, victim: Option<ObjectSlot>, to: &Coord3D) -> bool {
+        not_wired("attack_view_blocked")
     }
     fn find_closest_team_object_of_kind(&self, center: &Coord3D, radius: Real, kind: KindOfType, team_id: TeamId) -> Option<ObjectSlot> {
         not_wired("find_closest_team_object_of_kind")

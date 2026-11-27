@@ -6,11 +6,13 @@
 //!
 //! A state object lives as long as its machine, so what one stay in a state
 //! leaves behind is there at the next one. The sounds of `startMoveSound` are
-//! the client's; nothing here draws for them. The states of the attack-move sub
-//! machine other than idle (attack S14, crate pickup S11) are answered by
+//! the client's; nothing here draws for them. The attack state of the attack-move
+//! sub machine is [`crate::ai::ai_states::attack`], which also drives its approach
+//! through `AIInternalMoveToState` here; crate pickup (S11) is answered by
 //! [`crate::ai::seams::AiSeams`].
 
 use crate::ai::ai_state_machine::state_id;
+use crate::ai::ai_states::attack::{self, AttackState, Host};
 use crate::ai::ai_states::IdleState;
 use crate::ai::seams::{ai_seams, SeamsGuard};
 use crate::arena::{ModuleContext, ObjectSlot};
@@ -86,7 +88,7 @@ impl Default for InternalMove {
 
 impl InternalMove {
     /// `AIInternalMoveToState::xfer`.
-    fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+    pub(super) fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
         let mut version: XferVersion = 1;
         xfer.xfer_version(&mut version, 1)?;
         xfer.xfer_coord3d(&mut self.goal_position)?;
@@ -235,12 +237,13 @@ impl MoveStates {
         }
     }
 
-    /// `State::xfer` of a movement state. `idle` is the idle state of the
+    /// `State::xfer` of a movement state. `idle` and `attack` are states of the
     /// attack-move sub machine.
     pub fn xfer(
         &mut self,
         id: StateId,
         idle: &mut IdleState,
+        attack: &mut AttackState,
         xfer: &mut dyn Xfer,
         owner: ObjectId,
         seams: &mut SeamsGuard,
@@ -287,6 +290,10 @@ impl MoveStates {
                 }
                 if sub.current == state_id::IDLE {
                     idle.xfer(xfer)?;
+                } else if sub.current == state_id::ATTACK_OBJECT
+                    && seams.replaces_state(owner, sub.current) == FALSE
+                {
+                    attack.xfer(xfer)?;
                 } else {
                     seams.state_xfer(owner, sub.current, xfer)?;
                 }
@@ -305,7 +312,10 @@ fn moves(sim: &mut dyn SimApi, ctx: ModuleContext) -> &mut MoveStates {
 }
 
 fn data(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> &mut InternalMove {
-    moves(sim, ctx).internal(id)
+    match attack::split_move_key(id) {
+        Some((host, state)) => ai(sim, ctx).machine.attacks.internal_move(host, state),
+        None => moves(sim, ctx).internal(id),
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -407,7 +417,7 @@ fn last_node(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<(Coord3D, Pathf
 }
 
 /// `isSamePosition`: the target moved no more than a tenth of its distance.
-fn is_same_position(ours: &Coord3D, previous: &Coord3D, current: &Coord3D) -> bool {
+pub(super) fn is_same_position(ours: &Coord3D, previous: &Coord3D, current: &Coord3D) -> bool {
     let dx = current.x - previous.x;
     let dy = current.y - previous.y;
     let tx = current.x - ours.x;
@@ -435,6 +445,9 @@ fn set_adjusts_destination(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId
 
 /// `computePath`, as each state overrides it.
 fn compute_path(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
+    if let Some((host, state)) = attack::split_move_key(id) {
+        return attack::compute_path(sim, ctx, host, state);
+    }
     match id {
         state_id::MOVE_OUT_OF_THE_WAY => {
             data(sim, ctx, id).waiting_for_path = TRUE;
@@ -468,7 +481,7 @@ fn compute_path(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
     }
 }
 
-fn internal_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateReturnType {
+pub(super) fn internal_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateReturnType {
     let owner = ctx.owner_slot;
     let waiting = ai(sim, ctx).waiting_for_path;
     data(sim, ctx, id).waiting_for_path = waiting;
@@ -520,7 +533,7 @@ fn internal_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> S
     StateReturnType::Continue
 }
 
-fn internal_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) {
+pub(super) fn internal_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) {
     ai(sim, ctx).ending_move();
     // Every object has a team here.
     if ai_update::is_doing_ground_movement(sim, ctx) != FALSE && is_ultra_accurate(sim, ctx) {
@@ -534,7 +547,7 @@ fn internal_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) {
     }
 }
 
-fn internal_update(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateReturnType {
+pub(super) fn internal_update(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateReturnType {
     use ModelConditionFlagType as M;
     let owner = ctx.owner_slot;
     let had_path = ai(sim, ctx).has_path != FALSE;
@@ -904,7 +917,15 @@ fn sub(sim: &mut dyn SimApi, ctx: ModuleContext) -> &mut SubMachine {
     &mut moves(sim, ctx).attack_move.sub
 }
 
+/// The attack state of the sub machine, unless the seams stand in for it.
+fn is_ported_attack(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
+    id == state_id::ATTACK_OBJECT && ai_seams(sim).replaces_state(ctx.owner_id, id) == FALSE
+}
+
 fn sub_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateReturnType {
+    if is_ported_attack(sim, ctx, id) {
+        return attack::on_enter(sim, ctx, Host::AttackMove, id);
+    }
     if id != state_id::IDLE {
         return ai_seams(sim).state_enter(ctx.owner_id, id);
     }
@@ -916,7 +937,9 @@ fn sub_on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateR
 }
 
 fn sub_on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId, status: StateExitType) {
-    if id != state_id::IDLE {
+    if is_ported_attack(sim, ctx, id) {
+        attack::on_exit(sim, ctx, Host::AttackMove, status);
+    } else if id != state_id::IDLE {
         ai_seams(sim).state_exit(ctx.owner_id, id, status);
     }
 }
@@ -1025,7 +1048,11 @@ fn sub_update_machine(sim: &mut dyn SimApi, ctx: ModuleContext) {
     if id == INVALID_STATE_ID || id == state_id::IDLE {
         return;
     }
-    let status = ai_seams(sim).state_update(ctx.owner_id, id);
+    let status = if is_ported_attack(sim, ctx, id) {
+        attack::update(sim, ctx, Host::AttackMove)
+    } else {
+        ai_seams(sim).state_update(ctx.owner_id, id)
+    };
     let _ = sub_finish(sim, ctx, id, status, 0);
 }
 

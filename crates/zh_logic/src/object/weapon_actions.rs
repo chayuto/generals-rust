@@ -157,21 +157,7 @@ fn fire_current(
     let Some(reloaded) = with_weapon_in_slot(sim, owner, wslot, fire) else {
         return;
     };
-    let fired = sim
-        .object(owner)
-        .and_then(|o| o.weapon_set.get_weapon_in_weapon_slot(wslot))
-        .map(|w| {
-            // The sound's key only reaches the audio engine.
-            FiredWeaponInfo::from_template(
-                &w.template,
-                w.when_we_can_fire_again,
-                w.template.fire_sound_loop_time,
-                NameKeyType::INVALID,
-            )
-        });
-    if let Some(info) = fired {
-        sim.notify_firing_tracker_shot_fired(owner, &info, victim_id);
-    }
+    notify_shot_fired(sim, owner, wslot, victim_id);
     if reloaded != FALSE {
         // A temporary lock lasts for one clip.
         if let Some(o) = sim.object_mut(owner) {
@@ -201,6 +187,52 @@ pub fn fire_current_weapon_at_position(
     fire_current(sim, owner, ObjectId::INVALID, |weapon, sim| {
         fire_weapon_at_position(weapon, sim, owner, pos)
     });
+}
+
+/// The linked turrets' shot from one slot: `fireWeapon(pos)`, then the unlock
+/// after a reload and the firing tracker, whether or not it fired.
+pub fn fire_linked_weapon_at_position(
+    sim: &mut dyn SimApi,
+    owner: ObjectSlot,
+    wslot: WeaponSlotType,
+    pos: &zh_common::math::Coord3D,
+) {
+    let Some(reloaded) = with_weapon_in_slot(sim, owner, wslot, |weapon, sim| {
+        fire_weapon_at_position(weapon, sim, owner, pos)
+    }) else {
+        return;
+    };
+    if reloaded != FALSE {
+        if let Some(o) = sim.object_mut(owner) {
+            o.weapon_set
+                .release_weapon_lock(WeaponLockType::LockedTemporarily);
+        }
+    }
+    notify_shot_fired(sim, owner, wslot, ObjectId::INVALID);
+}
+
+/// `Object::notifyFiringTrackerShotFired`.
+fn notify_shot_fired(
+    sim: &mut dyn SimApi,
+    owner: ObjectSlot,
+    wslot: WeaponSlotType,
+    victim_id: ObjectId,
+) {
+    let fired = sim
+        .object(owner)
+        .and_then(|o| o.weapon_set.get_weapon_in_weapon_slot(wslot))
+        .map(|w| {
+            // The sound's key only reaches the audio engine.
+            FiredWeaponInfo::from_template(
+                &w.template,
+                w.when_we_can_fire_again,
+                w.template.fire_sound_loop_time,
+                NameKeyType::INVALID,
+            )
+        });
+    if let Some(info) = fired {
+        sim.notify_firing_tracker_shot_fired(owner, &info, victim_id);
+    }
 }
 
 /// `Weapon::processRequestAssistance`: every unit of the same kind and player near enough,
