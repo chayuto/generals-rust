@@ -126,11 +126,10 @@ impl OpenContainModuleData {
     }
 }
 
+/// `parseAudioEventRTS`: `NoSound` leaves the member alone; `None` is a name like any.
 fn parse_audio_event_name(reader: &mut IniReader<'_>, out: &mut String) -> Result<(), IniError> {
     let tok = reader.next_token(SEPS_DEFAULT)?;
-    if tok.eq_ignore_ascii_case("NoSound") || tok.eq_ignore_ascii_case("None") {
-        out.clear();
-    } else {
+    if !tok.eq_ignore_ascii_case("NoSound") {
         *out = tok.to_owned();
     }
     Ok(())

@@ -24,6 +24,10 @@ pub mod slow_death_behavior;
 pub mod spawn_behavior;
 pub mod supply_warehouse_crippling_behavior;
 pub mod tech_building_behavior;
+pub mod bridge_behavior;
+pub mod countermeasures_behavior;
+pub mod flight_deck_behavior;
+pub mod rebuild_hole_behavior;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;

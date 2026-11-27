@@ -47,6 +47,13 @@ def create_fixture_repo(root: Path) -> None:
                 "work_package": "WP-2.1",
                 "rust_target": "crates/zh_common/src/core/gamma.rs",
             },
+            {
+                "packet_id": "PKT-004",
+                "module_name": "Delta",
+                "phase": 5,
+                "work_package": "WP-5.4",
+                "rust_target": "crates/zh_common/src/core/delta.rs",
+            },
         ],
     }
     (root / "docs/MODULE_MANIFEST.json").write_text(
@@ -57,6 +64,10 @@ def create_fixture_repo(root: Path) -> None:
     )
     (root / "crates/zh_common/src/core/beta.rs").write_text(
         'pub fn wip() -> i32 { todo!("PKT-002") }\n', encoding="utf-8"
+    )
+    (root / "crates/zh_common/src/core/delta.rs").write_text(
+        "//! `PKT-004`: `Delta` module data. The behaviour is not ported.\n",
+        encoding="utf-8",
     )
     (root / "crates/zh_common/src/extra.rs").write_text(
         "pub fn helper() {}\n", encoding="utf-8"
@@ -95,7 +106,9 @@ class PortMapTests(unittest.TestCase):
             self.assertNotIn("\\", first)
             self.assertIn("| `PKT-001` | `Alpha` | 1 | `WP-1.1` | `implemented` |", first)
             self.assertIn("| `PKT-002` | `Beta` | 1 | `WP-1.2` | `seeded` |", first)
-            self.assertIn("| Phase 2 | 0 | 0 | 1 | 1 |", first)
+            self.assertIn("| Phase 2 | 0 | 0 | 0 | 1 | 1 |", first)
+            self.assertIn("| `PKT-004` | `Delta` | 5 | `WP-5.4` | `data-only` |", first)
+            self.assertIn("| Phase 5 | 0 | 1 | 0 | 0 | 1 |", first)
             self.assertIn("| `zh_common` | `crates/zh_common/src/extra.rs` | `implemented` |", first)
             self.assertIn("| `docs/golden_vectors/PKT-001.json` | 10 | yes |", first)
             self.assertIn("| `docs/golden_vectors/PKT-999.json` | 777 | yes |", first)

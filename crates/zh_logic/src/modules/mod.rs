@@ -11,6 +11,7 @@ pub mod destroy;
 pub mod die;
 pub mod helper;
 pub mod module;
+pub mod module_data;
 pub mod module_factory;
 pub mod special_power;
 pub mod update;

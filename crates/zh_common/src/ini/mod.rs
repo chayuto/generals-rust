@@ -363,6 +363,14 @@ impl<'a> IniReader<'a> {
         std::str::from_utf8(&bytes[start..end]).ok()
     }
 
+    /// `strtok` overwrites the separator that ended a token; [`Self::next_token`] leaves
+    /// it for the next call. Needed where the separator set changes after a `:`.
+    pub fn consume_separator(&mut self) {
+        if self.token_cursor < self.line_buf.len() {
+            self.token_cursor += 1;
+        }
+    }
+
     pub fn next_sub_token(&mut self, expected: &str) -> Result<&str, IniError> {
         let token = self.next_token(SEPS_COLON)?;
         if !token.eq_ignore_ascii_case(expected) {

@@ -233,6 +233,33 @@ pub fn create_dynamic_geometry_info_update(
     Box::new(DynamicGeometryInfoUpdate::new(typed))
 }
 
+impl DynamicGeometryInfoUpdateModuleData {
+    /// One field of `buildFieldParse`; the firestorm data takes these too.
+    pub fn parse_field(&mut self, field: &str, r: &mut IniReader<'_>) -> Result<(), IniError> {
+        if field.eq_ignore_ascii_case("InitialDelay") {
+            r.parse_duration_unsigned_int(&mut self.initial_delay)
+        } else if field.eq_ignore_ascii_case("InitialHeight") {
+            r.parse_real(&mut self.initial_height)
+        } else if field.eq_ignore_ascii_case("InitialMajorRadius") {
+            r.parse_real(&mut self.initial_major_radius)
+        } else if field.eq_ignore_ascii_case("InitialMinorRadius") {
+            r.parse_real(&mut self.initial_minor_radius)
+        } else if field.eq_ignore_ascii_case("FinalHeight") {
+            r.parse_real(&mut self.final_height)
+        } else if field.eq_ignore_ascii_case("FinalMajorRadius") {
+            r.parse_real(&mut self.final_major_radius)
+        } else if field.eq_ignore_ascii_case("FinalMinorRadius") {
+            r.parse_real(&mut self.final_minor_radius)
+        } else if field.eq_ignore_ascii_case("TransitionTime") {
+            r.parse_duration_unsigned_int(&mut self.transition_time)
+        } else if field.eq_ignore_ascii_case("ReverseAtTransitionTime") {
+            r.parse_bool(&mut self.reverse_at_transition_time)
+        } else {
+            Err(IniError::UnknownToken)
+        }
+    }
+}
+
 pub fn parse_dynamic_geometry_info_update_data(
     reader: &mut IniReader<'_>,
     tag_key: NameKeyType,
@@ -240,28 +267,6 @@ pub fn parse_dynamic_geometry_info_update_data(
     _parse_ctx: &mut ModuleParseContext<'_>,
 ) -> Result<Box<dyn ModuleData>, IniError> {
     let mut data = DynamicGeometryInfoUpdateModuleData::new(tag_key, module_name_key);
-    reader.read_block_fields(|field, r| {
-        if field.eq_ignore_ascii_case("InitialDelay") {
-            r.parse_duration_unsigned_int(&mut data.initial_delay)
-        } else if field.eq_ignore_ascii_case("InitialHeight") {
-            r.parse_real(&mut data.initial_height)
-        } else if field.eq_ignore_ascii_case("InitialMajorRadius") {
-            r.parse_real(&mut data.initial_major_radius)
-        } else if field.eq_ignore_ascii_case("InitialMinorRadius") {
-            r.parse_real(&mut data.initial_minor_radius)
-        } else if field.eq_ignore_ascii_case("FinalHeight") {
-            r.parse_real(&mut data.final_height)
-        } else if field.eq_ignore_ascii_case("FinalMajorRadius") {
-            r.parse_real(&mut data.final_major_radius)
-        } else if field.eq_ignore_ascii_case("FinalMinorRadius") {
-            r.parse_real(&mut data.final_minor_radius)
-        } else if field.eq_ignore_ascii_case("TransitionTime") {
-            r.parse_duration_unsigned_int(&mut data.transition_time)
-        } else if field.eq_ignore_ascii_case("ReverseAtTransitionTime") {
-            r.parse_bool(&mut data.reverse_at_transition_time)
-        } else {
-            Err(IniError::UnknownToken)
-        }
-    })?;
+    reader.read_block_fields(|field, r| data.parse_field(field, r))?;
     Ok(Box::new(data))
 }

@@ -1666,6 +1666,57 @@ fn parse_weapon_name(
     Ok(())
 }
 
+impl PhysicsBehaviorModuleData {
+    /// One field of `buildFieldParse`; `RailroadBehaviorModuleData` takes these too.
+    pub fn parse_field(
+        &mut self,
+        field: &str,
+        r: &mut IniReader<'_>,
+        ctx: &ModuleParseContext<'_>,
+    ) -> Result<(), IniError> {
+        let is = |name: &str| field.eq_ignore_ascii_case(name);
+        if is("Mass") {
+            r.parse_positive_non_zero_real(&mut self.mass)
+        } else if is("ShockResistance") {
+            r.parse_positive_non_zero_real(&mut self.shock_resistance)
+        } else if is("ShockMaxYaw") {
+            r.parse_positive_non_zero_real(&mut self.shock_max_yaw)
+        } else if is("ShockMaxPitch") {
+            r.parse_positive_non_zero_real(&mut self.shock_max_pitch)
+        } else if is("ShockMaxRoll") {
+            r.parse_positive_non_zero_real(&mut self.shock_max_roll)
+        } else if is("ForwardFriction") {
+            parse_friction_per_sec(r, &mut self.forward_friction)
+        } else if is("LateralFriction") {
+            parse_friction_per_sec(r, &mut self.lateral_friction)
+        } else if is("ZFriction") {
+            parse_friction_per_sec(r, &mut self.z_friction)
+        } else if is("AerodynamicFriction") {
+            parse_friction_per_sec(r, &mut self.aerodynamic_friction)
+        } else if is("CenterOfMassOffset") {
+            r.parse_real(&mut self.center_of_mass_offset)
+        } else if is("AllowBouncing") {
+            r.parse_bool(&mut self.allow_bouncing)
+        } else if is("AllowCollideForce") {
+            r.parse_bool(&mut self.allow_collide_force)
+        } else if is("KillWhenRestingOnGround") {
+            r.parse_bool(&mut self.kill_when_resting_on_ground)
+        } else if is("MinFallHeightForDamage") {
+            r.parse_real(&mut self.min_fall_height_for_damage)
+        } else if is("FallHeightDamageFactor") {
+            r.parse_real(&mut self.fall_height_damage_factor)
+        } else if is("PitchRollYawFactor") {
+            r.parse_real(&mut self.pitch_roll_yaw_factor)
+        } else if is("VehicleCrashesIntoBuildingWeaponTemplate") {
+            parse_weapon_name(r, ctx, &mut self.crash_into_building_weapon)
+        } else if is("VehicleCrashesIntoNonBuildingWeaponTemplate") {
+            parse_weapon_name(r, ctx, &mut self.crash_into_non_building_weapon)
+        } else {
+            Err(IniError::UnknownToken)
+        }
+    }
+}
+
 pub fn parse_physics_behavior_data(
     reader: &mut IniReader<'_>,
     tag_key: NameKeyType,
@@ -1673,48 +1724,7 @@ pub fn parse_physics_behavior_data(
     parse_ctx: &mut ModuleParseContext<'_>,
 ) -> Result<Box<dyn ModuleData>, IniError> {
     let mut d = PhysicsBehaviorModuleData::new(tag_key, module_name_key);
-    reader.read_block_fields(|field, r| {
-        let is = |name: &str| field.eq_ignore_ascii_case(name);
-        if is("Mass") {
-            r.parse_positive_non_zero_real(&mut d.mass)
-        } else if is("ShockResistance") {
-            r.parse_positive_non_zero_real(&mut d.shock_resistance)
-        } else if is("ShockMaxYaw") {
-            r.parse_positive_non_zero_real(&mut d.shock_max_yaw)
-        } else if is("ShockMaxPitch") {
-            r.parse_positive_non_zero_real(&mut d.shock_max_pitch)
-        } else if is("ShockMaxRoll") {
-            r.parse_positive_non_zero_real(&mut d.shock_max_roll)
-        } else if is("ForwardFriction") {
-            parse_friction_per_sec(r, &mut d.forward_friction)
-        } else if is("LateralFriction") {
-            parse_friction_per_sec(r, &mut d.lateral_friction)
-        } else if is("ZFriction") {
-            parse_friction_per_sec(r, &mut d.z_friction)
-        } else if is("AerodynamicFriction") {
-            parse_friction_per_sec(r, &mut d.aerodynamic_friction)
-        } else if is("CenterOfMassOffset") {
-            r.parse_real(&mut d.center_of_mass_offset)
-        } else if is("AllowBouncing") {
-            r.parse_bool(&mut d.allow_bouncing)
-        } else if is("AllowCollideForce") {
-            r.parse_bool(&mut d.allow_collide_force)
-        } else if is("KillWhenRestingOnGround") {
-            r.parse_bool(&mut d.kill_when_resting_on_ground)
-        } else if is("MinFallHeightForDamage") {
-            r.parse_real(&mut d.min_fall_height_for_damage)
-        } else if is("FallHeightDamageFactor") {
-            r.parse_real(&mut d.fall_height_damage_factor)
-        } else if is("PitchRollYawFactor") {
-            r.parse_real(&mut d.pitch_roll_yaw_factor)
-        } else if is("VehicleCrashesIntoBuildingWeaponTemplate") {
-            parse_weapon_name(r, parse_ctx, &mut d.crash_into_building_weapon)
-        } else if is("VehicleCrashesIntoNonBuildingWeaponTemplate") {
-            parse_weapon_name(r, parse_ctx, &mut d.crash_into_non_building_weapon)
-        } else {
-            Err(IniError::UnknownToken)
-        }
-    })?;
+    reader.read_block_fields(|field, r| d.parse_field(field, r, parse_ctx))?;
     Ok(Box::new(d))
 }
 

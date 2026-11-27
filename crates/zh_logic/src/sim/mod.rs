@@ -573,6 +573,10 @@ impl RulesRegistry {
         crate::modules::behavior::register_behavior_modules(&mut module_registry, &mut name_keys);
         crate::modules::contain::register_contain_modules(&mut module_registry, &mut name_keys);
         crate::modules::update::register_update_modules(&mut module_registry, &mut name_keys);
+        crate::modules::module_data::register_data_only_modules(
+            &mut module_registry,
+            &mut name_keys,
+        );
 
         let mut science_store = ScienceStore::new();
         science_store.init();

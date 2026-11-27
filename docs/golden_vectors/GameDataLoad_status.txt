@@ -53,7 +53,7 @@ blocks Weapon loaded 363
 blocks Weather unported 1
 unparsed_module_data draw 2897
 unparsed_module_data client 61
-unparsed_module_data logic 405
+unparsed_module_data logic 0
 files 128
 ignored_fields 3861
 ai_build list match

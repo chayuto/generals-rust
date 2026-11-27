@@ -12,6 +12,8 @@ pub mod parachute_contain;
 pub mod railed_transport_contain;
 pub mod transport_contain;
 pub mod tunnel_contain;
+pub mod overlord_contain;
+pub mod rider_change_contain;
 
 use crate::arena::FacetMask;
 use crate::modules::module::ModuleType;
