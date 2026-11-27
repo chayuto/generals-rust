@@ -155,6 +155,11 @@ void         zh_module_load_post_process(ZhModuleSlot slot);
 #define ZH_DAMAGE_UNRESISTABLE 11
 #define ZH_DEATH_NORMAL 0
 #define ZH_SLEEP_FOREVER 1073741823
+#define ZH_ARMORSET_PLAYER_UPGRADE 3
+#define ZH_MODEL_POWER_PLANT_UPGRADING 82
+#define ZH_MODEL_POWER_PLANT_UPGRADED 77
+#define ZH_MODEL_RADAR_EXTENDING 58
+#define ZH_MODEL_RADAR_UPGRADED 59
 
 /* The engine, as seen by the one module being run. */
 typedef struct ZhEngineSimCallbacks {
@@ -167,6 +172,11 @@ typedef struct ZhEngineSimCallbacks {
     float    (*object_max_health)(void* ctx);
     void     (*attempt_damage)(void* ctx, int32_t damage_type, int32_t death_type,
                                int32_t source_id, float amount, uint8_t kill);
+    uint8_t  (*object_has_drawable)(void* ctx);
+    void     (*set_model_condition_state)(void* ctx, int32_t flag);
+    void     (*clear_model_condition_state)(void* ctx, int32_t flag);
+    void     (*set_armor_set_flag)(void* ctx, int32_t flag, uint8_t set);
+    void     (*register_supply_warehouse)(void* ctx);
 } ZhEngineSimCallbacks;
 
 /* PKT-339 LifetimeUpdate. Construct and set_range return the die frame. */
@@ -175,6 +185,32 @@ uint32_t zh_lifetime_construct(const ZhEngineSimCallbacks* callbacks,
 uint32_t zh_lifetime_set_range(const ZhEngineSimCallbacks* callbacks,
                                uint32_t min_frames, uint32_t max_frames);
 uint32_t zh_lifetime_update(const ZhEngineSimCallbacks* callbacks);
+
+/* PKT-183 SupplyWarehouseCreate::onCreate. */
+void zh_supply_warehouse_on_create(const ZhEngineSimCallbacks* callbacks);
+
+/* PKT-194 and PKT-223: upgradeImplementation only; the upgrade mux stays in C++. */
+void zh_armor_upgrade_implementation(const ZhEngineSimCallbacks* callbacks);
+void zh_model_condition_upgrade_implementation(const ZhEngineSimCallbacks* callbacks,
+                                               int32_t condition_flag);
+
+/* PKT-358 RadarUpdate: C++ keeps the members. */
+typedef struct ZhRadarState {
+    uint32_t extend_done_frame;
+    uint8_t  extend_complete;
+    uint8_t  radar_active;
+} ZhRadarState;
+
+void     zh_radar_extend(const ZhEngineSimCallbacks* callbacks, float radar_extend_time,
+                         ZhRadarState* state);
+uint32_t zh_radar_update(const ZhEngineSimCallbacks* callbacks, ZhRadarState* state);
+
+/* PKT-351 PowerPlantUpdate: C++ keeps m_extended. */
+void     zh_power_plant_construct(const ZhEngineSimCallbacks* callbacks);
+void     zh_power_plant_extend_rods(const ZhEngineSimCallbacks* callbacks,
+                                    uint32_t rods_extend_time, uint8_t extend,
+                                    uint8_t* extended);
+uint32_t zh_power_plant_update(const ZhEngineSimCallbacks* callbacks, uint8_t* extended);
 
 /* ============================================================================
  * PKT-121 Money and PKT-118 Energy: C++ keeps the members

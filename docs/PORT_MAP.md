@@ -291,11 +291,17 @@
 | `zh_common` | `crates/zh_common/src/io/compression.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/math/gamemath.rs` | `implemented` |
 | `zh_common` | `crates/zh_common/src/types.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/armor_upgrade.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/economy.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/engine_sim_generated.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/lifetime_update.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/model_condition_upgrade.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/power_plant_update.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/radar_update.rs` | `implemented` |
 | `zh_ffi` | `crates/zh_ffi/src/sleepy_heap.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/supply_warehouse_create.rs` | `implemented` |
+| `zh_ffi` | `crates/zh_ffi/src/test_engine.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/gamelogic/frame.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |

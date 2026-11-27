@@ -411,7 +411,7 @@ impl SimView for EngineSim<'_> {
         not_wired("physics_last_collidee")
     }
     fn object_has_drawable(&self, owner: ObjectSlot) -> Bool {
-        not_wired("object_has_drawable")
+        self.engine_object_has_drawable(owner)
     }
     fn local_player_index(&self) -> Int {
         not_wired("local_player_index")
@@ -864,7 +864,7 @@ impl SimApi for EngineSim<'_> {
         not_wired("register_supply_center")
     }
     fn register_supply_warehouse(&mut self, owner: ObjectSlot) {
-        not_wired("register_supply_warehouse")
+        self.engine_register_supply_warehouse(owner)
     }
     fn on_special_power_creation(&mut self, owner: ObjectSlot) {
         not_wired("on_special_power_creation")
@@ -873,10 +873,10 @@ impl SimApi for EngineSim<'_> {
         not_wired("notify_bone_fx_damage_state_change")
     }
     fn set_model_condition_state(&mut self, owner: ObjectSlot, flag: ModelConditionFlagType) {
-        not_wired("set_model_condition_state")
+        self.engine_set_model_condition_state(owner, flag)
     }
     fn clear_model_condition_state(&mut self, owner: ObjectSlot, flag: ModelConditionFlagType) {
-        not_wired("clear_model_condition_state")
+        self.engine_clear_model_condition_state(owner, flag)
     }
     fn clear_and_set_model_condition_flags( &mut self, owner: ObjectSlot, clear: &ModelConditionFlags, set: &ModelConditionFlags, ) {
         not_wired("clear_and_set_model_condition_flags")
@@ -954,7 +954,7 @@ impl SimApi for EngineSim<'_> {
         not_wired("remove_upgrade")
     }
     fn set_armor_set_flag(&mut self, owner: ObjectSlot, flag: ArmorSetType, set: Bool) {
-        not_wired("set_armor_set_flag")
+        self.engine_set_armor_set_flag(owner, flag, set)
     }
     fn set_weapon_set_flag(&mut self, owner: ObjectSlot, flag: WeaponSetType, set: Bool) {
         not_wired("set_weapon_set_flag")

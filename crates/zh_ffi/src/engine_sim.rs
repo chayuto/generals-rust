@@ -8,7 +8,9 @@ use core::ffi::c_void;
 use zh_common::types::{Bool, Int, Real, UnsignedInt, UpdateSleepTime};
 use zh_logic::arena::{ModuleContext, ModuleDataId, ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::{DamageInfo, DamageInfoInput};
+use zh_logic::rules::combat_types::ArmorSetType;
 use zh_logic::rules::kind_of::KindOfType;
+use zh_logic::rules::model_state::ModelConditionFlagType;
 
 /// Mirrors `ZhEngineSimCallbacks` in `zh_ffi.h`.
 #[repr(C)]
@@ -22,6 +24,11 @@ pub struct ZhEngineSimCallbacks {
     pub object_is_kind_of: extern "C" fn(*mut c_void, i32) -> u8,
     pub object_max_health: extern "C" fn(*mut c_void) -> f32,
     pub attempt_damage: extern "C" fn(*mut c_void, i32, i32, i32, f32, u8),
+    pub object_has_drawable: extern "C" fn(*mut c_void) -> u8,
+    pub set_model_condition_state: extern "C" fn(*mut c_void, i32),
+    pub clear_model_condition_state: extern "C" fn(*mut c_void, i32),
+    pub set_armor_set_flag: extern "C" fn(*mut c_void, i32, u8),
+    pub register_supply_warehouse: extern "C" fn(*mut c_void),
 }
 
 /// Called by every method the adapter does not answer.
@@ -79,6 +86,44 @@ impl<'a> EngineSim<'a> {
     pub(crate) fn engine_object_max_health(&self, owner: ObjectSlot) -> Real {
         assert_eq!(owner, OWNER, "only the owning object can be queried");
         (self.callbacks.object_max_health)(self.callbacks.ctx)
+    }
+
+    pub(crate) fn engine_object_has_drawable(&self, owner: ObjectSlot) -> Bool {
+        assert_eq!(owner, OWNER, "only the owning object can be queried");
+        (self.callbacks.object_has_drawable)(self.callbacks.ctx)
+    }
+
+    pub(crate) fn engine_set_model_condition_state(
+        &mut self,
+        owner: ObjectSlot,
+        flag: ModelConditionFlagType,
+    ) {
+        assert_eq!(owner, OWNER, "only the owning object can be changed");
+        (self.callbacks.set_model_condition_state)(self.callbacks.ctx, flag as i32);
+    }
+
+    pub(crate) fn engine_clear_model_condition_state(
+        &mut self,
+        owner: ObjectSlot,
+        flag: ModelConditionFlagType,
+    ) {
+        assert_eq!(owner, OWNER, "only the owning object can be changed");
+        (self.callbacks.clear_model_condition_state)(self.callbacks.ctx, flag as i32);
+    }
+
+    pub(crate) fn engine_set_armor_set_flag(
+        &mut self,
+        owner: ObjectSlot,
+        flag: ArmorSetType,
+        set: Bool,
+    ) {
+        assert_eq!(owner, OWNER, "only the owning object can be changed");
+        (self.callbacks.set_armor_set_flag)(self.callbacks.ctx, flag as i32, set);
+    }
+
+    pub(crate) fn engine_register_supply_warehouse(&mut self, owner: ObjectSlot) {
+        assert_eq!(owner, OWNER, "only the owning object can be registered");
+        (self.callbacks.register_supply_warehouse)(self.callbacks.ctx);
     }
 
     /// Carries the fields `Object::kill` sets. A request that sets any other

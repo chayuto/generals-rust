@@ -1,10 +1,17 @@
 //! C-ABI Strangler FFI bridge (`libzh_ffi.a`) matching `crates/zh_ffi/include/zh_ffi.h`.
 
+pub mod armor_upgrade;
 pub mod economy;
 pub mod engine_sim;
 mod engine_sim_generated;
 pub mod lifetime_update;
+pub mod model_condition_upgrade;
+pub mod power_plant_update;
+pub mod radar_update;
 pub mod sleepy_heap;
+pub mod supply_warehouse_create;
+#[cfg(test)]
+mod test_engine;
 
 use core::ffi::c_void;
 use core::slice;

@@ -60,63 +60,17 @@ pub unsafe extern "C" fn zh_lifetime_update(callbacks: *const ZhEngineSimCallbac
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::ffi::c_void;
+    use crate::test_engine::{callbacks, Engine};
     use zh_logic::rules::combat_types::{DamageType, DeathType};
     use zh_logic::rules::kind_of::KindOfType;
 
-    #[derive(Default)]
-    struct Engine {
-        hulk: bool,
-        hulk_override: i32,
-        draws: Vec<(i32, i32)>,
-        wakes: Vec<u32>,
-        damage: Vec<(i32, i32, i32, f32, u8)>,
-    }
-
-    unsafe fn engine<'a>(ctx: *mut c_void) -> &'a mut Engine {
-        unsafe { &mut *ctx.cast::<Engine>() }
-    }
-
-    extern "C" fn frame(_: *mut c_void) -> u32 {
-        100
-    }
-    extern "C" fn rng(ctx: *mut c_void, lo: i32, hi: i32) -> i32 {
-        unsafe { engine(ctx) }.draws.push((lo, hi));
-        hi
-    }
-    extern "C" fn wake(ctx: *mut c_void, sleep: u32) {
-        unsafe { engine(ctx) }.wakes.push(sleep);
-    }
-    extern "C" fn hulk_override(ctx: *mut c_void) -> i32 {
-        unsafe { engine(ctx) }.hulk_override
-    }
-    extern "C" fn kind(ctx: *mut c_void, kindof: i32) -> u8 {
-        u8::from(kindof == KindOfType::Hulk as i32 && unsafe { engine(ctx) }.hulk)
-    }
-    extern "C" fn health(_: *mut c_void) -> f32 {
-        250.0
-    }
-    extern "C" fn damage(ctx: *mut c_void, kind: i32, death: i32, source: i32, amount: f32, kill: u8) {
-        unsafe { engine(ctx) }.damage.push((kind, death, source, amount, kill));
-    }
-
-    fn callbacks(engine: &mut Engine) -> ZhEngineSimCallbacks {
-        ZhEngineSimCallbacks {
-            ctx: (engine as *mut Engine).cast(),
-            frame,
-            rng_logic_int: rng,
-            set_wake_frame: wake,
-            hulk_max_lifetime_override: hulk_override,
-            object_is_kind_of: kind,
-            object_max_health: health,
-            attempt_damage: damage,
-        }
-    }
-
     #[test]
     fn construct_draws_once_and_returns_the_die_frame() {
-        for (hulk, over, expected) in [(false, 7, (10, 20)), (true, -1, (10, 20)), (true, 7, (7, 7))]
-        {
+        for (hulk, over, expected) in [
+            (false, 7, (10, 20)),
+            (true, -1, (10, 20)),
+            (true, 7, (7, 7)),
+        ] {
             let mut e = Engine {
                 hulk,
                 hulk_override: over,

@@ -32,6 +32,11 @@ WIRED = (
     "rng_logic_int",
     "set_wake_frame",
     "attempt_damage",
+    "object_has_drawable",
+    "set_model_condition_state",
+    "clear_model_condition_state",
+    "set_armor_set_flag",
+    "register_supply_warehouse",
 )
 
 

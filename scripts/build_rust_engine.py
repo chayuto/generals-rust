@@ -14,8 +14,9 @@ link line, so the linker never pulls the original member.
 
 Swapped so far: the random number generator (`RandomValue.cpp`, PKT-002),
 experience and veterancy (`ExperienceTracker.cpp`, PKT-003), money and energy
-(`Money.cpp`, `Energy.cpp`), the first behavior module (`LifetimeUpdate.cpp`, PKT-339,
-through `scripts/gen_engine_sim.py`'s adapter) and the sleepy-update heap (part of
+(`Money.cpp`, `Energy.cpp`), six behavior modules through `scripts/gen_engine_sim.py`'s
+adapter (`LifetimeUpdate`, `SupplyWarehouseCreate`, `ArmorUpgrade`,
+`ModelConditionUpgrade`, `RadarUpdate`, `PowerPlantUpdate`) and the sleepy-update heap (part of
 `GameLogic.cpp`, WP-7.1).
 `--mutate <swap>` builds a deliberately wrong variant to prove the replay check fails.
 
@@ -117,6 +118,66 @@ SWAPS = (
             (
                 "void LifetimeUpdate::setLifetimeRange(",
                 "void LifetimeUpdate::crc(",
+                "// the other functions are in the included file above",
+            ),
+        ),
+    ),
+    Swap(
+        "warehouse",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Create/SupplyWarehouseCreate.cpp",
+        (
+            (
+                "void SupplyWarehouseCreate::onCreate()",
+                "void SupplyWarehouseCreate::crc(",
+                '#include "zh_ffi_supply_warehouse_create.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "armor",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Upgrade/ArmorUpgrade.cpp",
+        (
+            (
+                "void ArmorUpgrade::upgradeImplementation()",
+                "void ArmorUpgrade::crc(",
+                '#include "zh_ffi_armor_upgrade.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "modelcondition",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Upgrade/ModelConditionUpgrade.cpp",
+        (
+            (
+                "void ModelConditionUpgrade::upgradeImplementation()",
+                "void ModelConditionUpgrade::crc(",
+                '#include "zh_ffi_model_condition_upgrade.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "radar",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/RadarUpdate.cpp",
+        (
+            (
+                "void RadarUpdate::extendRadar()",
+                "void RadarUpdate::crc(",
+                '#include "zh_ffi_radar_update.inc"',
+            ),
+        ),
+    ),
+    Swap(
+        "powerplant",
+        VENDOR / "GeneralsMD/Code/GameEngine/Source/GameLogic/Object/Update/PowerPlantUpdate.cpp",
+        (
+            (
+                "PowerPlantUpdate::PowerPlantUpdate(",
+                "PowerPlantUpdate::~PowerPlantUpdate()",
+                '#include "zh_ffi_power_plant_update.inc"',
+            ),
+            (
+                "void PowerPlantUpdate::extendRods(",
+                "void PowerPlantUpdate::crc(",
                 "// the other functions are in the included file above",
             ),
         ),
