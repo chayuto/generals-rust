@@ -160,6 +160,20 @@ pub trait AiSeams: Send {
     fn replaces_searches(&mut self) -> Bool {
         FALSE
     }
+    /// Whether [`AiSeams::attack_path`] answers `computeAttackPath` instead of the
+    /// map. For harnesses whose reference replaced it.
+    fn replaces_attack_path(&mut self) -> Bool {
+        FALSE
+    }
+    /// `computeAttackPath`: `None` for FALSE, else the path it left.
+    fn attack_path(
+        &mut self,
+        _owner: ObjectId,
+        _victim: Option<ObjectId>,
+        _victim_pos: &Coord3D,
+    ) -> Option<Option<Path>> {
+        None
+    }
     /// `Pathfinder::findClosestPath`, which may move `to` (S6).
     fn closest_path(
         &mut self,
@@ -471,6 +485,8 @@ forward! {
     point_on_path(owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real);
     path_xfer(owner: ObjectId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
     replaces_searches() -> Bool;
+    replaces_attack_path() -> Bool;
+    attack_path(owner: ObjectId, victim: Option<ObjectId>, victim_pos: &Coord3D) -> Option<Option<Path>>;
     closest_path(owner: ObjectId, from: &Coord3D, to: &mut Coord3D, blocked: Bool, path_cost_factor: Real) -> Option<Path>;
     patch_path(owner: ObjectId, current: Option<&Path>, blocked: Bool) -> Option<Path>;
     safe_path(owner: ObjectId, from: &Coord3D, repulsor1: &Coord3D, repulsor2: &Coord3D, radius: Real) -> Option<Path>;

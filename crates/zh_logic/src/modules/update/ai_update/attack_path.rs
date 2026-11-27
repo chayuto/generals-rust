@@ -244,6 +244,19 @@ pub(super) fn compute_attack_path(
 ) -> bool {
     let owner = ctx.owner_slot;
     let now = sim.frame();
+    if crate::ai::seams::ai_seams(sim).replaces_attack_path() != FALSE {
+        let state = ai(sim, ctx);
+        let (wanted, to) = (state.requested_victim_id, state.requested_destination);
+        let wanted = victim.map(|_| wanted);
+        let answer = crate::ai::seams::ai_seams(sim).attack_path(ctx.owner_id, wanted, &to);
+        return match answer {
+            Some(path) => {
+                set_path(sim, ctx, path);
+                true
+            }
+            None => false,
+        };
+    }
     // Too soon since the last path.
     let state = ai(sim, ctx);
     if state.path_timestamp >= now.wrapping_sub(2)

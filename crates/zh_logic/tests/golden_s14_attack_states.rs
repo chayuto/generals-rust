@@ -167,6 +167,12 @@ impl AiSeams for Seams {
         let id = number(&answer) as i32;
         (id != 0).then_some(ObjectId(id))
     }
+    fn replaces_searches(&mut self) -> Bool {
+        TRUE
+    }
+    fn replaces_attack_path(&mut self) -> Bool {
+        TRUE
+    }
     fn attack_path(
         &mut self,
         owner: ObjectId,
