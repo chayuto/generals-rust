@@ -495,10 +495,11 @@ fn wp52_die_golden_vectors() {
             api.grant_upgrade(o_fx, "UpgDieConflict", FALSE);
         }
         if fx_conf_ply {
+            let player_b = api.ctx.player_index(team_b);
             api.ctx
                 .world
                 .player_upgrades
-                .entry(team_b)
+                .entry(player_b)
                 .or_default()
                 .set_flags(&upg_conf_mask);
         }

@@ -1363,12 +1363,13 @@ fn wp52_collide_crates_golden_vectors() {
         api.ctx.process_destroy_list();
 
         // 5. MoneyCrateCollide (PKT-224)
-        api.ctx.world.player_money.insert(team_c, mn_m0);
+        let player_c = api.ctx.player_index(team_c);
+        api.ctx.world.player_money.insert(player_c, mn_m0);
         if mn_upg {
             api.ctx
                 .world
                 .player_upgrades
-                .entry(team_c)
+                .entry(player_c)
                 .or_default()
                 .set_flags(&upg_mask);
         }
@@ -1401,7 +1402,7 @@ fn wp52_collide_crates_golden_vectors() {
         api.ctx.process_destroy_list();
 
         // 6. SalvageCrateCollide (PKT-240)
-        api.ctx.world.player_money.insert(team_c, 0);
+        api.ctx.world.player_money.insert(player_c, 0);
         let sv_pos = Coord3D { x: 60.0, y: 10.0, z: 0.0 };
         let sv_crate = spawn(&mut api, &t_salv, team_b, sv_pos, 0.0);
         let sv_tmpl = match sv_sel {

@@ -1676,9 +1676,10 @@ fn golden_wp53_a_all_1000_seeds() {
                 .upgrade_mask()
                 .clone();
             let empty = UpgradeMaskType::new();
+            let player_a = sim.player_index(TEAM_A);
             sim.world
                 .player_upgrades
-                .entry(TEAM_A)
+                .entry(player_a)
                 .or_default()
                 .clear_and_set(&empty, &mask);
         }

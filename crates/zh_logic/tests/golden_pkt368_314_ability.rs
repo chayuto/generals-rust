@@ -1239,8 +1239,9 @@ fn golden_special_ability_and_command_button_hunt() {
                 }
             }
             w.player_sciences.entry(TEAMS[1]).or_default().insert(have);
-            w.player_money.insert(TEAMS[1], 100);
-            w.player_money.insert(TEAMS[2], get("money") as UnsignedInt);
+            w.player_money.insert(w.team_players[&TEAMS[1]], 100);
+            w.player_money
+                .insert(w.team_players[&TEAMS[2]], get("money") as UnsignedInt);
             w.frame = get("frame") as u32;
             w.rng.init_random_with_seed(get("seed") as u32);
         }

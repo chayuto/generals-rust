@@ -1084,10 +1084,12 @@ fn run_bunker(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
                 }
             }
             5 => {
-                sim.world.player_upgrades.insert(TEAM_A, mask.clone());
+                let player = sim.player_index(TEAM_A);
+                sim.world.player_upgrades.insert(player, mask.clone());
             }
             6 => {
-                sim.world.player_upgrades.remove(&TEAM_A);
+                let player = sim.player_index(TEAM_A);
+                sim.world.player_upgrades.remove(&player);
             }
             other => panic!("op {other}"),
         }
@@ -1253,10 +1255,11 @@ fn run_propaganda(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
                 }
             }
             7 => {
+                let player = sim.player_index(team);
                 if a != 0 {
-                    sim.world.player_upgrades.insert(team, sub.clone());
+                    sim.world.player_upgrades.insert(player, sub.clone());
                 } else {
-                    sim.world.player_upgrades.remove(&team);
+                    sim.world.player_upgrades.remove(&player);
                 }
             }
             8 => {

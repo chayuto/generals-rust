@@ -604,15 +604,9 @@ fn run_struct(sim: &mut SimContext, v: &Vector<'_>) -> usize {
 
 fn deposit_row(sim: &mut SimContext, m: ModuleSlot, ret: u32) -> String {
     let head = head(sim, m, ret);
-    // The port keeps money by team; a player's money is the sum over its teams.
     let money: Vec<String> = PLAYER_TEAMS
         .iter()
-        .map(|teams| {
-            teams
-                .iter()
-                .fold(0u32, |sum, &t| sum.wrapping_add(sim.player_money(t)))
-                .to_string()
-        })
+        .map(|teams| sim.player_money(teams[0]).to_string())
         .collect();
     let score: Vec<String> = (0..3)
         .map(|p| {
@@ -644,9 +638,7 @@ fn deposit_team(code: u32) -> TeamId {
 
 fn run_deposit(sim: &mut SimContext, v: &Vector<'_>) -> usize {
     for (player, key) in ["m0", "m1", "m2"].into_iter().enumerate() {
-        sim.world
-            .player_money
-            .insert(PLAYER_TEAMS[player][0], v.num(key));
+        sim.world.player_money.insert(player as i32, v.num(key));
     }
     let o = spawn(
         sim,
@@ -688,14 +680,12 @@ fn run_deposit(sim: &mut SimContext, v: &Vector<'_>) -> usize {
                     .upgrade_mask()
                     .clone();
                 let none = Default::default();
-                // The port keeps upgrades by team: give every team of the player.
-                for &team in PLAYER_TEAMS[op[1] as usize] {
-                    let owned = sim.world.player_upgrades.entry(team).or_default();
-                    if op[3] != 0 {
-                        owned.clear_and_set(&none, &mask);
-                    } else {
-                        owned.clear_and_set(&mask, &none);
-                    }
+                // The reference gives the player the upgrade without refreshing modules.
+                let owned = sim.world.player_upgrades.entry(op[1] as i32).or_default();
+                if op[3] != 0 {
+                    owned.clear_and_set(&none, &mask);
+                } else {
+                    owned.clear_and_set(&mask, &none);
                 }
             }
             3 => sim.set_object_construction_percent(o, f32::from_bits(op[1])),

@@ -1013,8 +1013,9 @@ fn test_wp52_special_power_1000_golden_vectors() {
         // Reset player state deterministically
         sim.world.player_sciences.clear();
         sim.world.player_bounty_percent.clear();
-        sim.world.player_money.insert(team_a, money_a);
-        sim.world.player_money.insert(team_b, money_b);
+        let (player_a, player_b) = (sim.player_index(team_a), sim.player_index(team_b));
+        sim.world.player_money.insert(player_a, money_a);
+        sim.world.player_money.insert(player_b, money_b);
         sim.world
             .shared_special_power_ready_frames
             .insert((team_a, sp_shared_id), frame0);

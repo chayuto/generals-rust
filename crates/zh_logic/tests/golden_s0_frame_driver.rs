@@ -503,7 +503,7 @@ fn observe(watch: &mut Watch, tape: &TapeLock, sim: &mut SimContext, hook: &str,
     let sabotage = |team: TeamId| {
         sim.world
             .player_energy
-            .get(&team)
+            .get(&sim.player_index(team))
             .map_or(0, |e| e.get_power_sabotaged_till_frame())
     };
     let global = format!(
@@ -585,7 +585,7 @@ impl FrameSeams for Seams<'_> {
             self.look(sim, &format!("A{player}"));
         }
     }
-    fn power_brown_out_change(&mut self, _sim: &mut SimContext, player: Int, _team: TeamId) {
+    fn power_brown_out_change(&mut self, _sim: &mut SimContext, player: Int) {
         self.brown_outs.push(player);
     }
     fn build_assistant(&mut self, sim: &mut SimContext) {
@@ -734,7 +734,7 @@ fn sabotage(sim: &SimContext) -> [u32; 2] {
     [TEAMS[0], TEAMS[1]].map(|team| {
         sim.world
             .player_energy
-            .get(&team)
+            .get(&sim.player_index(team))
             .map_or(0, |e| e.get_power_sabotaged_till_frame())
     })
 }

@@ -2211,9 +2211,14 @@ pub struct SimWorld {
     pub ai_enable_repulsors: Bool,
     pub team_players: BTreeMap<TeamId, Int>,
     pub team_members: BTreeMap<TeamId, Vec<ObjectSlot>>,
+    /// `Player::m_playerTeamPrototypes` by player index: each prototype is its team
+    /// instances, newest first. Filled by [`SimContext::add_player_team`]; a team
+    /// listed nowhere counts as a prototype of its own, after the listed ones.
+    pub player_team_prototypes: BTreeMap<Int, Vec<Vec<TeamId>>>,
     pub player_relationships: BTreeMap<(Int, Int), Relationship>,
     pub player_sciences: BTreeMap<TeamId, BTreeSet<ScienceType>>,
-    pub player_upgrades: BTreeMap<TeamId, UpgradeMaskType>,
+    /// `Player::m_upgradesCompleted` by player index.
+    pub player_upgrades: BTreeMap<Int, UpgradeMaskType>,
     pub player_preorder: BTreeMap<TeamId, Bool>,
     pub registered_supply_centers: Vec<ObjectId>,
     pub registered_supply_warehouses: Vec<ObjectId>,
@@ -2225,14 +2230,15 @@ pub struct SimWorld {
     pub damage_watch: Option<(ModuleSlot, Option<ObjectStatusMaskType>)>,
     pub triggered_fx_lists: Vec<(String, Coord3D)>,
     pub triggered_damage_fx: Vec<(String, DamageType, Real, ObjectId, ObjectId)>,
-    pub player_money: BTreeMap<TeamId, UnsignedInt>,
+    /// `Player::m_money` by player index.
+    pub player_money: BTreeMap<Int, UnsignedInt>,
     pub player_is_human: BTreeMap<TeamId, Bool>,
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
     pub player_cost_modifiers: BTreeMap<TeamId, Vec<(KindOfMaskType, Real, Int)>>,
     pub player_radars: BTreeMap<TeamId, (Int, Int)>,
-    pub player_energy: BTreeMap<TeamId, Energy>,
+    /// `Player::m_energy` by player index.
+    pub player_energy: BTreeMap<Int, Energy>,
     pub player_radar_disabled_until: BTreeMap<TeamId, UnsignedInt>,
-    pub player_power_sabotaged_until: BTreeMap<TeamId, UnsignedInt>,
     pub player_bounty_percent: BTreeMap<TeamId, Real>,
     pub player_captured_objects: BTreeMap<TeamId, Int>,
     pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
@@ -2324,8 +2330,8 @@ pub struct SimWorld {
     pub control_bar_overrides: BTreeMap<ControlBarOverrideKey, Option<CommandButtonId>>,
     /// Skill points awarded by modules, by player index.
     pub skill_points_awarded: BTreeMap<Int, Int>,
-    /// `Player::m_upgradesInProgress`.
-    pub player_upgrades_in_progress: BTreeMap<TeamId, UpgradeMaskType>,
+    /// `Player::m_upgradesInProgress` by player index.
+    pub player_upgrades_in_progress: BTreeMap<Int, UpgradeMaskType>,
     /// `Player::m_handicap`; absent means every handicap is 1.
     pub player_handicaps: BTreeMap<TeamId, crate::economy::handicap::Handicap>,
     /// `Player::m_productionCostChanges` by template name.
@@ -2371,6 +2377,7 @@ impl SimWorld {
             ai_enable_repulsors: TRUE,
             team_players: BTreeMap::new(),
             team_members: BTreeMap::new(),
+            player_team_prototypes: BTreeMap::new(),
             player_relationships: BTreeMap::new(),
             player_sciences: BTreeMap::new(),
             player_upgrades: BTreeMap::new(),
@@ -2391,7 +2398,6 @@ impl SimWorld {
             player_radars: BTreeMap::new(),
             player_energy: BTreeMap::new(),
             player_radar_disabled_until: BTreeMap::new(),
-            player_power_sabotaged_until: BTreeMap::new(),
             player_bounty_percent: BTreeMap::new(),
             player_captured_objects: BTreeMap::new(),
             shared_special_power_ready_frames: BTreeMap::new(),
@@ -2729,22 +2735,159 @@ impl SimContext {
         })
     }
 
-    /// Collects all object slots controlled by `player_idx` in `Player::iterateObjects`
-    /// (`defaultTeam` first, then other teams owned by `player_idx` in `team_members` order).
-    fn player_object_slots(&self, player_idx: Int) -> Vec<ObjectSlot> {
+    /// `Object::getControllingPlayer` of a member of `team_id`; a null `Team*` has none.
+    fn controlling_player(&self, team_id: TeamId) -> Option<Int> {
+        (team_id != TeamId::INVALID).then(|| self.player_index_for_team(team_id))
+    }
+
+    /// `Player::getEnergy`. `Player::init` makes every player the owner of its pool.
+    fn energy_of(&mut self, player_idx: Int) -> &mut Energy {
+        self.world
+            .player_energy
+            .entry(player_idx)
+            .or_insert_with(|| {
+                let mut energy = Energy::new();
+                energy.init(Some(player_idx));
+                energy
+            })
+    }
+
+    /// Records the player of a team, and with it `Object::isNeutralControlled`.
+    fn assign_team_player(&mut self, team_id: TeamId, player_idx: Int) {
+        let neutral = self.player_index_for_team(self.world.neutral_team_id);
+        self.world.team_players.insert(team_id, player_idx);
+        self.world
+            .team_is_neutral
+            .insert(team_id, Bool::from(player_idx == neutral));
+    }
+
+    /// The player's team prototypes in `Player::m_playerTeamPrototypes` order. Teams
+    /// that are in no list follow: the default team first, then by id.
+    fn player_prototypes(&self, player_idx: Int) -> Vec<Vec<TeamId>> {
+        let owned = |team: TeamId| self.player_index_for_team(team) == player_idx;
+        let listed: BTreeSet<TeamId> = self
+            .world
+            .player_team_prototypes
+            .values()
+            .flatten()
+            .flatten()
+            .copied()
+            .collect();
+        let mut out: Vec<Vec<TeamId>> = self
+            .world
+            .player_team_prototypes
+            .get(&player_idx)
+            .into_iter()
+            .flatten()
+            .map(|p| p.iter().copied().filter(|&t| owned(t)).collect())
+            .collect();
         let default_team = self.world.player_default_teams.get(&player_idx).copied();
-        let mut out = Vec::new();
-        if let Some(def_team) = default_team {
-            if let Some(members) = self.world.team_members.get(&def_team) {
-                out.extend_from_slice(members);
-            }
-        }
-        for (&team_id, members) in &self.world.team_members {
-            if Some(team_id) != default_team && self.player_index_for_team(team_id) == player_idx {
-                out.extend_from_slice(members);
-            }
-        }
+        let others = self.world.team_members.keys().copied();
+        let unlisted = default_team
+            .into_iter()
+            .chain(others.filter(|&t| Some(t) != default_team));
+        out.extend(
+            unlisted
+                .filter(|&t| !listed.contains(&t) && owned(t))
+                .map(|t| vec![t]),
+        );
         out
+    }
+
+    /// `TeamPrototype`'s constructor with its first instance: the prototype joins the
+    /// end of the player's list (`Player::addTeamToList`).
+    pub fn add_player_team(&mut self, team_id: TeamId, player_idx: Int) {
+        let mut list = self.player_prototypes(player_idx);
+        list.retain(|p| !p.contains(&team_id));
+        list.push(vec![team_id]);
+        self.assign_team_player(team_id, player_idx);
+        self.world.player_team_prototypes.insert(player_idx, list);
+    }
+
+    /// `TeamFactory::createTeamOnPrototype`: another instance of `sibling`'s prototype,
+    /// ahead of the older ones.
+    pub fn add_team_instance(&mut self, team_id: TeamId, sibling: TeamId) {
+        let player_idx = self.player_index_for_team(sibling);
+        let mut list = self.player_prototypes(player_idx);
+        match list.iter_mut().find(|p| p.contains(&sibling)) {
+            Some(prototype) => prototype.insert(0, team_id),
+            None => list.push(vec![team_id, sibling]),
+        }
+        self.assign_team_player(team_id, player_idx);
+        self.world.player_team_prototypes.insert(player_idx, list);
+    }
+
+    /// `TeamPrototype::setControllingPlayer`: every instance changes player, and the
+    /// prototype goes to the end of the new player's list.
+    fn move_team_prototype(&mut self, team_id: TeamId, new_player: Int) {
+        let old_player = self.player_index_for_team(team_id);
+        let mut old_list = self.player_prototypes(old_player);
+        let prototype = match old_list.iter().position(|p| p.contains(&team_id)) {
+            Some(at) => old_list.remove(at),
+            None => vec![team_id],
+        };
+        self.world
+            .player_team_prototypes
+            .insert(old_player, old_list);
+        let mut new_list = self.player_prototypes(new_player);
+        // If the player does not change, the instances just removed from its list are
+        // back as unlisted teams, one entry each.
+        new_list.retain(|p| !p.iter().any(|t| prototype.contains(t)));
+        for &instance in &prototype {
+            self.assign_team_player(instance, new_player);
+        }
+        new_list.push(prototype);
+        self.world
+            .player_team_prototypes
+            .insert(new_player, new_list);
+    }
+
+    /// Collects the objects of `player_idx` in `Player::iterateObjects` order: team
+    /// prototypes, their instances, then each team's member list.
+    fn player_object_slots(&self, player_idx: Int) -> Vec<ObjectSlot> {
+        self.player_prototypes(player_idx)
+            .iter()
+            .flatten()
+            .filter_map(|team| self.world.team_members.get(team))
+            .flatten()
+            .copied()
+            .collect()
+    }
+
+    /// The next member after `slot` in the list it is in now.
+    fn team_member_after(&self, slot: ObjectSlot) -> Option<ObjectSlot> {
+        let team = self.world.objects.get(slot)?.team_id;
+        let members = self.world.team_members.get(&team)?;
+        let at = members.iter().position(|&s| s == slot)?;
+        members.get(at + 1).copied()
+    }
+
+    /// `Player::addUpgrade(.., UPGRADE_STATUS_COMPLETE)` and `Player::onUpgradeCompleted`:
+    /// every object of the player rechecks its upgrade modules, even if the player
+    /// already had the upgrade. The member lists are walked live (`DLINK_ITERATOR`).
+    fn complete_player_upgrade(&mut self, player_idx: Int, mask: &UpgradeMaskType) {
+        let empty = UpgradeMaskType::new();
+        if let Some(pending) = self.world.player_upgrades_in_progress.get_mut(&player_idx) {
+            pending.clear_and_set(mask, &empty);
+        }
+        self.world
+            .player_upgrades
+            .entry(player_idx)
+            .or_default()
+            .clear_and_set(&empty, mask);
+        let teams: Vec<TeamId> = self
+            .player_prototypes(player_idx)
+            .into_iter()
+            .flatten()
+            .collect();
+        for team in teams {
+            let members = self.world.team_members.get(&team);
+            let mut next = members.and_then(|m| m.first().copied());
+            while let Some(slot) = next {
+                self.update_upgrade_modules(slot);
+                next = self.team_member_after(slot);
+            }
+        }
     }
 
     /// Sets the map extent, rebuilds the partition grid with `cell_size` over it,
@@ -3156,11 +3299,11 @@ impl SimContext {
         }
     }
 
-    /// `Team::setControllingPlayer`: updates the team's controlling player and
+    /// `Team::setControllingPlayer`: moves the team's prototype to the new player and
     /// refreshes shroud (or runs `onCapture` in non-retail builds) for all members.
     pub fn set_team_controlling_player(&mut self, team_id: TeamId, new_player: Int) {
         let old_player = self.player_index_for_team(team_id);
-        self.world.team_players.insert(team_id, new_player);
+        self.move_team_prototype(team_id, new_player);
         let slots: Vec<ObjectSlot> = self
             .world
             .team_members
@@ -4216,8 +4359,8 @@ impl SimContext {
         slot
     }
 
-    /// Grants a player-level upgrade (`Player::addUpgrade`) and refreshes all live
-    /// objects belonging to `team_id`.
+    /// Completes a player-level upgrade for the player controlling `team_id`
+    /// (`Player::addUpgrade`).
     pub fn grant_player_upgrade(&mut self, team_id: TeamId, upgrade_name: &str) {
         let Some(upgrade_mask) = self
             .rules
@@ -4227,28 +4370,8 @@ impl SimContext {
         else {
             return;
         };
-        let empty_mask = UpgradeMaskType::new();
-        if let Some(pending) = self.world.player_upgrades_in_progress.get_mut(&team_id) {
-            pending.clear_and_set(&upgrade_mask, &empty_mask);
-        }
-        self.world
-            .player_upgrades
-            .entry(team_id)
-            .or_default()
-            .clear_and_set(&empty_mask, &upgrade_mask);
-        let player_slots: Vec<ObjectSlot> = self
-            .world
-            .objects
-            .world_iter()
-            .filter(|&slot| {
-                self.world
-                    .objects
-                    .get(slot)
-                    .is_some_and(|o| !o.is_destroyed() && o.team_id == team_id)
-            })
-            .collect();
-        for pslot in player_slots {
-            self.update_upgrade_modules(pslot);
+        if let Some(player_idx) = self.controlling_player(team_id) {
+            self.complete_player_upgrade(player_idx, &upgrade_mask);
         }
     }
 
@@ -4276,15 +4399,17 @@ impl SimContext {
         let Some(info) = self.energy_object_info(owner) else {
             return;
         };
+        let Some(player_idx) = self.controlling_player(team_id) else {
+            return;
+        };
         if under_construction
-            || team_id == TeamId::INVALID
             || info.energy_production == 0
             || (info.is_disabled != FALSE && info.energy_production > 0)
         {
             return;
         }
         let frame = self.world.frame;
-        let energy = self.world.player_energy.entry(team_id).or_default();
+        let energy = self.energy_of(player_idx);
         if incoming != FALSE {
             energy.object_entering_influence(Some(info), frame, &mut NoopEnergyCallbacks);
         } else {
@@ -4866,9 +4991,8 @@ impl SimView for SimContext {
 
     fn player_has_upgrade(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
         if self
-            .world
-            .player_upgrades
-            .get(&team_id)
+            .controlling_player(team_id)
+            .and_then(|p| self.world.player_upgrades.get(&p))
             .is_some_and(|owned| owned.test_for_any(mask) != FALSE)
         {
             TRUE
@@ -4948,7 +5072,9 @@ impl SimView for SimContext {
     }
 
     fn player_money(&self, team_id: TeamId) -> UnsignedInt {
-        self.world.player_money.get(&team_id).copied().unwrap_or(0)
+        self.controlling_player(team_id)
+            .and_then(|p| self.world.player_money.get(&p).copied())
+            .unwrap_or(0)
     }
 
     fn player_is_human(&self, team_id: TeamId) -> Bool {
@@ -5298,9 +5424,8 @@ impl SimView for SimContext {
     }
 
     fn player_energy_production(&self, team_id: TeamId) -> Int {
-        self.world
-            .player_energy
-            .get(&team_id)
+        self.controlling_player(team_id)
+            .and_then(|p| self.world.player_energy.get(&p))
             .map_or(0, |e| e.get_production(self.world.frame))
     }
 
@@ -5557,9 +5682,8 @@ impl SimView for SimContext {
 
     fn player_has_upgrade_in_production(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
         Bool::from(
-            self.world
-                .player_upgrades_in_progress
-                .get(&team_id)
+            self.controlling_player(team_id)
+                .and_then(|p| self.world.player_upgrades_in_progress.get(&p))
                 .is_some_and(|owned| owned.test_for_all(mask) != FALSE),
         )
     }
@@ -7093,27 +7217,8 @@ impl SimApi for SimContext {
         };
         let empty_mask = UpgradeMaskType::new();
         if upgrade_type == UpgradeType::Player {
-            if let Some(pending) = self.world.player_upgrades_in_progress.get_mut(&team_id) {
-                pending.clear_and_set(&upgrade_mask, &empty_mask);
-            }
-            self.world
-                .player_upgrades
-                .entry(team_id)
-                .or_default()
-                .clear_and_set(&empty_mask, &upgrade_mask);
-            let player_slots: Vec<ObjectSlot> = self
-                .world
-                .objects
-                .world_iter()
-                .filter(|&slot| {
-                    self.world
-                        .objects
-                        .get(slot)
-                        .is_some_and(|o| !o.is_destroyed() && o.team_id == team_id)
-                })
-                .collect();
-            for pslot in player_slots {
-                self.update_upgrade_modules(pslot);
+            if let Some(player_idx) = self.controlling_player(team_id) {
+                self.complete_player_upgrade(player_idx, &upgrade_mask);
             }
         } else {
             if let Some(obj) = self.world.objects.get_mut(owner) {
@@ -7562,7 +7667,10 @@ impl SimApi for SimContext {
     }
 
     fn withdraw_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) -> UnsignedInt {
-        let entry = self.world.player_money.entry(team_id).or_insert(0);
+        let Some(player_idx) = self.controlling_player(team_id) else {
+            return 0;
+        };
+        let entry = self.world.player_money.entry(player_idx).or_insert(0);
         let withdrawn = (*entry).min(amount);
         *entry -= withdrawn;
         withdrawn
@@ -8150,42 +8258,34 @@ impl SimApi for SimContext {
     fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
         let info = self.energy_object_info(owner);
         let now = self.world.frame;
-        self.world
-            .player_energy
-            .entry(team_id)
-            .or_default()
-            .add_power_bonus(info, now, &mut NoopEnergyCallbacks);
+        if let Some(p) = self.controlling_player(team_id) {
+            self.energy_of(p)
+                .add_power_bonus(info, now, &mut NoopEnergyCallbacks);
+        }
     }
 
     fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
         let info = self.energy_object_info(owner);
         let now = self.world.frame;
-        self.world
-            .player_energy
-            .entry(team_id)
-            .or_default()
-            .remove_power_bonus(info, now, &mut NoopEnergyCallbacks);
+        if let Some(p) = self.controlling_player(team_id) {
+            self.energy_of(p)
+                .remove_power_bonus(info, now, &mut NoopEnergyCallbacks);
+        }
     }
 
     fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool) {
         let now = self.world.frame;
-        self.world
-            .player_energy
-            .entry(team_id)
-            .or_default()
-            .adjust_power(delta, adding, now, &mut NoopEnergyCallbacks);
+        if let Some(p) = self.controlling_player(team_id) {
+            self.energy_of(p)
+                .adjust_power(delta, adding, now, &mut NoopEnergyCallbacks);
+        }
     }
 
     fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt) {
-        let until = self.world.frame.saturating_add(frames);
-        self.world
-            .player_power_sabotaged_until
-            .insert(team_id, until);
-        self.world
-            .player_energy
-            .entry(team_id)
-            .or_default()
-            .set_power_sabotaged_till_frame(until);
+        let until = self.world.frame.wrapping_add(frames);
+        if let Some(p) = self.controlling_player(team_id) {
+            self.energy_of(p).set_power_sabotaged_till_frame(until);
+        }
     }
 
     fn pause_special_power(
@@ -8750,11 +8850,14 @@ impl SimApi for SimContext {
         if under_const || destroyed {
             return;
         }
+        let Some(player_idx) = self.controlling_player(team_id) else {
+            return;
+        };
         let empty_mask = UpgradeMaskType::new();
         let mut mask_to_check = self
             .world
             .player_upgrades
-            .get(&team_id)
+            .get(&player_idx)
             .cloned()
             .unwrap_or_default();
         mask_to_check.clear_and_set(&empty_mask, &obj_mask);

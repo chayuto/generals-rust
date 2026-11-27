@@ -698,13 +698,15 @@ impl Run {
                 s.hold_flag = b as i32;
             }),
             11 => {
-                sim.world.player_money.insert(TEAM, a);
+                let player = sim.player_index(TEAM);
+                sim.world.player_money.insert(player, a);
             }
             12 => {
                 let (prod, cons) = ENERGY[x];
                 let until = if y == 0 { 0 } else { sim.world.frame + y };
                 let energy = Energy::from_parts(prod, cons, until, Some(1));
-                sim.world.player_energy.insert(TEAM, energy);
+                let player = sim.player_index(TEAM);
+                sim.world.player_energy.insert(player, energy);
             }
             13 => {
                 if a != 0 {
@@ -921,12 +923,13 @@ fn start(sim: &mut SimContext, variant: usize, frame: u32, cfg: &[u32]) -> Run {
             .buildable_overrides
             .insert(name.to_owned(), status);
     }
-    sim.world.player_money.insert(TEAM, cfg[10]);
+    let player = sim.player_index(TEAM);
+    sim.world.player_money.insert(player, cfg[10]);
     // A player without any power entry stands for zero production and consumption.
     let (prod, cons) = ENERGY[c[11]];
     if (prod, cons) != (0, 0) {
         let energy = Energy::from_parts(prod, cons, 0, Some(1));
-        sim.world.player_energy.insert(TEAM, energy);
+        sim.world.player_energy.insert(player, energy);
     }
     let factory = spawn_on(sim, &format!("F{variant}"), TEAM);
     clear_log();

@@ -387,7 +387,7 @@ fn world(sim: &mut SimContext) {
     for (player, team) in TEAMS.into_iter().enumerate() {
         w.team_players.insert(team, player as i32);
         w.player_default_teams.insert(player as i32, team);
-        w.player_money.insert(team, 5000);
+        w.player_money.insert(player as i32, 5000);
         w.player_is_human.insert(team, FALSE);
     }
     w.team_is_neutral.insert(TEAMS[0], TRUE);
@@ -561,7 +561,7 @@ fn players_row(sim: &SimContext) -> String {
     for (p, team) in TEAMS.into_iter().enumerate() {
         let p = p as i32;
         let frame = sim.world.frame;
-        let energy = sim.world.player_energy.get(&team);
+        let energy = sim.world.player_energy.get(&p);
         let (prod, cons) =
             energy.map_or((0, 0), |e| (e.get_production(frame), e.get_consumption()));
         let sk = sim.world.score_keepers.get(&p).cloned().unwrap_or_default();
@@ -771,7 +771,8 @@ fn apply(sim: &mut SimContext, op: [u32; 4]) -> i32 {
             0
         }
         3 => {
-            sim.world.player_money.insert(TEAMS[a as usize], b);
+            let player = sim.player_index(TEAMS[a as usize]);
+            sim.world.player_money.insert(player, b);
             0
         }
         4 => {

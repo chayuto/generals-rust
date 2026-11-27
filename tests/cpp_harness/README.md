@@ -105,6 +105,12 @@ A small object normally spans at most two cells per axis, and its cell array has
 - **What goes wrong:** a cave destroyed without dying stays on its tracker's list of entrances. If it becomes the front entrance after a flush, `TunnelTracker::onTunnelDestroyed` calls `onContainedBy(nullptr)`: the riders stay listed but are contained by nothing, and can be listed a second time. A cave whose index is switched before `onBuildComplete` is listed twice.
 - **How the oracle handles it:** `gen_pkt264_cave.cpp` runs all of this.
 
+### Handing a team to another player moves no energy
+
+- **Where:** `Team::setControllingPlayer`. It moves the team's prototype, so every instance changes player, but only runs `onCapture` on this instance's members, and never `becomingTeamMember`.
+- **What happens:** base production and consumption stay with the old player. When such an object later leaves, it is subtracted from the new player, so a player's totals can go negative. Only power plant bonuses move.
+- **Guard:** `golden_player_state` keeps these states, negative totals included.
+
 ### A cave can end up without a team
 
 - **Where:** `CaveContain::onRemoving` and `recalcApparentControllingPlayer`.

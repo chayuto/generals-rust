@@ -11,7 +11,7 @@ use crate::arena::ObjectSlot;
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::rules::disabled_types::{DisabledType, DISABLED_COUNT};
 use crate::sim::{SimApi, SimContext};
-use zh_common::types::{Bool, Int, ObjectId, TeamId, FALSE};
+use zh_common::types::{Bool, Int, ObjectId, FALSE};
 
 /// The unported parts of the frame, in call order. Each default does nothing.
 pub trait FrameSeams {
@@ -32,7 +32,7 @@ pub trait FrameSeams {
     /// `Team::updateGenericScripts` of the player's teams.
     fn team_generic_scripts(&mut self, _sim: &mut SimContext, _player: Int) {}
     /// `Player::onPowerBrownOutChange`, when a power sabotage runs out.
-    fn power_brown_out_change(&mut self, _sim: &mut SimContext, _player: Int, _team: TeamId) {}
+    fn power_brown_out_change(&mut self, _sim: &mut SimContext, _player: Int) {}
     /// The rest of `Player::update`: academy statistics, the retaliation mode
     /// message of the local player and the income bucket.
     fn player_upkeep(&mut self, _sim: &mut SimContext, _player: Int) {}
@@ -111,26 +111,15 @@ fn update_players(sim: &mut SimContext, seams: &mut dyn FrameSeams) {
 /// The power sabotage part of `Player::update`.
 fn expire_power_sabotage(sim: &mut SimContext, seams: &mut dyn FrameSeams, player: Int) {
     let now = sim.world.frame;
-    let teams: Vec<TeamId> = sim
-        .world
-        .player_energy
-        .iter()
-        .filter(|(team, energy)| {
-            let till = energy.get_power_sabotaged_till_frame();
-            till != 0
-                && now > till
-                && sim.world.team_players.get(team).copied().unwrap_or(team.0) == player
-        })
-        .map(|(&team, _)| team)
-        .collect();
-    for team in teams {
-        if let Some(energy) = sim.world.player_energy.get_mut(&team) {
-            energy.set_power_sabotaged_till_frame(0);
-        }
-        sim.world.player_power_sabotaged_until.remove(&team);
+    let Some(energy) = sim.world.player_energy.get_mut(&player) else {
+        return;
+    };
+    let till = energy.get_power_sabotaged_till_frame();
+    if till != 0 && now > till {
+        energy.set_power_sabotaged_till_frame(0);
         // The reference brings the objects' power state up to date here; the
         // world keeps no brown-out state yet.
-        seams.power_brown_out_change(sim, player, team);
+        seams.power_brown_out_change(sim, player);
     }
 }
 

@@ -102,7 +102,10 @@ impl ThingTemplatePlayerView for PlayerView<'_> {
     fn get_energy_supply_ratio(&self) -> Real {
         // A player that never had a power module has no production and no consumption,
         // which is a ratio of zero.
-        let energy = self.ctx.world.player_energy.get(&self.team);
+        let energy = self
+            .ctx
+            .controlling_player(self.team)
+            .and_then(|p| self.ctx.world.player_energy.get(&p));
         energy.map_or(0.0, |e| e.get_energy_supply_ratio(self.ctx.world.frame))
     }
 
@@ -360,9 +363,8 @@ impl SimContext {
         };
         let empty = UpgradeMaskType::new();
         let mut mask = self
-            .world
-            .player_upgrades
-            .get(&obj.team_id)
+            .controlling_player(obj.team_id)
+            .and_then(|p| self.world.player_upgrades.get(&p))
             .cloned()
             .unwrap_or_default();
         mask.clear_and_set(&empty, &obj.upgrades_completed);
@@ -531,7 +533,10 @@ impl SimContext {
         if amount == 0 {
             return;
         }
-        let money = self.world.player_money.entry(team).or_insert(0);
+        let Some(player_idx) = self.controlling_player(team) else {
+            return;
+        };
+        let money = self.world.player_money.entry(player_idx).or_insert(0);
         *money = money.wrapping_add(amount);
         let frame = self.world.frame;
         self.academy(team).record_income(frame);
@@ -546,11 +551,14 @@ impl SimContext {
 
     /// `Player::addUpgrade(.., UPGRADE_STATUS_IN_PRODUCTION)`.
     pub(super) fn add_upgrade_in_production(&mut self, team: TeamId, upgrade: NameKeyType) {
-        if let Some(mask) = self.upgrade_mask_of(upgrade) {
+        if let (Some(mask), Some(player_idx)) = (
+            self.upgrade_mask_of(upgrade),
+            self.controlling_player(team),
+        ) {
             let empty = UpgradeMaskType::new();
             self.world
                 .player_upgrades_in_progress
-                .entry(team)
+                .entry(player_idx)
                 .or_default()
                 .clear_and_set(&empty, &mask);
         }
@@ -558,13 +566,16 @@ impl SimContext {
 
     /// `Player::removeUpgrade`.
     pub(super) fn remove_player_upgrade_of(&mut self, team: TeamId, upgrade: NameKeyType) {
-        if let Some(mask) = self.upgrade_mask_of(upgrade) {
+        if let (Some(mask), Some(player_idx)) = (
+            self.upgrade_mask_of(upgrade),
+            self.controlling_player(team),
+        ) {
             let empty = UpgradeMaskType::new();
             for masks in [
                 &mut self.world.player_upgrades_in_progress,
                 &mut self.world.player_upgrades,
             ] {
-                if let Some(owned) = masks.get_mut(&team) {
+                if let Some(owned) = masks.get_mut(&player_idx) {
                     owned.clear_and_set(&mask, &empty);
                 }
             }
