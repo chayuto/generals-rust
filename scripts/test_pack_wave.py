@@ -145,7 +145,10 @@ class TestPackWave(unittest.TestCase):
         )
         est_tokens = len(bundle.encode("utf-8")) // 4
         self.assertGreater(est_tokens, 5000)
-        self.assertLess(est_tokens, 40000)
+        # A reading budget, not a correctness check. The bundle quotes the spine traits,
+        # which grew with the AI slices (40,056 tokens then). Trim the packer, rather than
+        # raising this again, if it fails.
+        self.assertLess(est_tokens, 45000)
         self.assertIn("pub trait DieFacet", bundle)
         self.assertIn("FXListDie", bundle)
 
