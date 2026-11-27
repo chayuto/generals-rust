@@ -9690,6 +9690,15 @@ impl SimApi for SimContext {
         let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
             return FALSE;
         };
+        if let Some(entry) = self
+            .world
+            .modules
+            .payload(ms)
+            .and_then(|m| m.ai_collision_entry())
+        {
+            let ctx = self.world.modules.meta(ms).context(ms);
+            return entry(self, ctx, other);
+        }
         self.dispatch_module(ms, |m, sim, ctx| {
             m.as_ai_mut()
                 .map_or(FALSE, |ai| ai.process_collision(sim, ctx, other))

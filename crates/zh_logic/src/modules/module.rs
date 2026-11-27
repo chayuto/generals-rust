@@ -465,6 +465,12 @@ pub trait BehaviorModule: Send {
         None
     }
 
+    /// The `processCollision` entry of a resident AI module.
+    fn ai_collision_entry(
+        &self,
+    ) -> Option<crate::modules::update::ai_update::AiCollisionEntry> {
+        None
+    }
     /// The command entry of a resident AI module: orders go there instead of to
     /// its `&mut self` facet methods.
     fn ai_call_entry(&self) -> Option<crate::modules::update::ai_update::AiCallEntry> {

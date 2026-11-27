@@ -12,7 +12,8 @@
 //! `xfer` for this module; its `crc` writes nothing.
 //!
 //! Path requests, `computePath` and the drive along the path are in
-//! `ai_update/path_follow.rs`, asking allies aside in `allies.rs` (S9).
+//! `ai_update/path_follow.rs`, asking allies aside in `allies.rs`, blocking and
+//! collisions in `collision.rs` (S9; golden test `tests/golden_s9_path_follow.rs`).
 //!
 //! Not here: turrets (S14); mood targets (S12); the derived AI classes (S15 to
 //! S18; of the dozer and worker only construction and `xfer`, see
@@ -53,9 +54,11 @@ use zh_common::types::{
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
 mod allies;
+mod collision;
 mod path_follow;
 
 use allies::{move_allies, move_allies_away_from_destination, private_move_away_from_unit};
+pub use collision::process_collision;
 pub use path_follow::{
     can_compute_quick_path, compute_path, compute_quick_path, is_valid_locomotor_position,
     locomotor_distance_to_goal, request_approach_path, request_attack_path, request_path,
@@ -332,6 +335,10 @@ pub type AiCallEntry = fn(&mut dyn SimApi, ModuleContext, &AiCall);
 // -----------------------------------------------------------------------------
 // The module
 // -----------------------------------------------------------------------------
+
+/// `processCollision` of a resident AI module, which runs with the module in the
+/// arena.
+pub type AiCollisionEntry = fn(&mut dyn SimApi, ModuleContext, ObjectSlot) -> Bool;
 
 /// `AIUpdateInterface`. The fields are in `xfer` order.
 pub struct AiUpdate {
@@ -2266,6 +2273,10 @@ impl BehaviorModule for AiUpdate {
 
     fn ai_call_entry(&self) -> Option<AiCallEntry> {
         Some(execute)
+    }
+
+    fn ai_collision_entry(&self) -> Option<AiCollisionEntry> {
+        Some(process_collision)
     }
 
     /// The constructor: the normal locomotor set, then the next frame.

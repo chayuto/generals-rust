@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`284` implemented, `39` data only, `0` seeded skeletons, `140` unported)
-- **Golden Vector Oracles:** `113` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `108` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `114` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `109` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -382,6 +382,9 @@
 | `zh_logic` | `crates/zh_logic/src/gamelogic/command_target.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/gamelogic/frame.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/module_data.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/allies.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/collision.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/path_follow.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_actions.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_effects.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
@@ -491,6 +494,7 @@
 | `docs/golden_vectors/S5_Search.json` | - | no |
 | `docs/golden_vectors/S7_LocomotorMovement.json` | 1200 | no |
 | `docs/golden_vectors/S8_AiOrders.json` | 220 | no |
+| `docs/golden_vectors/S9_PathFollow.json` | 63 | no |
 | `docs/golden_vectors/SCRIPT_ENGINE.json` | - | no |
 | `docs/golden_vectors/SHROUD_UPDATES.json` | 300 | no |
 | `docs/golden_vectors/WP2_1_Xfer.json` | 1000 | no |
@@ -609,6 +613,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s5_search.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s7_locomotor_movement.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s8_ai_orders.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s9_path_follow.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_script_engine.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_shroud_updates.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_sleepy_heap.rs` | `active` |

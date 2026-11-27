@@ -113,13 +113,16 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
   - Orders reach the module through `AiCall` (`BehaviorModule::ai_call_entry`). `ai_construct` and `ai_init_state_machine` remain for the module stand-ins of older suites.
   - A game CRC has to call `xfer` in CRC mode for this module: it needs the next call frame, which `BehaviorModule::crc` cannot reach.
   - Derived classes: none yet. They need hooks on `update`, `execute_command` and `xfer`, and their own states.
-  - Left: request paths, `computeQuickPath`, `computePath`, the on-path drive and collisions (S9); `Object::reactToTransformChange`'s `updatePos` for AI objects (S4); squads, polygon areas, waypoint objects, `privateMoveAwayFromUnit`, command buttons; loading a save.
+  - Left: squads, polygon areas, waypoint objects, command buttons; loading a save.
 
 ### S9. Path following inside the AI update
 - C++: `AIUpdate.cpp` path request, `doPathfind`, `computePath`, `doLocomotor`, blocked and collision handling (1,630). One worker, tight; split collisions off if needed.
 - Oracle: Trace with units placed in each other's way.
 - Seams: `is_moving`, `destroy_path`, `get_path_destination`, `process_collision` (physics answers FALSE today). Risks: blocked counters, collision order, distance math.
 - Seen: units follow a path and push or wait for each other.
+- **Done for the base class.** Path requests, `doPathfind`, `computePath`, `computeQuickPath`, the on-path drive (`ai_update/path_follow.rs`), pushing allies aside (`allies.rs`) and blocking and collisions (`collision.rs`) run on the sim's pathfind map. `golden_s9_path_follow` traces 63 scenes of units in each other's way through the real frame; `path_follow_sim` drives a unit around a wall.
+  - The movement states (S10) are what turns an order into a path request.
+  - The other searches (S6) are asked through `AiSeams`. Gaps: `OPEN_DECISIONS.md`.
 
 ### S10. Movement states
 - C++: `AIStates.cpp` internal move, move to, follow path, tighten, move out of the way, attack-move shell (about 1,200). One worker.
