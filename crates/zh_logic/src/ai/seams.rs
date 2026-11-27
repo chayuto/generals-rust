@@ -9,6 +9,7 @@ use crate::combat::locomotor::LocomotorSeams;
 use crate::modules::module::CommandSourceType;
 use crate::modules::update::ai_update::AiCommandParms;
 use crate::object::thing::ThingTerrainAccess;
+use crate::pathfinder::path::Path;
 use crate::rules::combat_types::LocomotorSurfaceTypeMask;
 use crate::sim::SimView;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
@@ -154,6 +155,58 @@ pub trait AiSeams: Send {
     }
     /// `Path::computePointOnPath` or `computeFlightDistToGoal` (S3, S9): the
     /// point to steer for and the distance along the path.
+    /// `Pathfinder::findClosestPath`, which may move `to` (S6).
+    fn closest_path(
+        &mut self,
+        _owner: ObjectId,
+        _from: &Coord3D,
+        _to: &mut Coord3D,
+        _blocked: Bool,
+        _path_cost_factor: Real,
+    ) -> Option<Path> {
+        None
+    }
+    /// `Pathfinder::patchPath` (S6).
+    fn patch_path(
+        &mut self,
+        _owner: ObjectId,
+        _current: Option<&Path>,
+        _blocked: Bool,
+    ) -> Option<Path> {
+        None
+    }
+    /// `Pathfinder::findSafePath` (S6).
+    fn safe_path(
+        &mut self,
+        _owner: ObjectId,
+        _from: &Coord3D,
+        _repulsor1: &Coord3D,
+        _repulsor2: &Coord3D,
+        _radius: Real,
+    ) -> Option<Path> {
+        None
+    }
+    /// `Pathfinder::getMoveAwayFromPath` (S6): off `unit_path`, and off the path
+    /// of the unit moved away from before.
+    fn move_away_path(
+        &mut self,
+        _owner: ObjectId,
+        _unit: ObjectId,
+        _unit_path: &Path,
+        _second: Option<ObjectId>,
+        _second_path: Option<&Path>,
+    ) -> Option<Path> {
+        None
+    }
+    /// `computeAttackPath`: `None` for FALSE, else the path it left.
+    fn attack_path(
+        &mut self,
+        _owner: ObjectId,
+        _victim: Option<ObjectId>,
+        _victim_pos: &Coord3D,
+    ) -> Option<Option<Path>> {
+        None
+    }
     fn point_on_path(&mut self, _owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real) {
         (*pos, 0.0)
     }
@@ -374,6 +427,11 @@ forward! {
     compute_path(owner: ObjectId) -> Bool;
     point_on_path(owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real);
     path_xfer(owner: ObjectId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
+    closest_path(owner: ObjectId, from: &Coord3D, to: &mut Coord3D, blocked: Bool, path_cost_factor: Real) -> Option<Path>;
+    patch_path(owner: ObjectId, current: Option<&Path>, blocked: Bool) -> Option<Path>;
+    safe_path(owner: ObjectId, from: &Coord3D, repulsor1: &Coord3D, repulsor2: &Coord3D, radius: Real) -> Option<Path>;
+    move_away_path(owner: ObjectId, unit: ObjectId, unit_path: &Path, second: Option<ObjectId>, second_path: Option<&Path>) -> Option<Path>;
+    attack_path(owner: ObjectId, victim: Option<ObjectId>, victim_pos: &Coord3D) -> Option<Option<Path>>;
     state_enter(owner: ObjectId, state: StateId) -> StateReturnType;
     state_update(owner: ObjectId, state: StateId) -> StateReturnType;
     state_exit(owner: ObjectId, state: StateId, status: StateExitType);

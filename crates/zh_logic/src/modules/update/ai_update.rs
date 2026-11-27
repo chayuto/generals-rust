@@ -11,10 +11,12 @@
 //! module's next call frame, which only the world has. A game CRC must call
 //! `xfer` for this module; its `crc` writes nothing.
 //!
-//! Not here: path requests, `computePath`, blocked and collision handling and the
-//! `POSITION_ON_PATH` drive (S9); turrets (S14); mood targets (S12); the derived
-//! AI classes (S15 to S18; of the dozer and worker only construction and `xfer`,
-//! see [`DerivedAi`]); groups, command buttons and `privateMoveAwayFromUnit`.
+//! Path requests, `computePath` and the drive along the path are in
+//! `ai_update/path_follow.rs`, asking allies aside in `allies.rs` (S9).
+//!
+//! Not here: turrets (S14); mood targets (S12); the derived AI classes (S15 to
+//! S18; of the dozer and worker only construction and `xfer`, see
+//! [`DerivedAi`]); groups and command buttons.
 
 use crate::object::weapon_queries;
 use crate::ai::ai_state_machine::{self as machine, state_id, AiStateMachine};
@@ -34,6 +36,7 @@ use crate::modules::module::{
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::update::physics_update;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
+use crate::pathfinder::Path;
 use crate::rules::disabled_types::{DisabledMaskType, DisabledType};
 use crate::rules::kind_of::KindOfType;
 use crate::rules::model_state::ModelConditionFlagType;
@@ -48,6 +51,18 @@ use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, UpdateSleepTime, XferVersion, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError, XferMode};
+
+mod allies;
+mod path_follow;
+
+use allies::{move_allies, move_allies_away_from_destination, private_move_away_from_unit};
+pub use path_follow::{
+    can_compute_quick_path, compute_path, compute_quick_path, is_valid_locomotor_position,
+    locomotor_distance_to_goal, request_approach_path, request_attack_path, request_path,
+    request_safe_path,
+};
+pub(crate) use path_follow::{goal_position, update_goal};
+use path_follow::{point_on_path, set_path, with_pathfinder};
 
 /// `FAST_AS_POSSIBLE`.
 pub const FAST_AS_POSSIBLE: Real = 999_999.0;
@@ -255,6 +270,7 @@ pub enum AiCommandType {
     WanderInPlace,
     Panic,
     Busy,
+    MoveAwayFromUnit,
 }
 
 /// `AICommandParms`.
@@ -344,8 +360,11 @@ pub struct AiUpdate {
     pub executing_waypoint_queue: Bool,
     pub completed_waypoint: Option<UnsignedInt>,
     pub waiting_for_path: Bool,
-    /// `m_path != nullptr`; the path itself is behind the seams (S3).
+    /// `m_path != nullptr`.
     pub has_path: Bool,
+    /// `m_path`. Without a pathfind map a path may exist only behind the seams,
+    /// with `has_path` set and nothing here.
+    pub path: Option<Path>,
     pub requested_victim_id: ObjectId,
     pub requested_destination: Coord3D,
     pub requested_destination2: Coord3D,
@@ -389,6 +408,8 @@ pub struct AiUpdate {
     pub is_blocked_and_stuck: Bool,
     pub is_moving_flag: Bool,
     pub is_in_update: Bool,
+    /// `m_retryPath`: the last path only came close.
+    pub retry_path: Bool,
 
     /// What a class derived from `AIUpdateInterface` adds.
     pub derived: DerivedAi,
@@ -432,6 +453,7 @@ impl AiUpdate {
             completed_waypoint: None,
             waiting_for_path: FALSE,
             has_path: FALSE,
+            path: None,
             requested_victim_id: ObjectId::INVALID,
             requested_destination: zero,
             requested_destination2: zero,
@@ -472,6 +494,7 @@ impl AiUpdate {
             is_blocked_and_stuck: FALSE,
             is_moving_flag: FALSE,
             is_in_update: FALSE,
+            retry_path: FALSE,
             derived: DerivedAi::Base,
         }
     }
@@ -547,9 +570,46 @@ impl AiUpdate {
     /// `destroyPath`.
     pub fn destroy_path(&mut self) {
         self.has_path = FALSE;
+        self.path = None;
         self.waiting_for_path = FALSE;
         self.is_attack_path = FALSE;
         self.locomotor_goal_type = LocoGoalType::None;
+    }
+
+    /// `setLocomotorGoalPositionOnPath`.
+    pub fn set_goal_position_on_path(&mut self) {
+        self.locomotor_goal_type = LocoGoalType::PositionOnPath;
+        self.locomotor_goal_data = Coord3D::default();
+    }
+
+    /// `setFinalPosition`.
+    pub fn set_final_position(&mut self, pos: &Coord3D) {
+        self.final_position = *pos;
+        self.do_final_position = FALSE;
+    }
+
+    /// `setCanPathThroughUnits`.
+    pub fn set_can_path_through_units(&mut self, can: Bool) {
+        self.can_path_through_units = can;
+        if can != FALSE {
+            self.is_blocked_and_stuck = FALSE;
+        }
+    }
+
+    /// `m_locomotorGoalType != NONE`.
+    pub fn is_locomotor_goal_set(&self) -> bool {
+        self.locomotor_goal_type != LocoGoalType::None
+    }
+
+    /// `isAttacking`.
+    fn is_attacking_state(&self) -> bool {
+        matches!(
+            self.machine.current_state_id(),
+            state_id::ATTACK_POSITION
+                | state_id::ATTACK_OBJECT
+                | state_id::FORCE_ATTACK_OBJECT
+                | state_id::ATTACK_AND_FOLLOW_OBJECT
+        )
     }
 
     /// `setLocomotorGoalPositionExplicit`.
@@ -700,7 +760,10 @@ impl AiUpdate {
         let mut got_path = self.has_path;
         xfer.xfer_bool(&mut got_path)?;
         if got_path != FALSE && !crc {
-            seams.path_xfer(owner, xfer)?;
+            match self.path.as_mut() {
+                Some(path) => path.xfer(xfer)?,
+                None => seams.path_xfer(owner, xfer)?,
+            }
         }
         xfer.xfer_object_id(&mut self.requested_victim_id)?;
         xfer.xfer_coord3d(&mut self.requested_destination)?;
@@ -1169,8 +1232,11 @@ pub fn do_locomotor(sim: &mut dyn SimApi, ctx: ModuleContext) -> UpdateSleepTime
                     });
                     ai(sim, ctx).do_final_position = FALSE;
                 }
-                // Following the path is S9; nothing sets this goal yet.
-                LocoGoalType::PositionOnPath => {}
+                LocoGoalType::PositionOnPath => {
+                    if path_follow::drive_on_path(sim, ctx, &mut blocked).is_err() {
+                        return UpdateSleepTime::FOREVER;
+                    }
+                }
                 LocoGoalType::Angle => {
                     drive(sim, ctx, |l, w| l.move_towards_angle(w, goal.x));
                     ai(sim, ctx).do_final_position = FALSE;
@@ -1336,31 +1402,36 @@ fn finish_movement(sim: &mut dyn SimApi, ctx: ModuleContext) {
     ai(sim, ctx).destroy_path();
     set_locomotor_goal_none(sim, ctx);
     sim.clear_model_condition_state(owner, ModelConditionFlagType::Moving);
-    if let Some(mut goal) = ai_seams(sim).goal_position(ctx.owner_id) {
+    if let Some(mut goal) = goal_position(sim, ctx) {
         let pos = position_of(sim, owner);
         let dx = goal.x - pos.x;
         let dy = goal.y - pos.y;
         if dx * dx + dy * dy >= PATHFIND_CELL_SIZE_F * PATHFIND_CELL_SIZE_F {
-            goal = ai_seams(sim).snap_position(ctx.owner_id, pos);
+            goal = path_follow::snap_position(sim, ctx, pos);
         }
         let state = ai(sim, ctx);
         state.final_position = goal;
         state.do_final_position = FALSE;
         let layer = layer_of(sim, owner);
-        ai_seams(sim).update_goal(ctx.owner_id, &goal, layer);
+        update_goal(sim, ctx, &goal, layer);
     }
     let state = ai(sim, ctx);
     state.movement_complete = FALSE;
     state.ignore_obstacle_id = ObjectId::INVALID;
 }
 
-/// `doPathfind`: the path queue reached this unit. The searches are the seam's.
+/// `doPathfind`: the path queue reached this unit. Without a pathfind map the
+/// seam computes the path.
 pub fn do_pathfind(sim: &mut dyn SimApi, ctx: ModuleContext) {
-    let state = ai(sim, ctx);
-    if state.waiting_for_path == FALSE {
+    if ai(sim, ctx).waiting_for_path == FALSE {
         return;
     }
-    state.waiting_for_path = FALSE;
+    ai(sim, ctx).waiting_for_path = FALSE;
+    if sim.pathfinder().is_some() {
+        path_follow::do_pathfind_on_map(sim, ctx);
+        return;
+    }
+    let state = ai(sim, ctx);
     // The safe and approach searches replace the path and end there.
     let early = state.is_safe_path != FALSE
         || (state.is_approach_path != FALSE && is_doing_ground_movement(sim, ctx) != FALSE);
@@ -1778,6 +1849,7 @@ pub fn execute_command(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiComma
             plain_order(sim, ctx, source, state_id::WANDER_IN_PLACE);
         }
         C::Busy => plain_order(sim, ctx, source, state_id::BUSY),
+        C::MoveAwayFromUnit => private_move_away_from_unit(sim, ctx, obj),
     }
 }
 
@@ -1977,7 +2049,7 @@ fn private_attack_position(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiC
     // nearby instead. `retail-crc` does not ask about the range.
     if weapon(sim).is_some_and(|w| w.1 != FALSE)
         && (cfg!(feature = "retail-crc") || !current_weapon_reaches(sim, owner, &pos))
-        && ai_seams(sim).quick_path_exists(ctx.owner_id, &pos) == FALSE
+        && !path_follow::quick_path_exists(sim, ctx, &pos)
     {
         let options = FindPositionOptions {
             max_radius: 100.0,
@@ -2104,7 +2176,7 @@ fn load_post_process(sim: &mut dyn SimApi, ctx: ModuleContext) {
     if ai(sim, ctx).is_moving() == FALSE {
         ai(sim, ctx).pathfind_goal_cell = ICoord2D { x: -1, y: -1 };
         let (pos, layer) = (position_of(sim, owner), layer_of(sim, owner));
-        ai_seams(sim).update_goal(ctx.owner_id, &pos, layer);
+        update_goal(sim, ctx, &pos, layer);
         ai(sim, ctx).pathfind_cur_cell = ICoord2D { x: -1, y: -1 };
         ai_seams(sim).update_pos(ctx.owner_id, &pos);
     } else {
@@ -2119,7 +2191,7 @@ fn load_post_process(sim: &mut dyn SimApi, ctx: ModuleContext) {
             };
             ai(sim, ctx).pathfind_goal_cell = ICoord2D { x: -1, y: -1 };
             let layer = layer_of(sim, owner);
-            ai_seams(sim).update_goal(ctx.owner_id, &goal, layer);
+            update_goal(sim, ctx, &goal, layer);
         }
     }
     let state = ai(sim, ctx);
@@ -2248,13 +2320,7 @@ impl AiUpdateFacet for AiUpdate {
     }
 
     fn is_attacking(&self) -> Bool {
-        Bool::from(matches!(
-            self.machine.current_state_id(),
-            state_id::ATTACK_POSITION
-                | state_id::ATTACK_OBJECT
-                | state_id::FORCE_ATTACK_OBJECT
-                | state_id::ATTACK_AND_FOLLOW_OBJECT
-        ))
+        Bool::from(self.is_attacking_state())
     }
 
     fn is_idle(&self) -> Bool {

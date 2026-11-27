@@ -583,6 +583,18 @@ impl SimView for EngineSim<'_> {
     fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
         self.engine_ai_is_doing_ground_movement(owner)
     }
+    fn ai_context(&self, owner: ObjectSlot) -> Option<ModuleContext> {
+        not_wired("ai_context")
+    }
+    fn ai_path_view(&self, owner: ObjectSlot) -> Option<zh_logic::pathfinder::AdjustUnit> {
+        not_wired("ai_path_view")
+    }
+    fn path_units(&self) -> &dyn zh_logic::pathfinder::PathUnits {
+        not_wired("path_units")
+    }
+    fn tall_buildings(&self) -> &dyn zh_logic::pathfinder::TallBuildings {
+        not_wired("tall_buildings")
+    }
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
         not_wired("pristine_bone_transforms")
     }
@@ -1533,6 +1545,12 @@ impl SimApi for EngineSim<'_> {
     }
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         not_wired("queue_for_path")
+    }
+    fn take_pathfinder(&mut self) -> Option<Box<zh_logic::pathfinder::Pathfinder>> {
+        not_wired("take_pathfinder")
+    }
+    fn put_pathfinder(&mut self, pathfinder: Box<zh_logic::pathfinder::Pathfinder>) {
+        not_wired("put_pathfinder")
     }
     fn new_locomotor(&mut self, name: &str) -> Option<Locomotor> {
         not_wired("new_locomotor")

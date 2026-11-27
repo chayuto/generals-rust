@@ -114,15 +114,15 @@ fn do_init_idle_state(sim: &mut dyn SimApi, ctx: ModuleContext) {
             return;
         };
         if goal.x != 0.0 || goal.y != 0.0 || goal.z != 0.0 {
-            ai_seams(sim).update_goal(ctx.owner_id, &goal, layer);
+            ai_update::update_goal(sim, ctx, &goal, layer);
             if ultra_accurate == FALSE {
-                let adjusted = ai_seams(sim).goal_position(ctx.owner_id);
+                let adjusted = ai_update::goal_position(sim, ctx);
                 if let Some(pos) = adjusted {
                     goal = pos;
                     if sim.frame() <= 1 {
                         sim.set_object_position(ctx.owner_slot, &goal);
                     }
-                    ai_seams(sim).update_goal(ctx.owner_id, &goal, layer);
+                    ai_update::update_goal(sim, ctx, &goal, layer);
                 }
             }
         }

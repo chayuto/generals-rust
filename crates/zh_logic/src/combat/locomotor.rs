@@ -469,6 +469,7 @@ impl Locomotor {
 
     pub fn get_template_name(&self) -> &str { &self.template.name }
     pub fn get_legal_surfaces(&self) -> LocomotorSurfaceTypeMask { self.template.surfaces }
+    pub fn is_moving_backwards(&self) -> Bool { self.get_flag(LocomotorFlag::MovingBackwards) }
     pub fn get_is_downhill_only(&self) -> Bool { self.template.downhill_only }
     pub fn get_max_speed_for_condition(&self, condition: BodyDamageType, movement_penalty: BodyDamageType) -> Real {
         let mut speed = if is_condition_better(condition, movement_penalty) {
@@ -522,6 +523,7 @@ impl Locomotor {
     }
     pub fn set_allow_invalid_position(&mut self, allow: Bool) { self.set_flag(LocomotorFlag::AllowInvalidPosition, allow); }
     pub fn set_close_enough_dist(&mut self, dist: Real) { self.close_enough_dist = dist; }
+    pub fn is_close_enough_dist3d(&self) -> Bool { self.get_flag(LocomotorFlag::CloseEnough3D) }
     pub fn set_close_enough_dist3d(&mut self, setting: Bool) { self.set_flag(LocomotorFlag::CloseEnough3D, setting); }
     pub fn set_preferred_height(&mut self, height: Real) { self.preferred_height = height; }
     pub fn set_use_precise_z_pos(&mut self, value: Bool) { self.set_flag(LocomotorFlag::PreciseZPos, value); }

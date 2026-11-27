@@ -8,7 +8,7 @@
 //! `crates/zh_logic/tests/golden_s4_reservations.rs`. How the sim feeds them is
 //! tested in `crates/zh_logic/tests/pathfind_reservations_sim.rs`.
 
-use zh_common::math::{Coord3D, ICoord2D, Region3D};
+use zh_common::math::{gm_sqrtf, Coord3D, ICoord2D, Region3D};
 use zh_common::types::{ObjectId, Real, Relationship, FALSE};
 
 use super::{SimApi, SimContext, SimView};
@@ -19,7 +19,7 @@ use crate::gamelogic::global_data::BodyDamageType;
 use crate::modules::update::ai_update::AiUpdate;
 use crate::pathfinder::ai_pathfind::{
     AdjustUnit, Footprint, GoalMover, NoPathCost, PathAgent, PathUnit, PathUnits, PathWorld,
-    Pathfinder,
+    Pathfinder, TallBuilding, TallBuildings,
 };
 use crate::pathfinder::pathfind_constants::{PathfindLayerEnum, PATHFIND_CELL_SIZE_F};
 use crate::rules::combat_types::{DamageType, DeathType, LocomotorSurfaceTypeMask};
@@ -179,11 +179,9 @@ impl SimContext {
 }
 
 /// The units the pathfinder looks up while it holds the map.
-struct SimPathUnits<'a>(&'a SimContext);
-
-impl PathUnits for SimPathUnits<'_> {
+impl PathUnits for SimContext {
     fn unit(&self, id: ObjectId) -> Option<PathUnit> {
-        let sim = self.0;
+        let sim = self;
         let slot = sim.world.objects.slot_by_id(id)?;
         let obj = sim.world.objects.get(slot)?;
         Some(PathUnit {
@@ -194,16 +192,24 @@ impl PathUnits for SimPathUnits<'_> {
     }
 
     fn is_ally(&self, agent: ObjectId, other: ObjectId) -> bool {
-        let objects = &self.0.world.objects;
+        let objects = &self.world.objects;
         match (objects.slot_by_id(agent), objects.slot_by_id(other)) {
-            (Some(a), Some(b)) => self.0.player_relationship(a, b) == Relationship::Allies,
+            (Some(a), Some(b)) => self.player_relationship(a, b) == Relationship::Allies,
+            _ => false,
+        }
+    }
+
+    fn is_non_enemy_object(&self, agent: ObjectId, other: ObjectId) -> bool {
+        let objects = &self.world.objects;
+        match (objects.slot_by_id(agent), objects.slot_by_id(other)) {
+            (Some(a), Some(b)) => self.player_relationship(a, b) != Relationship::Enemies,
             _ => false,
         }
     }
 
     /// `canCrushOrSquish(other, TEST_CRUSH_OR_SQUISH)`.
     fn can_crush_or_squish(&self, agent: ObjectId, other: ObjectId) -> bool {
-        let sim = self.0;
+        let sim = self;
         let objects = &sim.world.objects;
         let (Some(a), Some(b)) = (objects.slot_by_id(agent), objects.slot_by_id(other)) else {
             return false;
@@ -226,7 +232,66 @@ impl PathUnits for SimPathUnits<'_> {
     }
 }
 
+impl TallBuildings for SimContext {
+    fn tall_building(&self, id: ObjectId) -> Option<TallBuilding> {
+        let slot = self.world.objects.slot_by_id(id)?;
+        if self.object_is_kind_of(slot, KindOfType::AircraftPathAround) == FALSE {
+            return None;
+        }
+        let obj = self.world.objects.get(slot)?;
+        Some(TallBuilding {
+            id,
+            position: *obj.thing.get_position(),
+            radius: obj.geometry.get_bounding_circle_radius(),
+        })
+    }
+
+    /// The reference asks the partition grid; this walks the objects, so ties
+    /// may go to another building.
+    fn closest_tall_building(&self, pos: &Coord3D, radius: Real) -> Option<TallBuilding> {
+        let mut best: Option<(Real, TallBuilding)> = None;
+        for slot in self.world.objects.world_iter() {
+            let Some(building) = self
+                .world
+                .objects
+                .id_of(slot)
+                .and_then(|id| self.tall_building(id))
+            else {
+                continue;
+            };
+            let dx = building.position.x - pos.x;
+            let dy = building.position.y - pos.y;
+            let distance = gm_sqrtf(dx * dx + dy * dy) - building.radius;
+            if distance <= radius && best.map_or(true, |(d, _)| distance < d) {
+                best = Some((distance, building));
+            }
+        }
+        best.map(|(_, building)| building)
+    }
+}
+
 impl SimContext {
+    /// `updatePos` as `setTriggerAreaFlagsForChangeInPosition` calls it.
+    pub(super) fn update_pathfind_position_after_move(&mut self, slot: ObjectSlot) {
+        if self.world.pathfinder.is_none()
+            || self.object_is_kind_of(slot, KindOfType::Projectile) != FALSE
+            || self.object_is_kind_of(slot, KindOfType::Inert) != FALSE
+            || self
+                .world
+                .objects
+                .get(slot)
+                .map_or(true, |o| o.ai_slot.is_none())
+        {
+            return;
+        }
+        self.update_pathfind_position(slot);
+    }
+
+    /// `Pathfinder::removePos`.
+    pub(super) fn remove_pathfind_position(&mut self, slot: ObjectSlot) {
+        self.with_goal_mover(slot, Pathfinder::remove_pos);
+    }
+
     fn resident_ai(&mut self, slot: ObjectSlot) -> Option<&mut AiUpdate> {
         let module = self.world.objects.get(slot)?.ai_slot?;
         self.resident_state_mut(module)?.downcast_mut::<AiUpdate>()
@@ -279,7 +344,7 @@ impl SimContext {
 
     /// What the destination searches read from a unit. A team with no player
     /// type counts as a person's, as an object without a player does.
-    fn adjust_unit(&self, slot: ObjectSlot) -> Option<AdjustUnit> {
+    pub(super) fn adjust_unit(&self, slot: ObjectSlot) -> Option<AdjustUnit> {
         let obj = self.world.objects.get(slot)?;
         let human = self.world.player_is_human.get(&obj.team_id) != Some(&FALSE);
         Some(AdjustUnit {
@@ -357,8 +422,7 @@ impl SimContext {
         });
     }
 
-    /// `Pathfinder::updatePos` for the object where it stands. Nothing in the
-    /// sim calls it when an object moves yet.
+    /// `Pathfinder::updatePos` for the object where it stands.
     pub fn update_pathfind_position(&mut self, slot: ObjectSlot) {
         let Some(pos) = self
             .world
@@ -388,7 +452,7 @@ impl SimContext {
         let mut pathfinder = self.world.pathfinder.take()?;
         let found = pathfinder.adjust_destination(
             self.terrain.as_ref(),
-            &SimPathUnits(self),
+            self,
             &mut NoPathCost,
             &unit,
             dest,
@@ -408,7 +472,7 @@ impl SimContext {
         let unit = self.adjust_unit(slot)?;
         Some(pathfinder.adjust_to_possible_destination(
             self.terrain.as_ref(),
-            &SimPathUnits(self),
+            self,
             &unit,
             dest,
         ))

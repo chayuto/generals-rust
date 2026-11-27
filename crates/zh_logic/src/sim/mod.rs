@@ -1385,6 +1385,14 @@ pub trait SimView {
     fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D);
     /// `AIUpdateInterface::isDoingGroundMovement`.
     fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool;
+    /// The context of the owner's AI, if it is a resident module.
+    fn ai_context(&self, owner: ObjectSlot) -> Option<ModuleContext>;
+    /// What the pathfinder reads from a unit.
+    fn ai_path_view(&self, owner: ObjectSlot) -> Option<crate::pathfinder::AdjustUnit>;
+    /// The units the pathfinder looks up.
+    fn path_units(&self) -> &dyn crate::pathfinder::PathUnits;
+    /// The buildings aircraft go around.
+    fn tall_buildings(&self) -> &dyn crate::pathfinder::TallBuildings;
     /// `Drawable::getPristineBonePositions` transforms from `SimWorld::pristine_bones`.
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D>;
     fn get_highest_layer_for_destination(
@@ -2177,6 +2185,11 @@ pub trait SimApi: SimView {
     fn ai_construct(&mut self, owner: ObjectSlot);
     /// `Pathfinder::queueForPath`.
     fn queue_for_path(&mut self, id: ObjectId) -> Bool;
+    /// `TheAI->pathfinder()` out of the sim, for a search that reads the rest of
+    /// the world while it changes the map. Hand it back with
+    /// [`SimApi::put_pathfinder`].
+    fn take_pathfinder(&mut self) -> Option<Box<crate::pathfinder::Pathfinder>>;
+    fn put_pathfinder(&mut self, pathfinder: Box<crate::pathfinder::Pathfinder>);
     /// `TheLocomotorStore->newLocomotor` by name; draws from the logic stream.
     fn new_locomotor(&mut self, name: &str) -> Option<Locomotor>;
     /// `ContainModuleInterface::markAllPassengersDetected`.
@@ -3867,6 +3880,7 @@ impl SimContext {
         }
         if moved {
             self.update_off_map(owner);
+            self.update_pathfind_position_after_move(owner);
         }
     }
 
@@ -6391,6 +6405,24 @@ impl SimView for SimContext {
     fn pathfinder_snap_position(&self, owner: ObjectSlot, pos: &mut Coord3D) {
         let (cell_x, cell_y, center) = self.pathfind_goal_cell(owner, pos);
         self.adjust_coord_to_cell(cell_x, cell_y, center, pos, PathfindLayerEnum::Ground);
+    }
+
+    fn ai_context(&self, owner: ObjectSlot) -> Option<ModuleContext> {
+        let ms = self.world.objects.get(owner)?.ai_slot?;
+        self.world.modules.payload(ms)?.resident()?;
+        Some(self.world.modules.meta(ms).context(ms))
+    }
+
+    fn ai_path_view(&self, owner: ObjectSlot) -> Option<crate::pathfinder::AdjustUnit> {
+        self.adjust_unit(owner)
+    }
+
+    fn path_units(&self) -> &dyn crate::pathfinder::PathUnits {
+        self
+    }
+
+    fn tall_buildings(&self) -> &dyn crate::pathfinder::TallBuildings {
+        self
     }
 
     fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
@@ -9619,6 +9651,10 @@ impl SimApi for SimContext {
     }
 
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
+        if self.world.objects.get(owner).map_or(true, |o| o.layer == layer) {
+            return;
+        }
+        self.remove_pathfind_position(owner);
         if let Some(obj) = self.world.objects.get_mut(owner) {
             // In the reference an AI unit's height was already read, from the old
             // layer, when it was positioned (`Pathfinder::updatePos`, unported). The
@@ -9628,6 +9664,9 @@ impl SimApi for SimContext {
             }
             obj.layer = layer;
             obj.thing.set_height_layer(layer);
+        }
+        if self.world.objects.get(owner).is_some_and(|o| o.ai_slot.is_some()) {
+            self.update_pathfind_position(owner);
         }
     }
 
@@ -11086,6 +11125,14 @@ impl SimApi for SimContext {
         .unwrap_or(FALSE)
     }
 
+    fn take_pathfinder(&mut self) -> Option<Box<crate::pathfinder::Pathfinder>> {
+        self.world.pathfinder.take()
+    }
+
+    fn put_pathfinder(&mut self, pathfinder: Box<crate::pathfinder::Pathfinder>) {
+        self.world.pathfinder = Some(pathfinder);
+    }
+
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         match self.world.pathfinder.as_deref_mut() {
             Some(pathfinder) => Bool::from(pathfinder.queue_for_path(id)),
@@ -12028,6 +12075,22 @@ impl SimView for MockSimApi {
         self.ctx.pathfinder_snap_position(owner, pos);
     }
 
+    fn ai_context(&self, owner: ObjectSlot) -> Option<ModuleContext> {
+        self.ctx.ai_context(owner)
+    }
+
+    fn ai_path_view(&self, owner: ObjectSlot) -> Option<crate::pathfinder::AdjustUnit> {
+        self.ctx.ai_path_view(owner)
+    }
+
+    fn path_units(&self) -> &dyn crate::pathfinder::PathUnits {
+        self.ctx.path_units()
+    }
+
+    fn tall_buildings(&self) -> &dyn crate::pathfinder::TallBuildings {
+        self.ctx.tall_buildings()
+    }
+
     fn ai_is_doing_ground_movement(&self, owner: ObjectSlot) -> Bool {
         self.ctx.ai_is_doing_ground_movement(owner)
     }
@@ -12139,6 +12202,14 @@ impl SimView for MockSimApi {
 }
 
 impl SimApi for MockSimApi {
+    fn take_pathfinder(&mut self) -> Option<Box<crate::pathfinder::Pathfinder>> {
+        self.ctx.take_pathfinder()
+    }
+
+    fn put_pathfinder(&mut self, pathfinder: Box<crate::pathfinder::Pathfinder>) {
+        self.ctx.put_pathfinder(pathfinder);
+    }
+
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         self.ctx.queue_for_path(id)
     }
