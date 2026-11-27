@@ -2385,6 +2385,8 @@ pub struct SimWorld {
     pub player_radars: BTreeMap<TeamId, (Int, Int)>,
     /// `Player::m_energy` by player index.
     pub player_energy: BTreeMap<Int, Energy>,
+    /// `Player::m_ai` of every computer player, by player index.
+    pub ai_players: BTreeMap<Int, crate::ai::ai_player::AiPlayer>,
     pub player_radar_disabled_until: BTreeMap<TeamId, UnsignedInt>,
     pub player_bounty_percent: BTreeMap<TeamId, Real>,
     pub player_captured_objects: BTreeMap<TeamId, Int>,
@@ -2550,6 +2552,7 @@ impl SimWorld {
             player_cost_modifiers: BTreeMap::new(),
             player_radars: BTreeMap::new(),
             player_energy: BTreeMap::new(),
+            ai_players: BTreeMap::new(),
             player_radar_disabled_until: BTreeMap::new(),
             player_bounty_percent: BTreeMap::new(),
             player_captured_objects: BTreeMap::new(),

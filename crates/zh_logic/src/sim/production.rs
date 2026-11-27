@@ -3,6 +3,7 @@
 //! Player state is keyed by team, as elsewhere in `SimWorld`.
 
 use super::{SimApi, SimContext, SimView};
+use crate::economy::energy::NoopEnergyCallbacks;
 use crate::arena::{DeferredSelfOp, FacetMask, ModuleSlot, ObjectSlot, ThingTemplateId};
 use crate::economy::academy_stats::{academy_kind_bits, AcademyObjectInfo, AcademyStats};
 use crate::economy::handicap::{Handicap, HandicapType};
@@ -16,7 +17,7 @@ use crate::object::thing_template::{
 };
 use crate::rules::command_set::{CommandButton, CommandButtonType};
 use crate::rules::kind_of::{KindOfMaskType, KindOfType};
-use crate::rules::object_status_types::ObjectStatusType;
+use crate::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
 use crate::rules::production_prerequisite::{PrereqPlayerView, ThingTemplateRef};
 use crate::rules::science::ScienceType;
 use crate::rules::upgrade::{UpgradeMaskType, UpgradeType};
@@ -620,8 +621,18 @@ impl SimContext {
     /// `ThingFactory::newObject`: a random build variation, then `initObject`'s upgrades.
     pub(super) fn factory_new_object_of(
         &mut self,
+        tmpl: ThingTemplateId,
+        team: TeamId,
+    ) -> ObjectSlot {
+        self.factory_new_object_with_status(tmpl, team, ObjectStatusMaskType::new())
+    }
+
+    /// `ThingFactory::newObject(tmpl, team, statusBits)`.
+    pub(crate) fn factory_new_object_with_status(
+        &mut self,
         mut tmpl: ThingTemplateId,
         team: TeamId,
+        status: ObjectStatusMaskType,
     ) -> ObjectSlot {
         let variations = self
             .template_by_id(tmpl)
@@ -633,9 +644,84 @@ impl SimContext {
                 tmpl = id;
             }
         }
-        let slot = self.spawn_object(tmpl, team, Coord3D::default(), 0.0);
+        let slot = self.spawn_object_with_status(tmpl, team, Coord3D::default(), 0.0, status);
         self.update_upgrade_modules(slot);
         slot
+    }
+
+    /// `ScoreKeeper::addObjectBuilt` and `addMoneySpent` of
+    /// `Player::onStructureConstructionComplete`.
+    pub(crate) fn record_structure_built(&mut self, owner: ObjectSlot) {
+        let Some((team, under_construction)) = self.world.objects.get(owner).map(|o| {
+            (
+                o.team_id,
+                o.status.test(ObjectStatusType::UnderConstruction.as_i32()),
+            )
+        }) else {
+            return;
+        };
+        let Some(desc) = self.score_desc(owner) else {
+            return;
+        };
+        let scoring = self.world.scoring_enabled;
+        let player = self.player_index_for_team(team);
+        self.score_keeper(team).add_object_built(
+            &ScoreObjectView {
+                template: &desc,
+                controlling_player_idx: player,
+                under_construction,
+            },
+            scoring,
+        );
+        let cost = self.unit_cost_for(team, ThingTemplateId(desc.id));
+        self.score_keeper(team).add_money_spent(cost);
+    }
+
+    /// `Player::onStructureUndone`.
+    pub(crate) fn record_structure_undone(&mut self, owner: ObjectSlot) {
+        let Some((team, under_construction)) = self.world.objects.get(owner).map(|o| {
+            (
+                o.team_id,
+                o.status.test(ObjectStatusType::UnderConstruction.as_i32()),
+            )
+        }) else {
+            return;
+        };
+        let Some(desc) = self.score_desc(owner) else {
+            return;
+        };
+        let scoring = self.world.scoring_enabled;
+        let player = self.player_index_for_team(team);
+        self.score_keeper(team).remove_object_built(
+            &ScoreObjectView {
+                template: &desc,
+                controlling_player_idx: player,
+                under_construction,
+            },
+            scoring,
+        );
+    }
+
+    /// `Object::friend_adjustPowerForPlayer`, whatever the construction status.
+    pub(crate) fn friend_adjust_power_for_player(&mut self, owner: ObjectSlot, incoming: Bool) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        let (Some(info), Some(player)) =
+            (self.energy_object_info(owner), self.controlling_player(team))
+        else {
+            return;
+        };
+        if info.is_disabled != FALSE && info.energy_production > 0 {
+            return;
+        }
+        let frame = self.world.frame;
+        let energy = self.energy_of(player);
+        if incoming != FALSE {
+            energy.object_entering_influence(Some(info), frame, &mut NoopEnergyCallbacks);
+        } else {
+            energy.object_leaving_influence(Some(info), frame, &mut NoopEnergyCallbacks);
+        }
     }
 
     /// `Player::onUnitCreated`.

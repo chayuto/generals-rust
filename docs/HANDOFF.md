@@ -51,7 +51,9 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - Game start against the reference (24 games: 6 baseline replays and 18 option variants; `GameStart.json`):
   - before the starting units, seed, players, teams, object fields, bridge records and the pathfind cells under each deck match on all 24 games;
   - before the AI player's map setup, seed and starting positions also match;
-  - at the end, only `AIPlayer::newMap` is missing (it also draws on the six-player custom map);
+  - at the end, every digest matches too, with the computer players' map setup (`AIPlayer::newMap`; `golden_ai_new_map` compares what these digests leave out);
+  - map setup gaps, each guarded in `golden_ai_new_map`: a unit told out of a new building's way gets no goal cell or path request (S10), and raising a turreted structure (only the synthetic `built` stage does) misses the turret's idle scan draw (S14). Mine detonation on a construction status change is not ported. `ParticleUplinkCannonUpdate` is not attached;
+  - a pitfall: `BuildAssistant.cpp` takes the double `WWMath::Sqrt` of a sum of `Pow` results, which differs from `gm_sqrtf` by an ulp for some inputs;
   - Dozer and Worker AI have construction and `xfer` only (`golden_s16_dozer_worker`): their orders and frame updates are slice S16, and `PORT_MAP.md` still lists them as data-only;
   - scripts affect only delay draws (no `ScriptWorld` adapter), wall height is 0, frames are not CRC-checked;
   - its mutation check is weak (17 of 60 caught before targeted rechecks): script status, shroud and observer paths are not exercised;
@@ -65,7 +67,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
 - Toward a moving unit (`AI_PORT_PLAN.md`): S4 goal reservations is done; then S5 and S6 searches, S9 path following, S10 movement states. These build on each other. S13 weapon firing is done and waits for S14 to call it.
 - Wiring still missing: targeting has no caller; the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
-- From the game start comparison: `AIPlayer::newMap`.
+- The computer opponent's frame updates (`AIPlayer::update`, slice S21) are not ported.
 - Client crates: ask the owner before adding the first one (item 12).
 - Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
 - Packet counts overstate completeness (see the known gaps). Weapons now do damage (`golden_pkt399_weapon_effects`); gaps are in `OPEN_DECISIONS.md`.

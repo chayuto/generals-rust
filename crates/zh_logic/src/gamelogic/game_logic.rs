@@ -19,13 +19,15 @@ use zh_common::io::data_chunk::{
 };
 use zh_common::io::map_object::{MapObject, FLAG_BRIDGE_FLAGS, FLAG_ROAD_FLAGS};
 use zh_common::io::recorder::{GameOptions, ReplayRules, ReplaySlot};
-use zh_common::math::{gm_sqrtf, normalize_angle, Coord2D, Coord3D, ICoord2D};
+use zh_common::math::{gm_sqrtf, normalize_angle, Coord2D, Coord3D, ICoord2D, Region3D};
 use zh_common::types::{
     Bool, Int, ObjectId, Real, TeamId, UnsignedInt, UnsignedShort, VeterancyLevel, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
+use crate::ai::ai_player::{players_new_map, AiPlayer};
 use crate::arena::{FacetMask, ModuleSlot, ObjectSlot};
+use crate::player::build_assistant::{on_structure_construction_complete, BuildContext};
 use crate::terrain::bridge::Bridge;
 use crate::terrain::bridge_load::{
     bridge_ends, bridge_geometry, bridge_point_pairs, BridgeModels, MAX_BRIDGES,
@@ -344,6 +346,9 @@ struct StartWorld<'a> {
     waypoint_ids: &'a [UnsignedInt],
     upgrade_masks: Vec<(String, UpgradeMaskType)>,
     script_copies: Vec<ScriptCopy>,
+    ai_players: &'a mut BTreeMap<Int, AiPlayer>,
+    /// `AIData::m_teamSeconds`.
+    team_seconds: Int,
     report: &'a mut StartReport,
 }
 
@@ -382,15 +387,25 @@ impl PlayerWorld for StartWorld<'_> {
     }
     fn becoming_local_player(&mut self, _player: PlayerIndex, _yes: bool) {}
     fn local_player_update(&mut self, _player: PlayerIndex) {}
-    fn create_ai(&mut self, _player: PlayerIndex, _kind: AiKind) {
-        self.report.unported("AIPlayer");
+    fn create_ai(&mut self, player: PlayerIndex, kind: AiKind) {
+        // Its frame updates are not ported.
+        self.report.unported("AIPlayer::update");
+        let difficulty = self.global_difficulty();
+        let frame = self.frame as Int;
+        let ai = AiPlayer::new(kind, player, frame, difficulty, self.team_seconds);
+        self.ai_players.insert(player, ai);
     }
-    fn delete_ai(&mut self, _player: PlayerIndex) {}
-    fn set_ai_difficulty(&mut self, _player: PlayerIndex, _difficulty: Int) {}
+    fn delete_ai(&mut self, player: PlayerIndex) {
+        self.ai_players.remove(&player);
+    }
+    fn set_ai_difficulty(&mut self, player: PlayerIndex, difficulty: Int) {
+        if let Some(ai) = self.ai_players.get_mut(&player) {
+            ai.difficulty = difficulty;
+        }
+    }
     fn ai_update(&mut self, _player: PlayerIndex) {}
-    fn ai_new_map(&mut self, _player: PlayerIndex) {
-        self.report.unported("AIPlayer::newMap");
-    }
+    // The start calls `players_new_map`, which has the sim to build in.
+    fn ai_new_map(&mut self, _player: PlayerIndex) {}
     fn ai_pre_team_destroy(&mut self, _player: PlayerIndex, _team: TeamId) {}
     fn qualify_skirmish_scripts(&mut self, sides: &mut SidesList, copy: &SkirmishScripts<'_>) {
         let key = self.sides_keys.player_name;
@@ -532,6 +547,8 @@ impl Env<'_> {
             waypoints: self.waypoints,
             waypoint_ids: self.waypoint_ids,
             upgrade_masks,
+            ai_players: &mut sim.world.ai_players,
+            team_seconds: rules.ai_data.team_seconds as Int,
             report,
         };
         let mut env = PlayerEnv {
@@ -1512,7 +1529,9 @@ fn adjust_to_free_cell(loader: &mut Loader<'_>, slot: ObjectSlot, pos: &Coord3D)
 /// `placeNetworkBuildingsForPlayer`: the starting building and units of one slot.
 fn place_network_buildings(
     loader: &mut Loader<'_>,
+    players: &mut PlayerList,
     teams: &mut TeamFactory,
+    pathfind_extent: &Region3D,
     waypoints: &[(String, Coord3D)],
     team: TeamId,
     start_pos: i32,
@@ -1539,11 +1558,22 @@ fn place_network_buildings(
         loader.report.skip_object("no starting building");
         return;
     };
-    // `Player::onStructureCreated` and `onStructureConstructionComplete`: the score,
-    // academy and AI records.
-    loader
-        .report
-        .unported("Player::onStructureConstructionComplete");
+    // `Player::onStructureCreated` (empty) and `onStructureConstructionComplete`.
+    let Some(owner) = loader.sim.controlling_player(team) else {
+        return;
+    };
+    on_structure_construction_complete(
+        &mut BuildContext {
+            sim: &mut *loader.sim,
+            players,
+            named: &mut *loader.named,
+            unported: &mut loader.report.unported,
+            pathfind_extent: *pathfind_extent,
+        },
+        yard,
+        owner,
+        false,
+    );
     let radius = loader
         .sim
         .world
@@ -1852,7 +1882,9 @@ pub fn start_new_game_observed(
                     report: &mut report,
                     named: &mut named,
                 },
+                &mut players,
                 &mut teams,
+                &pathfind_extent,
                 &waypoints,
                 team,
                 slot.start_pos,
@@ -1866,7 +1898,14 @@ pub fn start_new_game_observed(
     sync_teams(&mut sim, &players, &teams);
     sync_members(&sim, &players, &mut teams);
     observe(StartStage::BeforePlayerMaps, &sim, &players, &teams);
-    env.run(&mut sim, &stores, &mut report, |e| players.new_map(e.world));
+    // `ThePlayerList->newMap`.
+    players_new_map(&mut BuildContext {
+        sim: &mut sim,
+        players: &mut players,
+        named: &mut named,
+        unported: &mut report.unported,
+        pathfind_extent,
+    });
     sync_teams(&mut sim, &players, &teams);
     sync_members(&sim, &players, &mut teams);
     Ok(GameStart {

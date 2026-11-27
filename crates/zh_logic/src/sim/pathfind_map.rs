@@ -163,6 +163,11 @@ impl SimContext {
         self.classify_on_pathfind_map(slot, true);
     }
 
+    /// `Pathfinder::removeObjectFromPathfindMap` for a caller outside the sim.
+    pub fn remove_object_from_pathfind_map(&mut self, slot: ObjectSlot) {
+        self.classify_on_pathfind_map(slot, false);
+    }
+
     /// `createAWallFromMyFootprint` / `removeWallFromMyFootprint`.
     pub(super) fn classify_pathfind_wall(&mut self, slot: ObjectSlot, insert: bool) {
         if self.world.pathfinder.is_none() {

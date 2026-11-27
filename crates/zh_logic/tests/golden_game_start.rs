@@ -4,9 +4,8 @@
 //! `tests/cpp_harness/gen_game_start.py` recorded `docs/golden_vectors/GameStart.json`
 //! (counts and digests only: the rows name map content).
 //!
-//! Every digest is compared. The ones the port is known to miss are listed in
-//! [`known_divergence`] with their cause, and must still differ: a fix has to take
-//! its entry out.
+//! Every digest is compared and has to match, apart from what a map with bridges
+//! rules out.
 //!
 //! The retail tests need the game (`ZH_DIR`, default `$HOME/Games/generalszh`) and the
 //! replays with their user maps (`ZH_USER_DIR`, default
@@ -14,7 +13,7 @@
 //! without comparing. `GAME_START_DUMP=<dir>` writes the port's rows for a diff
 //! against the reference's.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use zh_common::io::file::OsDiskFileHost;
@@ -33,34 +32,6 @@ const GOLDEN: &str = include_str!("../../../docs/golden_vectors/GameStart.json")
 
 /// Logic frames each started game runs.
 const FRAMES: u32 = 300;
-
-/// Why a digest differs from the reference, if it is known to. `before_units` and
-/// `before_ai` match; `end` differs by `AIPlayer::newMap`, not ported: in the
-/// reference it destroys the computer player's command center and what stands
-/// under the new one (which sets their destroyed bit) and builds it again, which
-/// changes the next object id and that team's member count. On the six-player
-/// custom map the reference also draws random numbers there.
-fn known_divergence(stage: &str, key: &str) -> Option<&'static str> {
-    (stage == "end" && KNOWN_AT_END.contains(&key)).then_some("unported AIPlayer::newMap")
-}
-
-const KNOWN_AT_END: [&str; 14] = [
-    "seed_digest",
-    "start_position_digest",
-    // `AIPlayer::newMap` clears map objects from under the new buildings.
-    "unbridged_digest",
-    "game_digest",
-    "team_digest",
-    "map_status_digest",
-    "start_count",
-    "start_template_digest",
-    "start_team_digest",
-    "start_angle_digest",
-    "start_layer_digest",
-    "start_health_digest",
-    "start_status_digest",
-    "start_vision_digest",
-];
 
 /// FNV-1a over the rows, each ended by a newline.
 fn digest<'a>(rows: impl Iterator<Item = &'a str>) -> String {
@@ -363,12 +334,19 @@ fn check_report(game: &GameStart, before: &[String], failures: &mut Vec<String>,
         ));
     }
     let count = |call: &str| report.unported.get(call).copied().unwrap_or(0);
-    let computers = count("AIPlayer");
-    // Every mobile starting unit has an AI to place it.
-    if count("mobile starting unit without AI") != 0
-        || count("AIPlayer::newMap") != computers
-        || count("ScriptEngine") != 1
-    {
+    // Every mobile starting unit has an AI to place it, and the computer players'
+    // map setup leaves nothing out.
+    let left_out = report.unported.keys().any(|call| {
+        [
+            "buildObjectNow",
+            "onStructureProduced",
+            "runObjectScript",
+            "aiMoveTo",
+        ]
+        .iter()
+        .any(|part| call.contains(part))
+    });
+    if left_out || count("mobile starting unit without AI") != 0 || count("ScriptEngine") != 1 {
         failures.push(format!("{name}: unported calls {:?}", report.unported));
     }
 }
@@ -377,8 +355,6 @@ fn check_report(game: &GameStart, before: &[String], failures: &mut Vec<String>,
 fn retail_game_starts_match_the_reference_and_run() {
     let cases = golden_cases();
     let mut failures = Vec::new();
-    // `(stage, key)` of every digest that differed in some game.
-    let mut differing: BTreeSet<(String, String)> = BTreeSet::new();
     let mut compared = 0;
     let mut started: BTreeMap<&str, Started> = BTreeMap::new();
     let mut reserved = 0;
@@ -412,28 +388,19 @@ fn retail_game_starts_match_the_reference_and_run() {
         let Some(run) = started.get(name) else {
             continue;
         };
-        let game = &run.game;
         let rows = run.rows(&case.stage);
         let ours = summarize(rows);
         for (key, value) in &case.values {
             if key == "start_positions" {
                 let found: Vec<String> = start_positions(rows).into_iter().map(|p| p.1).collect();
                 let expected: Vec<&str> = value.split(',').filter(|v| !v.is_empty()).collect();
-                // `AIPlayer::newMap` replaces objects, so at `end` only the
-                // objects both have are compared.
-                let differs = expected.iter().zip(&found).any(|(a, b)| a != b)
-                    || (case.stage != "end" && expected.len() != found.len());
-                if differs {
+                if expected != found {
                     failures.push(format!("{name} {}: starting positions", case.stage));
                 }
                 continue;
             }
             let got = ours.iter().find(|(k, _)| k == key).map(|(_, v)| v);
-            if got == Some(value) {
-                continue;
-            }
-            differing.insert((case.stage.clone(), key.clone()));
-            if known_divergence(&case.stage, key).is_none() {
+            if got != Some(value) {
                 failures.push(format!(
                     "{name} {} {key}: reference {value}, port {got:?}",
                     case.stage
@@ -445,12 +412,6 @@ fn retail_game_starts_match_the_reference_and_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     if compared == REPLAY_GAMES + VARIANT_GAMES {
         assert_eq!(reserved, MOVED_UNITS, "starting units with a goal cell");
-        for key in KNOWN_AT_END {
-            assert!(
-                differing.contains(&("end".to_owned(), key.to_owned())),
-                "end {key} matches now: take it out of the known divergences"
-            );
-        }
     }
     eprintln!("compared {compared} game starts");
 }
