@@ -36,6 +36,7 @@ use crate::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpd
 use crate::arena::ObjectSlot;
 use crate::gamelogic::game_engine::StartupStores;
 use crate::gamelogic::global_data::GameDifficulty;
+use crate::player::science_purchase::science_added_to_world;
 use crate::player::player_list::PlayerList;
 use crate::player::seams::{
     AiKind, PlayerEnv, PlayerIndex, PlayerPart, PlayerWorld, SkirmishScripts,
@@ -556,9 +557,7 @@ impl ScriptWorld for LiveWorld<'_> {
             }
         });
         if added {
-            if let Some(team) = self.default_team(player) {
-                self.sim.grant_player_science(team, science);
-            }
+            science_added_to_world(self.sim, player, science);
         }
         added
     }
@@ -1128,7 +1127,7 @@ impl PlayerWorld for FramePlayers<'_> {
     fn power_brownout_changed(&mut self, _player: PlayerIndex, _brownout: bool) {
         self.missing("Player::onPowerBrownOutChange");
     }
-    // `grant_science` brings the world's sciences up to date itself.
+    // `grant_science` brings the world up to date itself.
     fn science_added(&mut self, _player: PlayerIndex, _science: ScienceType) {}
     fn upgrade_count(&self, _player: PlayerIndex) -> UnsignedShort {
         0

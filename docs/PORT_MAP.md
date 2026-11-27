@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`290` implemented, `37` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `123` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `118` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `124` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `119` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -406,6 +406,7 @@
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/hierarchical.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/queries.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/search.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/player/science_purchase.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/player/seams.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/command_button.rs` | `implemented` |
@@ -520,6 +521,7 @@
 | `docs/golden_vectors/S9_PathFollow.json` | 63 | no |
 | `docs/golden_vectors/SCRIPT_ENGINE.json` | - | no |
 | `docs/golden_vectors/SHROUD_UPDATES.json` | 300 | no |
+| `docs/golden_vectors/SciencePurchase.json` | - | no |
 | `docs/golden_vectors/WP2_1_Xfer.json` | 1000 | no |
 | `docs/golden_vectors/WP2_2a_GameMath.json` | 2000 | no |
 | `docs/golden_vectors/WP3_1_Economy.json` | 1000 | no |
@@ -645,6 +647,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_s7_locomotor_movement.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s8_ai_orders.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s9_path_follow.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_science_purchase.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_script_engine.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_script_world.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_shroud_updates.rs` | `active` |

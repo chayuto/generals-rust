@@ -17,8 +17,11 @@ use crate::modules::module::CommandSourceType;
 use crate::modules::update::ai_update::{AiCommandParms, AiCommandType};
 use crate::object::weapon_set::{WeaponLockType, WeaponSlotType};
 use crate::player::build_assistant::build_object_with_dozer;
+use crate::player::player_list::PlayerList;
+use crate::player::science_purchase::attempt_to_purchase_science;
 use crate::player::squad::{self, PlayerSquads};
 use crate::rules::kind_of::KindOfType;
+use crate::scripts::script_engine::ScriptEngine;
 use crate::sim::{SimApi, SimContext, SimView};
 use std::collections::BTreeMap;
 use zh_common::io::recorder::{
@@ -93,15 +96,42 @@ impl Default for CommandState {
     }
 }
 
+/// The parts of a game outside the sim that orders reach.
+pub struct CommandGame<'a> {
+    pub players: &'a mut PlayerList,
+    pub scripts: &'a mut ScriptEngine,
+}
+
 struct SimCommands<'a> {
     sim: &'a mut SimContext,
+    game: Option<CommandGame<'a>>,
     state: &'a mut CommandState,
     /// `currentlySelectedGroup`.
     group: Option<GroupId>,
 }
 
-/// `logicMessageDispatcher` over the world.
+/// `logicMessageDispatcher` over the world alone: an order that needs the rest
+/// of the game is listed in [`CommandState::not_carried_out`].
 pub fn dispatch_command(sim: &mut SimContext, state: &mut CommandState, msg: &ReplayCommand) {
+    dispatch(sim, None, state, msg);
+}
+
+/// `logicMessageDispatcher` over a whole game.
+pub fn dispatch_game_command(
+    sim: &mut SimContext,
+    game: CommandGame<'_>,
+    state: &mut CommandState,
+    msg: &ReplayCommand,
+) {
+    dispatch(sim, Some(game), state, msg);
+}
+
+fn dispatch(
+    sim: &mut SimContext,
+    game: Option<CommandGame<'_>>,
+    state: &mut CommandState,
+    msg: &ReplayCommand,
+) {
     let player = msg.player_index;
     let mut group = None;
     if sim.world.player_default_teams.contains_key(&player)
@@ -119,7 +149,15 @@ pub fn dispatch_command(sim: &mut SimContext, state: &mut CommandState, msg: &Re
             group = Some(new);
         }
     }
-    dispatcher::dispatch(&mut SimCommands { sim, state, group }, msg);
+    dispatcher::dispatch(
+        &mut SimCommands {
+            sim,
+            game,
+            state,
+            group,
+        },
+        msg,
+    );
     // Retail destroys the group of the command once it has been carried out.
     if let Some(group) = group {
         ai_group::destroy_group(sim, group);
@@ -468,12 +506,21 @@ impl CommandTarget for SimCommands<'_> {
         );
     }
 
-    /// Not carried out: the science purchase points are with the `PlayerList`.
-    fn purchase_science(&mut self, msg: &ReplayCommand, _player: i32, science: i32) {
+    fn purchase_science(&mut self, msg: &ReplayCommand, player: i32, science: i32) {
         if !self.sim.rules.science_store.is_valid_science(science) {
             self.unknown(msg, science);
         }
-        self.skip(msg);
+        let Some(game) = &mut self.game else {
+            self.skip(msg);
+            return;
+        };
+        attempt_to_purchase_science(
+            self.sim,
+            game.players,
+            Some(&mut *game.scripts),
+            player,
+            science,
+        );
     }
 
     fn queue_upgrade(&mut self, msg: &ReplayCommand, _group: &[u32], upgrade: u32) {

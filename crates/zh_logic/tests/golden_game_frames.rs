@@ -24,7 +24,7 @@ use zh_common::math::Coord3D;
 use zh_common::types::{Bool, ObjectId, TeamId};
 use zh_logic::ai::ai_player;
 use zh_logic::arena::FacetMask;
-use zh_logic::gamelogic::command_target::{dispatch_command, CommandState};
+use zh_logic::gamelogic::command_target::{dispatch_game_command, CommandGame, CommandState};
 use zh_logic::gamelogic::frame::{run_frame, FrameSeams};
 use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader, StartupStores};
 use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, ReplayGameRules};
@@ -271,7 +271,11 @@ impl FrameSeams for Frame<'_, '_, '_> {
         let playback = &mut *self.playback;
         for message in playback.commands.commands_for_frame(sim.world.frame) {
             if message.is_delivered() {
-                dispatch_command(sim, &mut playback.state, &message);
+                let game = CommandGame {
+                    players: self.players,
+                    scripts: &mut self.scripts.engine,
+                };
+                dispatch_game_command(sim, game, &mut playback.state, &message);
             }
         }
     }
