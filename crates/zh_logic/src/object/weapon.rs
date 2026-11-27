@@ -1,13 +1,11 @@
 //! `PKT-399`: Weapon templates, runtime weapons, reload/clip math, and snapshots.
 
-use crate::gamelogic::global_data::{
-    WeaponBonus, WeaponBonusField, WeaponBonusSet,
-};
+use crate::gamelogic::global_data::{WeaponBonus, WeaponBonusField, WeaponBonusSet};
 use crate::rules::combat_types::{
     DamageType, DeathType, WeaponStatus,
 };
 use zh_common::ini::{
-    convert_duration_from_msecs_to_frames, convert_velocity_in_secs_to_frames, IniError, IniReader,
+    convert_duration_from_msecs_to_frames, IniError, IniLoadType, IniReader, SEPS_DEFAULT,
 };
 use zh_common::math::{gm_ceilf, real_to_int_floor, Coord2D};
 use zh_common::random_value::PrngState;
@@ -56,8 +54,18 @@ impl WeaponPrefireType {
     pub const fn as_i32(self) -> Int { self as Int }
 }
 
-pub const WEAPON_RELOAD_NAMES: [&str; 3] = ["AUTO_RELOAD", "NO_RELOAD", "RETURN_TO_BASE"];
+/// `TheWeaponReloadNames`.
+pub const WEAPON_RELOAD_NAMES: [&str; 3] = ["YES", "NO", "RETURN_TO_BASE"];
 pub const WEAPON_PREFIRE_NAMES: [&str; 3] = ["PER_SHOT", "PER_ATTACK", "PER_CLIP"];
+/// `TheWeaponAffectsMaskNames`.
+pub const WEAPON_AFFECTS_NAMES: [&str; 7] = [
+    "SELF", "ALLIES", "ENEMIES", "NEUTRALS", "SUICIDE", "NOT_SIMILAR", "NOT_AIRBORNE",
+];
+/// `TheWeaponCollideMaskNames`.
+pub const WEAPON_COLLIDE_NAMES: [&str; 9] = [
+    "ALLIES", "ENEMIES", "STRUCTURES", "SHRUBBERY", "PROJECTILES", "WALLS", "SMALL_MISSILES",
+    "BALLISTIC_MISSILES", "CONTROLLED_STRUCTURES",
+];
 
 pub const WEAPON_ANTI_AIRBORNE_VEHICLE: Int = 0x01;
 pub const WEAPON_ANTI_GROUND: Int = 0x02;
@@ -161,6 +169,14 @@ pub struct WeaponTemplate {
     pub historic_bonus_count: Int,
     /// Name of `m_historicBonusWeapon`; empty is none.
     pub historic_bonus_weapon: String,
+    /// Event name of `m_fireSound`; empty for `NoSound` or unset.
+    pub fire_sound: String,
+    pub fire_sound_loop_time: UnsignedInt,
+    /// `m_fireFXs`, `m_projectileDetonateFXs` and `m_projectileExhausts` by veterancy
+    /// level; empty is none.
+    pub fire_fx: [String; 4],
+    pub projectile_detonation_fx: [String; 4],
+    pub projectile_exhaust: [String; 4],
 }
 
 impl Default for WeaponTemplate {
@@ -195,39 +211,50 @@ impl Default for WeaponTemplate {
             laser_bone_name: String::new(), historic_bonus_time: 0,
             historic_bonus_radius: 0.0, historic_bonus_count: 0,
             historic_bonus_weapon: String::new(),
+            fire_sound: String::new(), fire_sound_loop_time: 0,
+            fire_fx: Default::default(), projectile_detonation_fx: Default::default(),
+            projectile_exhaust: Default::default(),
         }
     }
 }
 
-/// `INI::parseDurationUnsignedInt`: whole milliseconds, rounded up to frames.
-fn parse_duration_unsigned_int(value: &str) -> Result<UnsignedInt, IniError> {
-    let msec = IniReader::scan_unsigned_int(value)?;
-    Ok(gm_ceilf(convert_duration_from_msecs_to_frames(msec as Real)) as UnsignedInt)
-}
-
 /// A name field where `None` means no reference.
-fn name_or_none(value: &str) -> String {
-    if value.eq_ignore_ascii_case("None") { String::new() } else { value.to_string() }
+fn name_or_none(value: String) -> String {
+    if value.eq_ignore_ascii_case("None") { String::new() } else { value }
 }
 
-/// `ObjectStatusMaskType::parseSingleBitFromINI`.
-fn parse_damage_status(value: &str) -> Result<ObjectStatusType, IniError> {
-    OBJECT_STATUS_NAMES
-        .iter()
-        .position(|n| n.eq_ignore_ascii_case(value))
-        .and_then(|i| ObjectStatusType::from_i32(i as Int))
-        .ok_or(IniError::InvalidData)
+/// `parseAllVetLevels*`: one value for every veterancy level.
+fn parse_all_vet_levels(names: &mut [String; 4], ini: &mut IniReader<'_>) -> Result<(), IniError> {
+    let name = name_or_none(ini.next_ascii_string()?);
+    *names = std::array::from_fn(|_| name.clone());
+    Ok(())
 }
 
-/// `parsePerVetLevelAsciiString`: a veterancy level name, then the value.
-fn parse_per_vet_level(names: &mut [String; 4], value: &str) -> Result<(), IniError> {
-    let mut parts = value.split_whitespace();
-    let level = parts.next().unwrap_or("");
-    let index = VETERANCY_NAMES
-        .iter()
-        .position(|n| n.eq_ignore_ascii_case(level))
-        .ok_or(IniError::InvalidData)?;
-    names[index] = name_or_none(parts.next().ok_or(IniError::InvalidData)?);
+/// `parsePerVetLevel*`: a veterancy level name, then the value.
+fn parse_per_vet_level(names: &mut [String; 4], ini: &mut IniReader<'_>) -> Result<(), IniError> {
+    let level = IniReader::scan_index_list(ini.next_token(SEPS_DEFAULT)?, &VETERANCY_NAMES)?;
+    names[level as usize] = name_or_none(ini.next_ascii_string()?);
+    Ok(())
+}
+
+fn parse_mask(ini: &mut IniReader<'_>, mask: &mut Int, names: &[&str]) -> Result<(), IniError> {
+    let mut bits = *mask as UnsignedInt;
+    ini.parse_bit_string32(&mut bits, names)?;
+    *mask = bits as Int;
+    Ok(())
+}
+
+fn parse_mask_bit(ini: &mut IniReader<'_>, mask: &mut Int, bit: Int) -> Result<(), IniError> {
+    let mut bits = *mask as UnsignedInt;
+    ini.parse_bit_in_int32(&mut bits, bit as UnsignedInt)?;
+    *mask = bits as Int;
+    Ok(())
+}
+
+fn parse_frames(ini: &mut IniReader<'_>, frames: &mut Int) -> Result<(), IniError> {
+    let mut value = 0;
+    ini.parse_duration_unsigned_int(&mut value)?;
+    *frames = value as Int;
     Ok(())
 }
 
@@ -238,144 +265,211 @@ impl WeaponTemplate {
         self.parse_ini_block_collect(text, &mut Vec::new())
     }
 
-    /// As [`Self::parse_ini_block`], appending the keys it does not handle.
+    /// As [`Self::parse_ini_block`], appending the keys the field table lacks.
     pub fn parse_ini_block_collect(
         &mut self,
         text: &str,
         ignored: &mut Vec<String>,
     ) -> Result<(), IniError> {
-        let mut lines = text.lines();
-        let first = lines.next().unwrap_or("");
-        let mut parts = first.split_whitespace();
-        if parts.next().unwrap_or("") != "Weapon" { return Err(IniError::InvalidData); }
-        self.name = parts.next().unwrap_or("").to_string();
-        for line in lines {
-            let line = line.trim();
-            if line.eq_ignore_ascii_case("End") { break; }
-            let Some((key, value)) = line.split_once('=') else { continue };
-            let key = key.trim();
-            let value = value.trim();
-            match key {
-                "PrimaryDamage" => self.primary_damage = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "PrimaryDamageRadius" => self.primary_damage_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "SecondaryDamage" => self.secondary_damage = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "SecondaryDamageRadius" => self.secondary_damage_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ShockWaveAmount" => self.shock_wave_amount = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ShockWaveRadius" => self.shock_wave_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ShockWaveTaperOff" => self.shock_wave_taper_off = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "AttackRange" => self.attack_range = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "MinimumAttackRange" => self.minimum_attack_range = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "RequestAssistRange" => self.request_assist_range = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "AcceptableAimDelta" => self.aim_delta = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
-                "ScatterRadius" => self.scatter_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ScatterTargetScalar" => self.scatter_target_scalar = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ScatterRadiusVsInfantry" => self.scatter_radius_vs_infantry = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "DamageType" => {
-                    let i = IniReader::scan_index_list(value, &zh_common::ini::DAMAGE_TYPE_NAMES).map_err(|_| IniError::InvalidData)?;
-                    self.damage_type = DamageType::from_i32(i).unwrap_or(DamageType::Explosion);
-                }
-                "DeathType" => {
-                    let i = IniReader::scan_index_list(value, &zh_common::ini::DEATH_TYPE_NAMES).map_err(|_| IniError::InvalidData)?;
-                    self.death_type = DeathType::from_i32(i).unwrap_or(DeathType::Normal);
-                }
-                "WeaponSpeed" => self.weapon_speed = convert_velocity_in_secs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?),
-                "MinWeaponSpeed" => self.min_weapon_speed = convert_velocity_in_secs_to_frames(IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?),
-                "ScaleWeaponSpeed" => self.scale_weapon_speed = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "WeaponRecoil" => self.weapon_recoil = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
-                "MinTargetPitch" => self.min_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
-                "MaxTargetPitch" => self.max_target_pitch = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
-                "RadiusDamageAngle" => self.radius_damage_angle = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * zh_common::ini::RADS_PER_DEGREE,
-                "ProjectileObject" => self.projectile_name = name_or_none(value),
-                "DamageStatusType" => self.damage_status_type = parse_damage_status(value)?,
-                "FireOCL" => self.fire_ocl = std::array::from_fn(|_| name_or_none(value)),
-                "ProjectileDetonationOCL" => self.projectile_detonation_ocl = std::array::from_fn(|_| name_or_none(value)),
-                "VeterancyFireOCL" => parse_per_vet_level(&mut self.fire_ocl, value)?,
-                "VeterancyProjectileDetonationOCL" => parse_per_vet_level(&mut self.projectile_detonation_ocl, value)?,
-                "ProjectileStreamName" => self.projectile_stream_name = value.to_string(),
-                "LaserName" => self.laser_name = value.to_string(),
-                "LaserBoneName" => self.laser_bone_name = value.to_string(),
-                "HistoricBonusTime" => self.historic_bonus_time = parse_duration_unsigned_int(value)?,
-                "HistoricBonusRadius" => self.historic_bonus_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "HistoricBonusCount" => self.historic_bonus_count = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "HistoricBonusWeapon" => self.historic_bonus_weapon = name_or_none(value),
-                "ClipSize" => self.clip_size = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "ClipReloadTime" => self.clip_reload_time = parse_duration_unsigned_int(value)? as Int,
-                "DelayBetweenShots" => self.parse_shot_delay(value)?,
-                "ContinuousFireOne" => self.continuous_fire_one_shots_needed = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "ContinuousFireTwo" => self.continuous_fire_two_shots_needed = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "ContinuousFireCoast" => self.continuous_fire_coast_frames = parse_duration_unsigned_int(value)?,
-                "AutoReloadWhenIdle" => self.auto_reload_when_idle_frames = parse_duration_unsigned_int(value)?,
-                "ShotsPerBarrel" => self.shots_per_barrel = IniReader::scan_int(value).map_err(|_| IniError::InvalidData)?,
-                "DamageDealtAtSelfPosition" => self.damage_dealt_at_self_position = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "AutoReloadsClip" => self.reload_type = if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE { WeaponReloadType::AutoReload } else { match value.to_ascii_uppercase().as_str() { "RETURN_TO_BASE" => WeaponReloadType::ReturnToBase, _ => WeaponReloadType::NoReload } },
-                "PreAttackDelay" => self.pre_attack_delay = parse_duration_unsigned_int(value)? as Int,
-                "PreAttackType" => self.prefire_type = match IniReader::scan_index_list(value, &WEAPON_PREFIRE_NAMES).unwrap_or(0) { 1 => WeaponPrefireType::PerAttack, 2 => WeaponPrefireType::PerClip, _ => WeaponPrefireType::PerShot },
-                "ContinueAttackRange" => self.continue_attack_range = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "SuspendFXDelay" => self.suspend_fx_delay = parse_duration_unsigned_int(value)?,
-                "LeechRangeWeapon" => self.leech_range_weapon = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "CapableOfFollowingWaypoints" => self.capable_of_following_waypoint = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "ShowsAmmoPips" => self.is_shows_ammo_pips = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "AllowAttackGarrisonedBldgs" => self.allow_attack_garrisoned_buildings = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "PlayFXWhenStealthed" => self.play_fx_when_stealthed = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "MissileCallsOnDie" => self.missile_calls_on_die = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "RadiusDamageAffects" => self.affects_mask = parse_affects(value),
-                "ProjectileCollidesWith" => self.collide_mask = parse_collide(value),
-                "AntiAirborneVehicle" => set_anti(&mut self.anti_mask, WEAPON_ANTI_AIRBORNE_VEHICLE, value),
-                "AntiGround" => set_anti(&mut self.anti_mask, WEAPON_ANTI_GROUND, value),
-                "AntiProjectile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_PROJECTILE, value),
-                "AntiSmallMissile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_SMALL_MISSILE, value),
-                "AntiMine" => set_anti(&mut self.anti_mask, WEAPON_ANTI_MINE, value),
-                "AntiAirborneInfantry" => set_anti(&mut self.anti_mask, WEAPON_ANTI_AIRBORNE_INFANTRY, value),
-                "AntiBallisticMissile" => set_anti(&mut self.anti_mask, WEAPON_ANTI_BALLISTIC_MISSILE, value),
-                "AntiParachute" => set_anti(&mut self.anti_mask, WEAPON_ANTI_PARACHUTE, value),
-                "ScatterTarget" => {
-                    // `INI::parseCoord2D`: `X` and `Y` sub-tokens, separated by colon or space.
-                    let mut tokens = value
-                        .split(|c: char| c == ':' || c.is_ascii_whitespace())
-                        .filter(|t| !t.is_empty());
-                    let mut sub = |key: &str| match (tokens.next(), tokens.next()) {
-                        (Some(k), Some(v)) if k.eq_ignore_ascii_case(key) => IniReader::scan_real(v),
-                        _ => Err(IniError::InvalidData),
-                    };
-                    let x = sub("X")?;
-                    let y = sub("Y")?;
-                    self.scatter_targets.push(Coord2D { x, y });
-                }
-                "WeaponBonus" => {
-                    let mut parts = value.split_whitespace();
-                    let condition_name = parts.next().unwrap_or("");
-                    let field_name = parts.next().unwrap_or("");
-                    let percent = parts.next().unwrap_or("100%");
-                    let ci = crate::gamelogic::global_data::THE_WEAPON_BONUS_NAMES.iter().position(|n| *n == condition_name);
-                    let fi = crate::gamelogic::global_data::THE_WEAPON_BONUS_FIELD_NAMES.iter().position(|n| *n == field_name);
-                    if let (Some(ci), Some(fi)) = (ci, fi) {
-                        let pct = IniReader::scan_percent_to_real(percent).map_err(|_| IniError::InvalidData)? * 100.0_f32;
-                        self.extra_bonus.entries[ci].set_field(crate::gamelogic::global_data::WeaponBonusField::from_i32(fi as i32).unwrap(), pct / 100.0_f32);
-                    }
-                }
-                other => ignored.push(other.to_owned()),
+        let mut ini = IniReader::new("", text.as_bytes(), IniLoadType::Overwrite);
+        ini.read_line(None)?;
+        if ini.next_token(SEPS_DEFAULT)? != "Weapon" {
+            return Err(IniError::InvalidData);
+        }
+        self.name = ini.next_token(SEPS_DEFAULT)?.to_owned();
+        self.parse_fields(&mut ini, ignored)
+    }
+
+    /// `INI::initFromINI` over `TheWeaponTemplateFieldParseTable`, from the line after
+    /// the header through `End`. A key outside the table is skipped, as the reference
+    /// build does (`DEBUG_CRASH` only), and appended to `ignored`.
+    ///
+    /// FX list, particle system and weapon names are kept as written; the caller makes
+    /// the lookups.
+    pub fn parse_fields(
+        &mut self,
+        ini: &mut IniReader<'_>,
+        ignored: &mut Vec<String>,
+    ) -> Result<(), IniError> {
+        ini.read_block_fields(|key, ini| {
+            if !self.parse_field(key, ini)? {
+                ignored.push(key.to_owned());
             }
+            Ok(())
+        })?;
+        if self.projectile_name.eq_ignore_ascii_case("None") {
+            self.projectile_name.clear();
         }
         Ok(())
     }
 
+    /// One row of the field table; `false` when `key` is not in it. Matching is case
+    /// sensitive, as `findFieldParse`'s `strcmp` is.
+    fn parse_field(&mut self, key: &str, ini: &mut IniReader<'_>) -> Result<bool, IniError> {
+        match key {
+            "PrimaryDamage" => ini.parse_real(&mut self.primary_damage)?,
+            "PrimaryDamageRadius" => ini.parse_real(&mut self.primary_damage_radius)?,
+            "SecondaryDamage" => ini.parse_real(&mut self.secondary_damage)?,
+            "SecondaryDamageRadius" => ini.parse_real(&mut self.secondary_damage_radius)?,
+            "ShockWaveAmount" => ini.parse_real(&mut self.shock_wave_amount)?,
+            "ShockWaveRadius" => ini.parse_real(&mut self.shock_wave_radius)?,
+            "ShockWaveTaperOff" => ini.parse_real(&mut self.shock_wave_taper_off)?,
+            "AttackRange" => ini.parse_real(&mut self.attack_range)?,
+            "MinimumAttackRange" => ini.parse_real(&mut self.minimum_attack_range)?,
+            "RequestAssistRange" => ini.parse_real(&mut self.request_assist_range)?,
+            "AcceptableAimDelta" => ini.parse_angle_real(&mut self.aim_delta)?,
+            "ScatterRadius" => ini.parse_real(&mut self.scatter_radius)?,
+            "ScatterTargetScalar" => ini.parse_real(&mut self.scatter_target_scalar)?,
+            "ScatterRadiusVsInfantry" => ini.parse_real(&mut self.scatter_radius_vs_infantry)?,
+            "DamageType" => {
+                let token = ini.next_token(SEPS_DEFAULT)?;
+                let i = IniReader::scan_index_list(token, &zh_common::ini::DAMAGE_TYPE_NAMES)?;
+                self.damage_type = DamageType::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "DamageStatusType" => {
+                let token = ini.next_token(SEPS_DEFAULT)?;
+                let i = IniReader::scan_index_list(token, &OBJECT_STATUS_NAMES)?;
+                self.damage_status_type =
+                    ObjectStatusType::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "DeathType" => {
+                let token = ini.next_token(SEPS_DEFAULT)?;
+                let i = IniReader::scan_index_list(token, &zh_common::ini::DEATH_TYPE_NAMES)?;
+                self.death_type = DeathType::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "WeaponSpeed" => ini.parse_velocity_real(&mut self.weapon_speed)?,
+            "MinWeaponSpeed" => ini.parse_velocity_real(&mut self.min_weapon_speed)?,
+            "ScaleWeaponSpeed" => ini.parse_bool(&mut self.scale_weapon_speed)?,
+            "WeaponRecoil" => ini.parse_angle_real(&mut self.weapon_recoil)?,
+            "MinTargetPitch" => ini.parse_angle_real(&mut self.min_target_pitch)?,
+            "MaxTargetPitch" => ini.parse_angle_real(&mut self.max_target_pitch)?,
+            "RadiusDamageAngle" => ini.parse_angle_real(&mut self.radius_damage_angle)?,
+            "ProjectileObject" => ini.parse_ascii_string(&mut self.projectile_name)?,
+            "FireSound" => {
+                let event = ini.next_token(SEPS_DEFAULT)?;
+                if !event.eq_ignore_ascii_case("NoSound") {
+                    self.fire_sound = event.to_owned();
+                }
+            }
+            "FireSoundLoopTime" => {
+                ini.parse_duration_unsigned_int(&mut self.fire_sound_loop_time)?
+            }
+            "FireFX" => parse_all_vet_levels(&mut self.fire_fx, ini)?,
+            "ProjectileDetonationFX" => {
+                parse_all_vet_levels(&mut self.projectile_detonation_fx, ini)?
+            }
+            "FireOCL" => parse_all_vet_levels(&mut self.fire_ocl, ini)?,
+            "ProjectileDetonationOCL" => {
+                parse_all_vet_levels(&mut self.projectile_detonation_ocl, ini)?
+            }
+            "ProjectileExhaust" => parse_all_vet_levels(&mut self.projectile_exhaust, ini)?,
+            "VeterancyFireFX" => parse_per_vet_level(&mut self.fire_fx, ini)?,
+            "VeterancyProjectileDetonationFX" => {
+                parse_per_vet_level(&mut self.projectile_detonation_fx, ini)?
+            }
+            "VeterancyFireOCL" => parse_per_vet_level(&mut self.fire_ocl, ini)?,
+            "VeterancyProjectileDetonationOCL" => {
+                parse_per_vet_level(&mut self.projectile_detonation_ocl, ini)?
+            }
+            "VeterancyProjectileExhaust" => {
+                parse_per_vet_level(&mut self.projectile_exhaust, ini)?
+            }
+            "ClipSize" => ini.parse_int(&mut self.clip_size)?,
+            "ContinuousFireOne" => ini.parse_int(&mut self.continuous_fire_one_shots_needed)?,
+            "ContinuousFireTwo" => ini.parse_int(&mut self.continuous_fire_two_shots_needed)?,
+            "ContinuousFireCoast" => {
+                ini.parse_duration_unsigned_int(&mut self.continuous_fire_coast_frames)?
+            }
+            "AutoReloadWhenIdle" => {
+                ini.parse_duration_unsigned_int(&mut self.auto_reload_when_idle_frames)?
+            }
+            "ClipReloadTime" => parse_frames(ini, &mut self.clip_reload_time)?,
+            "DelayBetweenShots" => self.parse_shot_delay(ini)?,
+            "ShotsPerBarrel" => ini.parse_int(&mut self.shots_per_barrel)?,
+            "DamageDealtAtSelfPosition" => {
+                ini.parse_bool(&mut self.damage_dealt_at_self_position)?
+            }
+            "RadiusDamageAffects" => {
+                parse_mask(ini, &mut self.affects_mask, &WEAPON_AFFECTS_NAMES)?
+            }
+            "ProjectileCollidesWith" => {
+                parse_mask(ini, &mut self.collide_mask, &WEAPON_COLLIDE_NAMES)?
+            }
+            "AntiAirborneVehicle" => {
+                parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_AIRBORNE_VEHICLE)?
+            }
+            "AntiGround" => parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_GROUND)?,
+            "AntiProjectile" => parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_PROJECTILE)?,
+            "AntiSmallMissile" => {
+                parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_SMALL_MISSILE)?
+            }
+            "AntiMine" => parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_MINE)?,
+            "AntiParachute" => parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_PARACHUTE)?,
+            "AntiAirborneInfantry" => {
+                parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_AIRBORNE_INFANTRY)?
+            }
+            "AntiBallisticMissile" => {
+                parse_mask_bit(ini, &mut self.anti_mask, WEAPON_ANTI_BALLISTIC_MISSILE)?
+            }
+            "AutoReloadsClip" => {
+                let token = ini.next_token(SEPS_DEFAULT)?;
+                let i = IniReader::scan_index_list(token, &WEAPON_RELOAD_NAMES)?;
+                self.reload_type = WeaponReloadType::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "ProjectileStreamName" => ini.parse_ascii_string(&mut self.projectile_stream_name)?,
+            "LaserName" => ini.parse_ascii_string(&mut self.laser_name)?,
+            "LaserBoneName" => ini.parse_ascii_string(&mut self.laser_bone_name)?,
+            "WeaponBonus" => self.extra_bonus.parse_weapon_bonus_set(ini)?,
+            "HistoricBonusTime" => {
+                ini.parse_duration_unsigned_int(&mut self.historic_bonus_time)?
+            }
+            "HistoricBonusRadius" => ini.parse_real(&mut self.historic_bonus_radius)?,
+            "HistoricBonusCount" => ini.parse_int(&mut self.historic_bonus_count)?,
+            "HistoricBonusWeapon" => {
+                let token = ini.next_token(SEPS_DEFAULT)?.to_owned();
+                self.historic_bonus_weapon = name_or_none(token);
+            }
+            "LeechRangeWeapon" => ini.parse_bool(&mut self.leech_range_weapon)?,
+            "ScatterTarget" => {
+                let mut target = Coord2D { x: 0.0, y: 0.0 };
+                ini.parse_coord2d(&mut target)?;
+                self.scatter_targets.push(target);
+            }
+            "CapableOfFollowingWaypoints" => {
+                ini.parse_bool(&mut self.capable_of_following_waypoint)?
+            }
+            "ShowsAmmoPips" => ini.parse_bool(&mut self.is_shows_ammo_pips)?,
+            "AllowAttackGarrisonedBldgs" => {
+                ini.parse_bool(&mut self.allow_attack_garrisoned_buildings)?
+            }
+            "PlayFXWhenStealthed" => ini.parse_bool(&mut self.play_fx_when_stealthed)?,
+            "PreAttackDelay" => parse_frames(ini, &mut self.pre_attack_delay)?,
+            "PreAttackType" => {
+                let token = ini.next_token(SEPS_DEFAULT)?;
+                let i = IniReader::scan_index_list(token, &WEAPON_PREFIRE_NAMES)?;
+                self.prefire_type = WeaponPrefireType::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "ContinueAttackRange" => ini.parse_real(&mut self.continue_attack_range)?,
+            "SuspendFXDelay" => ini.parse_duration_unsigned_int(&mut self.suspend_fx_delay)?,
+            "MissileCallsOnDie" => ini.parse_bool(&mut self.missile_calls_on_die)?,
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     /// `WeaponTemplate::parseShotDelay`: `<msec>` or `Min:<msec> Max:<msec>`.
-    fn parse_shot_delay(&mut self, value: &str) -> Result<(), IniError> {
-        let value = value.split(';').next().unwrap_or("");
-        let mut tokens = value
-            .split(|c| zh_common::ini::SEPS_COLON.contains(c))
-            .filter(|t| !t.is_empty());
-        let mut next = || tokens.next().ok_or(IniError::InvalidData);
-        let first = next()?;
+    fn parse_shot_delay(&mut self, ini: &mut IniReader<'_>) -> Result<(), IniError> {
+        let seps = zh_common::ini::SEPS_COLON;
+        let first = ini.next_token(seps)?.to_owned();
         let (min, max) = if first.eq_ignore_ascii_case("Min") {
-            let min = IniReader::scan_int(next()?)?;
-            if next()?.eq_ignore_ascii_case("Max") {
-                (min, IniReader::scan_int(next()?)?)
+            let min = IniReader::scan_int(ini.next_token(seps)?)?;
+            if ini.next_token(seps)?.eq_ignore_ascii_case("Max") {
+                (min, IniReader::scan_int(ini.next_token(seps)?)?)
             } else {
                 (min, min)
             }
         } else {
-            let both = IniReader::scan_int(first)?;
+            let both = IniReader::scan_int(&first)?;
             (both, both)
         };
         let frames = |msec: Int| gm_ceilf(convert_duration_from_msecs_to_frames(msec as Real)) as Int;
@@ -421,30 +515,6 @@ impl WeaponTemplate {
             _ => if self.primary_damage > 0.0_f32 || self.secondary_damage > 0.0_f32 { TRUE } else { FALSE },
         }
     }
-}
-
-/// `INI::parseBitInInt32`: the bit follows the value, so `No` clears a default.
-fn set_anti(mask: &mut Int, bit: Int, value: &str) {
-    if IniReader::scan_bool(value).unwrap_or(FALSE) == TRUE {
-        *mask |= bit;
-    } else {
-        *mask &= !bit;
-    }
-}
-
-fn parse_affects(value: &str) -> Int {
-    let mut m = 0;
-    for name in value.split_whitespace() {
-        m |= match name { "SELF"=>WEAPON_AFFECTS_SELF, "ALLIES"=>WEAPON_AFFECTS_ALLIES, "ENEMIES"=>WEAPON_AFFECTS_ENEMIES, "NEUTRAL"=>WEAPON_AFFECTS_NEUTRALS, "NEUTRALs"=>WEAPON_AFFECTS_NEUTRALS, "NEUTRALS"=>WEAPON_AFFECTS_NEUTRALS, "SUICIDE"=>WEAPON_AFFECTS_SUICIDE, "NOT_SIMILAR"=>WEAPON_AFFECTS_NOT_SIMILAR, "NOT_AIRBORNE"=>WEAPON_AFFECTS_NOT_AIRBORNE, _=>0 };
-    }
-    m
-}
-fn parse_collide(value: &str) -> Int {
-    let mut m = 0;
-    for name in value.split_whitespace() {
-        m |= match name { "ALLIES"=>WEAPON_COLLIDE_ALLIES, "ENEMIES"=>WEAPON_COLLIDE_ENEMIES, "STRUCTURES"=>WEAPON_COLLIDE_STRUCTURES, "SHRUBBERY"=>WEAPON_COLLIDE_SHRUBBERY, "PROJECTILES"=>WEAPON_COLLIDE_PROJECTILES, "WALLS"=>WEAPON_COLLIDE_WALLS, "SMALL_MISSILES"=>WEAPON_COLLIDE_SMALL_MISSILES, "BALLISTIC_MISSILES"=>WEAPON_COLLIDE_BALLISTIC_MISSILES, "CONTROLLED_STRUCTURES"=>WEAPON_COLLIDE_CONTROLLED_STRUCTURES, _=>0 };
-    }
-    m
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -643,6 +713,10 @@ pub struct WeaponStore {
 impl WeaponStore {
     pub fn new() -> Self { Self::default() }
     pub fn add_template(&mut self, template: WeaponTemplate) { self.templates.push(template); }
+    /// Whether `INI::parseWeaponTemplate` finds a template: `None` never names one.
+    pub fn has_template(&self, name: &str) -> bool {
+        !name.eq_ignore_ascii_case("None") && self.find_weapon_template(name).is_some()
+    }
     pub fn find_weapon_template(&self, name: &str) -> Option<&WeaponTemplate> { self.templates.iter().find(|t| t.name == name) }
     pub fn allocate_new_weapon(&self, template: &WeaponTemplate, slot: WeaponSlotType, frame: UnsignedInt) -> Weapon {
         Weapon::new(template.clone(), slot, frame)

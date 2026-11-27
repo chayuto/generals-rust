@@ -517,6 +517,7 @@ fn ai_data(values: &[i64]) -> AiData {
         enable_repulsors: flag(values[8]),
         attack_uses_line_of_sight: flag(values[9]),
         attack_ignore_insignificant_buildings: flag(values[10]),
+        ..AiData::default()
     }
 }
 

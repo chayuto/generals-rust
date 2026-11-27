@@ -371,7 +371,7 @@ impl CommandButtonHuntUpdate {
                 o.team_id,
             )
         })?;
-        let modifier_distance = sim.rules().attack_priority_distance_modifier;
+        let modifier_distance = sim.rules().ai_data.attack_priority_distance_modifier;
         let mut best = None;
         let mut effective_priority: Int = 0;
         let mut actual_priority: Int = 0;

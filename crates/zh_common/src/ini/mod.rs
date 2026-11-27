@@ -6,6 +6,9 @@
 
 #![allow(unused_variables, dead_code)]
 
+pub mod ini_terrain_bridge;
+pub mod ini_terrain_road;
+
 use crate::math::{gm_ceilf, Coord2D, Coord3D, ICoord2D, RGBAColorInt, RGBColor, PI};
 use crate::random_value::DistributionType;
 use crate::types::{Bool, Byte, Int, Real, Short, UnsignedByte, UnsignedInt, UnsignedShort, FALSE, TRUE};
@@ -368,22 +371,37 @@ impl<'a> IniReader<'a> {
         self.next_token(SEPS_COLON)
     }
 
+    /// `INI::getNextAsciiString`. A quoted value is read as two tokens: the first up to
+    /// a separator, the rest up to a quote. The two are joined by a space only when the
+    /// rest is longer than one character, and only a value with no rest loses a closing
+    /// quote from its first token.
     pub fn next_ascii_string(&mut self) -> Result<String, IniError> {
         let Some(token) = self.next_token_or_null(SEPS_DEFAULT) else {
             return Ok(String::new());
         };
-        if !token.starts_with('"') {
+        let Some(first) = token.strip_prefix('"') else {
             return Ok(token.to_string());
+        };
+        let mut result = first.to_string();
+        // `strtok` has consumed the separator that ended the first token.
+        if self.token_cursor < self.line_buf.len() {
+            self.token_cursor += 1;
         }
-        let mut result = token[1..].to_string();
-        if result.ends_with('"') {
-            result.pop();
-            return Ok(result);
-        }
-        if let Some(rest) = self.next_token_or_null(SEPS_QUOTE) {
-            if !rest.is_empty() {
-                result.push(' ');
-                result.push_str(rest.trim_start_matches(char::is_whitespace).trim_end_matches('"'));
+        match self.next_token_or_null(SEPS_QUOTE) {
+            Some(rest) => {
+                if rest.len() > 1 && rest.as_bytes()[1] != b'\t' {
+                    result.push(' ');
+                }
+                result.push_str(rest);
+                // The quote that ended it is consumed too.
+                if self.token_cursor < self.line_buf.len() {
+                    self.token_cursor += 1;
+                }
+            }
+            None => {
+                if result.ends_with('"') {
+                    result.pop();
+                }
             }
         }
         Ok(result)

@@ -306,7 +306,7 @@ fn world(tape: &SharedTape, humans: &str) -> SimContext {
     sim.rules.global_data.gravity = -1.0;
     sim.rules.global_data.partition_cell_size = 20.0;
     sim.rules.global_data.movement_penalty_damage_state = BodyDamageType::ReallyDamaged;
-    sim.rules.ai_force_idle_frames_count = 45;
+    sim.rules.ai_data.force_idle_frames_count = 45;
     sim.ai_seams = shared(Seams(tape.clone()));
     sim.paths = Box::new(Queue(tape.clone()));
     sim.init_partition(

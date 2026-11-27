@@ -1203,7 +1203,7 @@ fn golden_special_ability_and_command_button_hunt() {
         let positions = Arc::new(Mutex::new(BTreeMap::new()));
         sim.client = Box::new(Client(Arc::clone(&log), Arc::clone(&positions)));
         sim.terrain = Box::new(Wall(get("wall") as Real));
-        sim.rules.attack_priority_distance_modifier = get("modifier") as Real;
+        sim.rules.ai_data.attack_priority_distance_modifier = get("modifier") as Real;
         sim.world = SimWorld::new();
         sim.init_partition(
             20.0,

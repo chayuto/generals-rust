@@ -1,10 +1,10 @@
-blocks AIData unported 2
+blocks AIData loaded 2
 blocks Animation client_skipped 14
 blocks Armor loaded 53
 blocks AudioEvent client_skipped 1410
 blocks AudioSettings client_skipped 1
 blocks BenchProfile client_skipped 4
-blocks Bridge unported 27
+blocks Bridge loaded 27
 blocks Campaign client_skipped 17
 blocks ChallengeGenerals client_skipped 1
 blocks CommandButton partial 820
@@ -22,7 +22,7 @@ blocks GameData loaded 2
 blocks InGameUI client_skipped 1
 blocks LODPreset client_skipped 34
 blocks Language client_skipped 1
-blocks Locomotor partial 182
+blocks Locomotor loaded 182
 blocks MappedImage client_skipped 1369
 blocks MiscAudio client_skipped 1
 blocks Mouse client_skipped 1
@@ -32,14 +32,14 @@ blocks MultiplayerSettings loaded 2
 blocks MultiplayerStartingMoneyChoice loaded 4
 blocks MusicTrack client_skipped 69
 blocks Object loaded 1880
-blocks ObjectCreationList name_only 295
+blocks ObjectCreationList loaded 295
 blocks ObjectReskin loaded 235
 blocks OnlineChatColors client_skipped 1
 blocks ParticleSystem name_only 1091
 blocks PlayerTemplate loaded 15
 blocks Rank loaded 5
 blocks ReallyLowMHz client_skipped 1
-blocks Road unported 63
+blocks Road loaded 63
 blocks Science loaded 96
 blocks ShellMenuScheme client_skipped 1
 blocks SpecialPower loaded 80
@@ -49,14 +49,81 @@ blocks Upgrade loaded 83
 blocks Video client_skipped 41
 blocks WaterSet unported 4
 blocks WaterTransparency unported 1
-blocks Weapon partial 363
+blocks Weapon loaded 363
 blocks Weather unported 1
 unparsed_module_data draw 2897
 unparsed_module_data client 61
 unparsed_module_data logic 405
 files 128
-ignored_fields 4779
+ignored_fields 3861
+ai_build list match
+ai_data aggressiveRangeModifier match
+ai_data aiCrushesInfantry match
+ai_data aiDozerBoredRadiusModifier match
+ai_data alertRangeModifier match
+ai_data attackIgnoreInsignificantBuildings match
+ai_data attackPriorityDistanceModifier match
+ai_data attackUsesLineOfSight match
+ai_data crc match
+ai_data distanceRequiresGroup match
+ai_data enableRepulsors match
+ai_data forceIdleFramesCount match
+ai_data forceSkirmishAI match
+ai_data guardChaseUnitFrames match
+ai_data guardEnemyReturnScanRate match
+ai_data guardEnemyScanRate match
+ai_data guardInnerModifierAI match
+ai_data guardInnerModifierHuman match
+ai_data guardOuterModifierAI match
+ai_data guardOuterModifierHuman match
+ai_data infantryPathfindDiameter match
+ai_data maxRecruitDistance match
+ai_data maxRetaliateDistance match
+ai_data minClumpDensity match
+ai_data minDistanceForGroup match
+ai_data minInfantryForGroup match
+ai_data minVehiclesForGroup match
+ai_data rebuildDelaySeconds match
+ai_data repulsedDistance match
+ai_data resourcesPoor match
+ai_data resourcesWealthy match
+ai_data retaliateFriendsRadius match
+ai_data rotateSkirmishBases match
+ai_data skirmishBaseDefenseExtraDistance match
+ai_data skirmishGroupFudgeValue match
+ai_data structureSeconds match
+ai_data structuresPoorMod match
+ai_data structuresWealthyMod match
+ai_data supplyCenterSafeRadius match
+ai_data teamPoorMod match
+ai_data teamResourcesToBuild match
+ai_data teamSeconds match
+ai_data teamWealthyMod match
+ai_data vehiclePathfindDiameter match
+ai_data wallHeight match
+ai_side info match
 armor coefficients match
+bridge bridge_model_name match
+bridge bridge_model_name_broken match
+bridge bridge_model_name_damaged match
+bridge bridge_model_name_really_damaged match
+bridge bridge_scale match
+bridge effects match
+bridge id match
+bridge is_bridge match
+bridge num_fx_per_type match
+bridge radar_color match
+bridge road_width match
+bridge road_width_in_texture match
+bridge scaffold_object_name match
+bridge scaffold_support_object_name match
+bridge sounds match
+bridge texture match
+bridge texture_broken match
+bridge texture_damaged match
+bridge texture_really_damaged match
+bridge tower_object_name match
+bridge transition_effects_height match
 command_set slots match
 locomotor accel_pitch_limit match
 locomotor acceleration match
@@ -118,6 +185,112 @@ locomotor wander_length_factor match
 locomotor wander_width_factor match
 locomotor wheel_turn_angle match
 locomotor wobble_rate match
+nugget anim_sets match
+nugget bounce_sound match
+nugget contain_inside_source_object match
+nugget convergence_factor match
+nugget debris_to_generate match
+nugget delay_delivery_frames_max match
+nugget delivery_decal match
+nugget delivery_decal_radius match
+nugget dies_on_bad_land match
+nugget disposition match
+nugget disposition_intensity match
+nugget dist_to_target match
+nugget dive_end_distance match
+nugget dive_start_distance match
+nugget drop_delay match
+nugget drop_offset match
+nugget drop_variance match
+nugget error_radius match
+nugget exit_pitch_rate match
+nugget extra_bounciness match
+nugget extra_friction match
+nugget fade_frames match
+nugget fade_in match
+nugget fade_out match
+nugget fade_sound_name match
+nugget fire_weapon match
+nugget formation_size match
+nugget formation_spacing match
+nugget fx_final match
+nugget ignore_primary_obstacle match
+nugget inherit_transport_velocity match
+nugget inherits_veterancy match
+nugget invulnerable_time match
+nugget is_parachute_directly match
+nugget mass match
+nugget max_attempts match
+nugget max_distance_formation match
+nugget max_frames match
+nugget max_health match
+nugget max_mag match
+nugget max_pitch match
+nugget min_distance_a_formation match
+nugget min_distance_b_formation match
+nugget min_frames match
+nugget min_health match
+nugget min_lod_required match
+nugget min_mag match
+nugget min_pitch match
+nugget names match
+nugget names_are_objects match
+nugget number_of_shots match
+nugget object_count match
+nugget offset match
+nugget ok_to_change_model_color match
+nugget orient_in_force_direction match
+nugget particle_system_name match
+nugget payload match
+nugget pitch_rate match
+nugget pre_open_distance match
+nugget preserve_layer match
+nugget put_in_container match
+nugget requires_live_player match
+nugget roll_rate match
+nugget self_destruct_object match
+nugget shadow_type match
+nugget skip_if_significantly_airborne match
+nugget spin_rate match
+nugget spread_formation match
+nugget start_at_max_speed match
+nugget start_at_preferred_height match
+nugget strafe_fx match
+nugget strafe_length match
+nugget strafing_weapon_slot match
+nugget transport_name match
+nugget type match
+nugget visible_drop_bone_name match
+nugget visible_items_dropped_per_interval match
+nugget visible_num_bones match
+nugget visible_payload_template_name match
+nugget visible_payload_weapon match
+nugget visible_sub_object_name match
+nugget weapon match
+nugget weapon_slot match
+nugget yaw_rate match
+ocl count match
+road bridge_model_name match
+road bridge_model_name_broken match
+road bridge_model_name_damaged match
+road bridge_model_name_really_damaged match
+road bridge_scale match
+road effects match
+road id match
+road is_bridge match
+road num_fx_per_type match
+road radar_color match
+road road_width match
+road road_width_in_texture match
+road scaffold_object_name match
+road scaffold_support_object_name match
+road sounds match
+road texture match
+road texture_broken match
+road texture_damaged match
+road texture_really_damaged match
+road tower_object_name match
+road transition_effects_height match
 science cost match
 science grantable match
 special_power detection_time match
@@ -167,9 +340,15 @@ weapon damage_dealt_at_self_position match
 weapon damage_status_type match
 weapon damage_type match
 weapon death_type match
+weapon extra_bonus match
+weapon fire_fx match
+weapon fire_ocl match
+weapon fire_sound match
+weapon fire_sound_loop_time match
 weapon historic_bonus_count match
 weapon historic_bonus_radius match
 weapon historic_bonus_time match
+weapon historic_bonus_weapon match
 weapon is_shows_ammo_pips match
 weapon laser_bone_name match
 weapon laser_name match
@@ -186,6 +365,9 @@ weapon pre_attack_delay match
 weapon prefire_type match
 weapon primary_damage match
 weapon primary_damage_radius match
+weapon projectile_detonation_fx match
+weapon projectile_detonation_ocl match
+weapon projectile_exhaust match
 weapon projectile_name match
 weapon projectile_stream_name match
 weapon radius_damage_angle match

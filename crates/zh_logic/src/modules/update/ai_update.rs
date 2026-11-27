@@ -876,7 +876,7 @@ pub fn mood_matrix_action_adjustment(
 pub fn reset_next_mood_check_time(sim: &mut dyn SimApi, ctx: ModuleContext) {
     let when = sim
         .frame()
-        .wrapping_add(sim.rules().ai_force_idle_frames_count);
+        .wrapping_add(sim.rules().ai_data.force_idle_frames_count);
     let state = ai(sim, ctx);
     state.next_mood_check_time = when;
     state.randomly_offset_mood_check = TRUE;

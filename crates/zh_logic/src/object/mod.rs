@@ -1,4 +1,5 @@
 pub mod experience_tracker;
+pub mod object_creation_list;
 pub mod object_script_status_bits;
 pub mod object_types;
 pub mod overridable;

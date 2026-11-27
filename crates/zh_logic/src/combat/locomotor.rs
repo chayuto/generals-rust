@@ -24,7 +24,7 @@ use crate::arena::ObjectSlot;
 use crate::sim::SimApi;
 use crate::combat::turret_ai::normalize_angle_cpp;
 use zh_common::ini::{
-    IniError, IniReader, LOGICFRAMES_PER_SECOND, RADS_PER_DEGREE, SECONDS_PER_LOGICFRAME_REAL,
+    IniError, IniLoadType, IniReader, LOGICFRAMES_PER_SECOND, SECONDS_PER_LOGICFRAME_REAL, SEPS_DEFAULT,
 };
 use zh_common::math::{
     gm_acosf, gm_atan2f, gm_cosf, gm_fabsf, gm_sinf, reference_div_f32, Coord3D, Matrix3D, PI,
@@ -34,24 +34,6 @@ use zh_common::types::{Bool, Int, Real, UnsignedInt, XferVersion, FALSE, TRUE};
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
 pub const BIGNUM: Real = 99999.0_f32;
-
-#[inline]
-fn parse_velocity(value: &str) -> Result<Real, IniError> {
-    let v = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?;
-    Ok(v * SECONDS_PER_LOGICFRAME_REAL)
-}
-
-#[inline]
-fn parse_acceleration(value: &str) -> Result<Real, IniError> {
-    let v = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?;
-    Ok(v * (SECONDS_PER_LOGICFRAME_REAL * SECONDS_PER_LOGICFRAME_REAL))
-}
-
-#[inline]
-fn parse_angular_velocity(value: &str) -> Result<Real, IniError> {
-    let v = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?;
-    Ok(v * (SECONDS_PER_LOGICFRAME_REAL * RADS_PER_DEGREE))
-}
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -245,101 +227,124 @@ impl LocomotorTemplate {
         self.parse_ini_block_collect(text, &mut Vec::new())
     }
 
-    /// As [`Self::parse_ini_block`], appending the keys it does not handle.
+    /// As [`Self::parse_ini_block`], appending the keys the field table lacks.
     pub fn parse_ini_block_collect(
         &mut self,
         text: &str,
         ignored: &mut Vec<String>,
     ) -> Result<(), IniError> {
-        for line in text.lines().skip(1) {
-            let line = line.trim();
-            if line.eq_ignore_ascii_case("End") { break; }
-            let Some((key, value)) = line.split_once('=') else { continue };
-            let key = key.trim();
-            let value = value.trim();
-            match key {
-                "Surfaces" => {
-                    self.surfaces = 0;
-                    for name in value.split_whitespace() {
-                        let idx = IniReader::scan_index_list(name, &LOCOMOTOR_SURFACE_TYPE_NAMES)?;
-                        self.surfaces |= 1 << idx;
-                    }
-                }
-                "Speed" => self.max_speed = parse_velocity(value)?,
-                "SpeedDamaged" => self.max_speed_damaged = parse_velocity(value)?,
-                "TurnRate" => self.max_turn_rate = parse_angular_velocity(value)?,
-                "TurnRateDamaged" => self.max_turn_rate_damaged = parse_angular_velocity(value)?,
-                "Acceleration" => self.acceleration = parse_acceleration(value)?,
-                "AccelerationDamaged" => self.acceleration_damaged = parse_acceleration(value)?,
-                "Lift" => self.lift = parse_acceleration(value)?,
-                "LiftDamaged" => self.lift_damaged = parse_acceleration(value)?,
-                "Braking" => self.braking = parse_acceleration(value)?,
-                "MinSpeed" => self.min_speed = parse_velocity(value)?,
-                "MinTurnSpeed" => self.min_turn_speed = parse_velocity(value)?,
-                "PreferredHeight" => self.preferred_height = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "PreferredHeightDamping" => self.preferred_height_damping = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "CirclingRadius" => self.circling_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "Extra2DFriction" => self.extra_2d_friction = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * SECONDS_PER_LOGICFRAME_REAL,
-                "SpeedLimitZ" => self.speed_limit_z = parse_velocity(value)?,
-                "MaxThrustAngle" => self.max_thrust_angle = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * RADS_PER_DEGREE,
-                "ZAxisBehavior" => self.behavior_z = LocomotorBehaviorZ::from_i32(
-                    IniReader::scan_index_list(value, &LOCOMOTOR_BEHAVIOR_Z_NAMES)?
-                ).unwrap_or(LocomotorBehaviorZ::NoZMotiveForce),
-                "Appearance" => self.appearance = LocomotorAppearance::from_i32(
-                    IniReader::scan_index_list(value, &LOCOMOTOR_APPEARANCE_NAMES)?
-                ).unwrap_or(LocomotorAppearance::Other),
-                "GroupMovementPriority" => {
-                    let v = IniReader::scan_index_list(value, &LOCOMOTOR_PRIORITY_NAMES)?;
-                    self.move_priority = match v { 0 => LocomotorPriority::MovesBack, 2 => LocomotorPriority::MovesFront, _ => LocomotorPriority::MovesMiddle };
-                }
-                "AccelerationPitchLimit" | "DecelerationPitchLimit" => {
-                    let v = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * RADS_PER_DEGREE;
-                    if key == "AccelerationPitchLimit" { self.accel_pitch_limit = v; } else { self.decel_pitch_limit = v; }
-                }
-                "BounceAmount" => self.bounce_kick = parse_angular_velocity(value)?,
-                "PitchStiffness" => self.pitch_stiffness = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "RollStiffness" => self.roll_stiffness = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "PitchDamping" => self.pitch_damping = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "RollDamping" => self.roll_damping = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ThrustRoll" => self.thrust_roll = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ThrustWobbleRate" => self.wobble_rate = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ThrustMinWobble" => self.min_wobble = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ThrustMaxWobble" => self.max_wobble = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "PitchInDirectionOfZVelFactor" => self.pitch_by_z_vel_coef = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ForwardVelocityPitchFactor" => self.forward_vel_coef = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "LateralVelocityRollFactor" => self.lateral_vel_coef = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ForwardAccelerationPitchFactor" => self.forward_accel_coef = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "LateralAccelerationRollFactor" => self.lateral_accel_coef = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "UniformAxialDamping" => self.uniform_axial_damping = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "TurnPivotOffset" => self.turn_pivot_offset = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "Apply2DFrictionWhenAirborne" => self.apply_2d_friction_airborne = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "DownhillOnly" => self.downhill_only = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "AllowAirborneMotiveForce" => self.allow_motive_force_airborne = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "LocomotorWorksWhenDead" => self.locomotor_works_when_dead = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "AirborneTargetingHeight" => self.airborne_targeting_height = value.parse::<Int>().map_err(|_| IniError::InvalidData)?,
-                "StickToGround" => self.stick_to_ground = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "CanMoveBackwards" => self.can_move_backward = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "HasSuspension" => self.has_suspension = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "FrontWheelTurnAngle" => self.wheel_turn_angle = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * RADS_PER_DEGREE,
-                "MaximumWheelExtension" => self.maximum_wheel_extension = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "MaximumWheelCompression" => self.maximum_wheel_compression = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "CloseEnoughDist" => self.close_enough_dist = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "CloseEnoughDist3D" => self.is_close_enough_dist3d = IniReader::scan_bool(value).map_err(|_| IniError::InvalidData)?,
-                "SlideIntoPlaceTime" => self.ultra_accurate_slide_factor = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)? * (LOGICFRAMES_PER_SECOND as Real / 1000.0_f32),
-                "WanderWidthFactor" => self.wander_width_factor = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "WanderLengthFactor" => self.wander_length_factor = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "WanderAboutPointRadius" => self.wander_about_point_radius = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "RudderCorrectionDegree" => self.rudder_correction_degree = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "RudderCorrectionRate" => self.rudder_correction_rate = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ElevatorCorrectionDegree" => self.elevator_correction_degree = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                "ElevatorCorrectionRate" => self.elevator_correction_rate = IniReader::scan_real(value).map_err(|_| IniError::InvalidData)?,
-                other => ignored.push(other.to_owned()),
+        let mut ini = IniReader::new("", text.as_bytes(), IniLoadType::Overwrite);
+        ini.read_line(None)?;
+        let _keyword = ini.next_token(SEPS_DEFAULT)?;
+        self.name = ini.next_token(SEPS_DEFAULT)?.to_owned();
+        self.parse_fields(&mut ini, ignored)
+    }
+
+    /// `INI::initFromINI` over the locomotor field table, from the line after the
+    /// header through `End`, then `validate`. A key outside the table is skipped, as
+    /// the reference build does (`DEBUG_CRASH` only), and appended to `ignored`.
+    pub fn parse_fields(
+        &mut self,
+        ini: &mut IniReader<'_>,
+        ignored: &mut Vec<String>,
+    ) -> Result<(), IniError> {
+        ini.read_block_fields(|key, ini| {
+            if !self.parse_field(key, ini)? {
+                ignored.push(key.to_owned());
             }
-        }
-        if let Some(first) = text.lines().next().and_then(|l| l.split_whitespace().nth(1)) {
-            self.name = first.to_owned();
-        }
+            Ok(())
+        })?;
         self.validate()
+    }
+
+    /// One row of the field table; `false` when `key` is not in it (case sensitive).
+    fn parse_field(&mut self, key: &str, ini: &mut IniReader<'_>) -> Result<bool, IniError> {
+        let index = |ini: &mut IniReader<'_>, names: &[&str]| {
+            IniReader::scan_index_list(ini.next_token(SEPS_DEFAULT)?, names)
+        };
+        match key {
+            "Surfaces" => {
+                let mut bits = self.surfaces as UnsignedInt;
+                ini.parse_bit_string32(&mut bits, &LOCOMOTOR_SURFACE_TYPE_NAMES)?;
+                self.surfaces = bits as Int;
+            }
+            "Speed" => ini.parse_velocity_real(&mut self.max_speed)?,
+            "SpeedDamaged" => ini.parse_velocity_real(&mut self.max_speed_damaged)?,
+            "TurnRate" => ini.parse_angular_velocity_real(&mut self.max_turn_rate)?,
+            "TurnRateDamaged" => ini.parse_angular_velocity_real(&mut self.max_turn_rate_damaged)?,
+            "Acceleration" => ini.parse_acceleration_real(&mut self.acceleration)?,
+            "AccelerationDamaged" => ini.parse_acceleration_real(&mut self.acceleration_damaged)?,
+            "Lift" => ini.parse_acceleration_real(&mut self.lift)?,
+            "LiftDamaged" => ini.parse_acceleration_real(&mut self.lift_damaged)?,
+            "Braking" => ini.parse_acceleration_real(&mut self.braking)?,
+            "MinSpeed" => ini.parse_velocity_real(&mut self.min_speed)?,
+            "MinTurnSpeed" => ini.parse_velocity_real(&mut self.min_turn_speed)?,
+            "PreferredHeight" => ini.parse_real(&mut self.preferred_height)?,
+            "PreferredHeightDamping" => ini.parse_real(&mut self.preferred_height_damping)?,
+            "CirclingRadius" => ini.parse_real(&mut self.circling_radius)?,
+            "Extra2DFriction" => {
+                ini.parse_real(&mut self.extra_2d_friction)?;
+                self.extra_2d_friction *= SECONDS_PER_LOGICFRAME_REAL;
+            }
+            "SpeedLimitZ" => ini.parse_velocity_real(&mut self.speed_limit_z)?,
+            "MaxThrustAngle" => ini.parse_angle_real(&mut self.max_thrust_angle)?,
+            "ZAxisBehavior" => {
+                let i = index(ini, &LOCOMOTOR_BEHAVIOR_Z_NAMES)?;
+                self.behavior_z = LocomotorBehaviorZ::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "Appearance" => {
+                let i = index(ini, &LOCOMOTOR_APPEARANCE_NAMES)?;
+                self.appearance = LocomotorAppearance::from_i32(i).ok_or(IniError::InvalidData)?;
+            }
+            "GroupMovementPriority" => {
+                self.move_priority = match index(ini, &LOCOMOTOR_PRIORITY_NAMES)? {
+                    0 => LocomotorPriority::MovesBack,
+                    2 => LocomotorPriority::MovesFront,
+                    _ => LocomotorPriority::MovesMiddle,
+                };
+            }
+            "AccelerationPitchLimit" => ini.parse_angle_real(&mut self.accel_pitch_limit)?,
+            "DecelerationPitchLimit" => ini.parse_angle_real(&mut self.decel_pitch_limit)?,
+            "BounceAmount" => ini.parse_angular_velocity_real(&mut self.bounce_kick)?,
+            "PitchStiffness" => ini.parse_real(&mut self.pitch_stiffness)?,
+            "RollStiffness" => ini.parse_real(&mut self.roll_stiffness)?,
+            "PitchDamping" => ini.parse_real(&mut self.pitch_damping)?,
+            "RollDamping" => ini.parse_real(&mut self.roll_damping)?,
+            "ThrustRoll" => ini.parse_real(&mut self.thrust_roll)?,
+            "ThrustWobbleRate" => ini.parse_real(&mut self.wobble_rate)?,
+            "ThrustMinWobble" => ini.parse_real(&mut self.min_wobble)?,
+            "ThrustMaxWobble" => ini.parse_real(&mut self.max_wobble)?,
+            "PitchInDirectionOfZVelFactor" => ini.parse_real(&mut self.pitch_by_z_vel_coef)?,
+            "ForwardVelocityPitchFactor" => ini.parse_real(&mut self.forward_vel_coef)?,
+            "LateralVelocityRollFactor" => ini.parse_real(&mut self.lateral_vel_coef)?,
+            "ForwardAccelerationPitchFactor" => ini.parse_real(&mut self.forward_accel_coef)?,
+            "LateralAccelerationRollFactor" => ini.parse_real(&mut self.lateral_accel_coef)?,
+            "UniformAxialDamping" => ini.parse_real(&mut self.uniform_axial_damping)?,
+            "TurnPivotOffset" => ini.parse_real(&mut self.turn_pivot_offset)?,
+            "Apply2DFrictionWhenAirborne" => ini.parse_bool(&mut self.apply_2d_friction_airborne)?,
+            "DownhillOnly" => ini.parse_bool(&mut self.downhill_only)?,
+            "AllowAirborneMotiveForce" => ini.parse_bool(&mut self.allow_motive_force_airborne)?,
+            "LocomotorWorksWhenDead" => ini.parse_bool(&mut self.locomotor_works_when_dead)?,
+            "AirborneTargetingHeight" => ini.parse_int(&mut self.airborne_targeting_height)?,
+            "StickToGround" => ini.parse_bool(&mut self.stick_to_ground)?,
+            "CanMoveBackwards" => ini.parse_bool(&mut self.can_move_backward)?,
+            "HasSuspension" => ini.parse_bool(&mut self.has_suspension)?,
+            "FrontWheelTurnAngle" => ini.parse_angle_real(&mut self.wheel_turn_angle)?,
+            "MaximumWheelExtension" => ini.parse_real(&mut self.maximum_wheel_extension)?,
+            "MaximumWheelCompression" => ini.parse_real(&mut self.maximum_wheel_compression)?,
+            "CloseEnoughDist" => ini.parse_real(&mut self.close_enough_dist)?,
+            "CloseEnoughDist3D" => ini.parse_bool(&mut self.is_close_enough_dist3d)?,
+            "SlideIntoPlaceTime" => ini.parse_duration_real(&mut self.ultra_accurate_slide_factor)?,
+            "WanderWidthFactor" => ini.parse_real(&mut self.wander_width_factor)?,
+            "WanderLengthFactor" => ini.parse_real(&mut self.wander_length_factor)?,
+            "WanderAboutPointRadius" => ini.parse_real(&mut self.wander_about_point_radius)?,
+            "RudderCorrectionDegree" => ini.parse_real(&mut self.rudder_correction_degree)?,
+            "RudderCorrectionRate" => ini.parse_real(&mut self.rudder_correction_rate)?,
+            "ElevatorCorrectionDegree" => ini.parse_real(&mut self.elevator_correction_degree)?,
+            "ElevatorCorrectionRate" => ini.parse_real(&mut self.elevator_correction_rate)?,
+            _ => return Ok(false),
+        }
+        Ok(true)
     }
 
     pub fn validate(&mut self) -> Result<(), IniError> {

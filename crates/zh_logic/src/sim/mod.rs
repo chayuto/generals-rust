@@ -532,14 +532,16 @@ pub struct RulesRegistry {
     pub special_power_store: SpecialPowerStore,
     pub crate_system: CrateSystem,
     pub global_data: GlobalData,
-    /// `TAiData::m_forceIdleFramesCount` (`ForceIdleMSEC` in `AIData.ini`).
-    pub ai_force_idle_frames_count: UnsignedInt,
+    /// `TheAI`'s `TAiData`.
+    pub ai_data: crate::ai::ai::AiData,
+    /// `TheObjectCreationListStore`.
+    pub ocl_store: crate::object::object_creation_list::ObjectCreationListStore,
+    /// `TheTerrainRoads`.
+    pub terrain_roads: zh_common::ini::ini_terrain_road::TerrainRoadCollection,
     pub fx_list_names: BTreeSet<String>,
     pub damage_fx_names: BTreeSet<String>,
     pub ocl_names: BTreeSet<String>,
     pub particle_system_names: BTreeSet<String>,
-    /// `AIData::m_attackPriorityDistanceModifier` (`AI` is unported).
-    pub attack_priority_distance_modifier: Real,
     /// `TheControlBar`'s buttons and sets.
     pub command_store: CommandStore,
 }
@@ -593,13 +595,14 @@ impl RulesRegistry {
             special_power_store: SpecialPowerStore::new(),
             crate_system,
             global_data: GlobalData::new(),
-            ai_force_idle_frames_count: 1,
+            ai_data: Default::default(),
+            ocl_store: Default::default(),
+            terrain_roads: Default::default(),
             fx_list_names: BTreeSet::new(),
             damage_fx_names: BTreeSet::new(),
             ocl_names: BTreeSet::new(),
             particle_system_names: BTreeSet::new(),
             command_store: CommandStore::default(),
-            attack_priority_distance_modifier: 0.0,
         }
     }
 

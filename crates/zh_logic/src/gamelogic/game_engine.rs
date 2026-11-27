@@ -18,8 +18,8 @@ use zh_common::io::file::LocalFileHost;
 
 use crate::combat::locomotor::LocomotorTemplate;
 use crate::modules::module::ModuleType;
+use crate::object::object_creation_list::OclRefs;
 use crate::object::thing_template::{DefaultModuleMaskLookup, ThingTemplateParseContext};
-use crate::object::weapon::WeaponTemplate;
 use crate::rules::command_set::{CommandButton, CommandButtonType};
 use crate::rules::multiplayer_settings::{
     parse_multiplayer_color_definition, parse_multiplayer_settings_definition,
@@ -467,14 +467,8 @@ impl GameDataLoader {
                 self.rules.particle_system_names.insert(name.clone());
                 Some(BlockStatus::NameOnly)
             }
-            "ObjectCreationList" => {
-                self.rules.ocl_names.insert(name.clone());
-                Some(BlockStatus::NameOnly)
-            }
-            "AIData" | "Bridge" | "Road" | "MapData" | "ScriptAction" | "ScriptCondition"
-            | "WaterSet" | "WaterTransparency" | "Weather" | "WebpageURL" => {
-                Some(BlockStatus::Unported)
-            }
+            "MapData" | "ScriptAction" | "ScriptCondition" | "WaterSet" | "WaterTransparency"
+            | "Weather" | "WebpageURL" => Some(BlockStatus::Unported),
             _ => None,
         };
         if let Some(status) = status {
@@ -615,7 +609,11 @@ impl GameDataLoader {
                 r.thing_factory
                     .parse_object_definition(ini, &name, &reskin_from, &mut ctx)?;
             }
-            "Weapon" | "Locomotor" => return self.parse_partial(kind, ini),
+            "Weapon" => return self.parse_weapon(ini, load_type),
+            "Locomotor" => return self.parse_locomotor(ini),
+            "AIData" | "Bridge" | "Road" | "ObjectCreationList" => {
+                return self.parse_with_field_tables(kind, ini)
+            }
             "CommandSet" => return self.parse_command_set(ini),
             "CommandButton" => return self.parse_command_button(ini),
             _ => return Err(IniError::UnknownToken),
@@ -623,30 +621,11 @@ impl GameDataLoader {
         Ok(BlockStatus::Loaded)
     }
 
-    /// Collects the block's text for the line-based weapon and locomotor parsers.
-    fn parse_partial(
-        &mut self,
-        kind: &str,
-        ini: &mut IniReader<'_>,
-    ) -> Result<BlockStatus, IniError> {
-        let name = ini.next_token(SEPS_DEFAULT)?.to_owned();
-        let mut text = format!("{kind} {name}\n");
-        ini.read_block_fields(|_, ini| {
-            text.push_str(&String::from_utf8_lossy(ini.current_line_bytes()));
-            text.push('\n');
-            Ok(())
-        })?;
-        text.push_str("End\n");
-        let mut ignored = Vec::new();
-        if kind == "Weapon" {
-            let mut t = WeaponTemplate::default();
-            t.parse_ini_block_collect(&text, &mut ignored)?;
-            self.rules.weapon_store.add_template(t);
-        } else {
-            let mut t = LocomotorTemplate::new();
-            t.name = name;
-            t.parse_ini_block_collect(&text, &mut ignored)?;
-            self.rules.locomotor_store.add_template(t);
+    /// Counts the keys a parser's field tables lack. The reference build skips them
+    /// (`DEBUG_CRASH` only), so the block stays, marked as partial.
+    fn note_ignored(&mut self, kind: &str, ignored: Vec<String>) -> BlockStatus {
+        if ignored.is_empty() {
+            return BlockStatus::Loaded;
         }
         for field in ignored {
             *self
@@ -655,7 +634,102 @@ impl GameDataLoader {
                 .entry(format!("{kind}.{field}"))
                 .or_insert(0) += 1;
         }
-        Ok(BlockStatus::Partial)
+        BlockStatus::Partial
+    }
+
+    /// `WeaponStore::parseWeaponTemplateDefinition`.
+    fn parse_weapon(
+        &mut self,
+        ini: &mut IniReader<'_>,
+        load_type: IniLoadType,
+    ) -> Result<BlockStatus, IniError> {
+        let name = ini.next_token(SEPS_DEFAULT)?.to_owned();
+        let r = &mut self.rules;
+        let existing = r.weapon_store.find_weapon_template(&name).cloned();
+        // The reference returns early on a repeated name and then trips over the
+        // block's fields.
+        if existing.is_some() && load_type != IniLoadType::CreateOverrides {
+            return Err(IniError::UnknownToken);
+        }
+        // An override copy never reaches the name map, so lookups keep the original.
+        let is_override = existing.is_some();
+        let mut t = existing.unwrap_or_default();
+        t.name = name;
+        let mut ignored = Vec::new();
+        t.parse_fields(ini, &mut ignored)?;
+
+        // `parseFXList`, `parseParticleSystemTemplate` and `parseWeaponTemplate` keep
+        // only what exists.
+        let keep = |names: &mut [String; 4], known: &BTreeSet<String>| {
+            for name in names {
+                if !known.contains(name.as_str()) {
+                    name.clear();
+                }
+            }
+        };
+        keep(&mut t.fire_fx, &r.fx_list_names);
+        keep(&mut t.projectile_detonation_fx, &r.fx_list_names);
+        keep(&mut t.projectile_exhaust, &r.particle_system_names);
+        if t.historic_bonus_weapon != t.name
+            && !r.weapon_store.has_template(&t.historic_bonus_weapon)
+        {
+            t.historic_bonus_weapon.clear();
+        }
+        if !is_override {
+            r.weapon_store.add_template(t);
+        }
+        Ok(self.note_ignored("Weapon", ignored))
+    }
+
+    /// `LocomotorStore::parseLocomotorTemplateDefinition`: a repeated name is parsed on
+    /// top of what it holds.
+    fn parse_locomotor(&mut self, ini: &mut IniReader<'_>) -> Result<BlockStatus, IniError> {
+        let name = ini.next_token(SEPS_DEFAULT)?.to_owned();
+        let store = &mut self.rules.locomotor_store;
+        let mut t = store
+            .find_by_name(&name)
+            .cloned()
+            .unwrap_or_else(LocomotorTemplate::new);
+        t.name = name;
+        let mut ignored = Vec::new();
+        t.parse_fields(ini, &mut ignored)?;
+        store.add_template(t);
+        Ok(self.note_ignored("Locomotor", ignored))
+    }
+
+    fn parse_with_field_tables(
+        &mut self,
+        kind: &str,
+        ini: &mut IniReader<'_>,
+    ) -> Result<BlockStatus, IniError> {
+        let r = &mut self.rules;
+        let mut ignored = Vec::new();
+        match kind {
+            "AIData" => r.ai_data.parse_definition(
+                ini,
+                &r.science_store,
+                &mut r.name_keys,
+                &mut ignored,
+            )?,
+            "Bridge" => r.terrain_roads.parse_bridge_definition(ini, &mut ignored)?,
+            "Road" => r.terrain_roads.parse_road_definition(ini, &mut ignored)?,
+            _ => {
+                let refs = OclRefs {
+                    weapon_store: &r.weapon_store,
+                    fx_list_names: &r.fx_list_names,
+                };
+                // The name is known from the header on, as `ocl_names` records it.
+                let name = std::str::from_utf8(ini.current_line_bytes())
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("")
+                    .to_owned();
+                r.ocl_names.insert(name);
+                r.ocl_store.parse_definition(ini, refs, &mut ignored)?;
+            }
+        }
+        Ok(self.note_ignored(kind, ignored))
     }
 
     /// Reads `Command`, `Object` and `Upgrade` of a button, which is what the sim's
