@@ -4,6 +4,8 @@
 The stock headless engine plays each replay under lldb, which loads
 `gen_game_start.cpp` as a dylib into the stopped process, at two stages:
 
+- `before_units`: the first call of `placeNetworkBuildingsForPlayer`, with the
+  map's objects made;
 - `before_ai`: entry of `PlayerList::newMap`, with every map object and starting
   unit made and the computer players' `AIPlayer::newMap` not yet run;
 - `end`: return of the loading `GameLogic::tryStartNewGame`.
@@ -57,6 +59,7 @@ def build_dylib(out: pathlib.Path) -> None:
 
 
 STAGES = {
+    "before_units": ["breakpoint set --name placeNetworkBuildingsForPlayer -N stop", "continue"],
     "before_ai": ["breakpoint set --name PlayerList::newMap -N stop", "continue"],
     "end": ["thread step-out"],
 }
@@ -75,6 +78,10 @@ VARIANTS = [
     ("chosen_spots", "defcon6", 4242,
      HUMAN + "0,2,1,1,1:CE,3,3,3,1:CH,-1,-1,-1,0:CE,-1,-1,-1,0:X:X:X:X:"),
     ("defcon6", "defcon6", 99, HUMAN + "-1,-1,-1,2,1:CE,-1,-1,-1,2:CE,-1,-1,-1,3:CH,-1,-1,-1,3:X:X:X:X:"),
+    ("old_factions", "defcon6", 31337,
+     HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:CE,-1,-1,-1,-1:CE,-1,-1,-1,-1:X:X:X:X:"),
+    ("same_colors", "defcon6", 2024,
+     HUMAN + "3,-1,-1,-1,1:CE,3,-1,-1,-1:CE,3,-1,-1,-1:X:X:X:X:X:"),
     ("alpine_assault", "alpine assault", 1, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
     ("bitter_winter", "bitter winter", 2, HUMAN + "-1,-1,-1,-1,1:CM,-1,-1,-1,-1:X:X:X:X:X:X:"),
     ("dark_night", "dark night", 3, HUMAN + "-1,-1,-1,-1,1:CH,-1,-1,-1,-1:X:X:X:X:X:X:"),
@@ -91,7 +98,8 @@ VARIANTS = [
 
 
 def variant_options(map_name: str, seed: int, slots: str) -> str:
-    return f"US=1;M=07maps/{map_name};MC=0;MS=0;SD={seed};C=100;SR=0;SC=10000;O=N;S={slots};"
+    old = "Y" if seed == 31337 else "N"
+    return f"US=1;M=07maps/{map_name};MC=0;MS=0;SD={seed};C=100;SR=0;SC=10000;O={old};S={slots};"
 
 
 def write_variant(home: pathlib.Path, name: str, options: str) -> None:

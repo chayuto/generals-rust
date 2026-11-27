@@ -1494,15 +1494,24 @@ fn place_network_buildings(
 
 /// `GameLogic::startNewGame` over loaded rule data.
 pub fn start_new_game(loader: GameDataLoader, parms: StartParms) -> Result<GameStart, StartError> {
-    start_new_game_observed(loader, parms, |_, _, _| {})
+    start_new_game_observed(loader, parms, |_, _, _, _| {})
 }
 
-/// [`start_new_game`], showing `before_player_maps` the game where the reference
-/// calls `ThePlayerList->newMap` (the computer players set up their bases there).
+/// A point of `startNewGame` at which [`start_new_game_observed`] shows the game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartStage {
+    /// The map's objects are made; no starting building or unit is.
+    BeforeStartingUnits,
+    /// The call of `ThePlayerList->newMap`, where the computer players set up
+    /// their bases.
+    BeforePlayerMaps,
+}
+
+/// [`start_new_game`], showing `observe` the game at each [`StartStage`].
 pub fn start_new_game_observed(
     mut loader: GameDataLoader,
     parms: StartParms,
-    mut before_player_maps: impl FnMut(&SimContext, &PlayerList, &TeamFactory),
+    mut observe: impl FnMut(StartStage, &SimContext, &PlayerList, &TeamFactory),
 ) -> Result<GameStart, StartError> {
     // `GameLogic::loadMapINI`.
     for (name, bytes) in &parms.map.inis {
@@ -1716,6 +1725,9 @@ pub fn start_new_game_observed(
         use_trees,
         multiplayer,
     );
+    sync_teams(&mut sim, &players, &teams);
+    sync_members(&sim, &players, &mut teams);
+    observe(StartStage::BeforeStartingUnits, &sim, &players, &teams);
 
     if let Some(g) = game.as_ref() {
         for (i, slot) in g.slots.iter().enumerate() {
@@ -1765,7 +1777,7 @@ pub fn start_new_game_observed(
     sim.update_partition();
     sync_teams(&mut sim, &players, &teams);
     sync_members(&sim, &players, &mut teams);
-    before_player_maps(&sim, &players, &teams);
+    observe(StartStage::BeforePlayerMaps, &sim, &players, &teams);
     env.run(&mut sim, &stores, &mut report, |e| players.new_map(e.world));
     sync_teams(&mut sim, &players, &teams);
     sync_members(&sim, &players, &mut teams);

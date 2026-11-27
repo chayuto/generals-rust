@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use zh_common::io::file::OsDiskFileHost;
 use zh_logic::gamelogic::frame::{run_frame, NoFrameSeams};
 use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader};
-use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart};
+use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, StartStage};
 use zh_logic::rules::kind_of::KindOfType;
 use zh_logic::sim::SimView;
 
@@ -34,7 +34,8 @@ const GOLDEN: &str = include_str!("../../../docs/golden_vectors/GameStart.json")
 /// Logic frames each started game runs.
 const FRAMES: u32 = 300;
 
-/// Why a digest differs from the reference, if it is known to. `before_ai`:
+/// Why a digest differs from the reference, if it is known to. At `before_units`
+/// everything matches. `before_ai`:
 ///
 /// - the seed: `DozerAIUpdate` and `WorkerAIUpdate` are not ported, so a starting
 ///   dozer or worker has no AI module and draws no random numbers;
@@ -46,6 +47,9 @@ const FRAMES: u32 = 300;
 /// their destroyed bit) and builds it again, which changes the next object id and
 /// that team's member count.
 fn known_divergence(stage: &str, key: &str) -> Option<&'static str> {
+    if stage == "before_units" {
+        return None;
+    }
     KNOWN_AT_BOTH
         .iter()
         .find(|(k, _)| *k == key)
@@ -207,26 +211,48 @@ fn golden_cases() -> Vec<Case> {
         .collect()
 }
 
+/// Stages recorded per game.
+const STAGES: usize = 3;
+/// Mobile starting units, over all games and at both later stages, which
+/// `adjustDestination` moved in the reference.
+const MOVED_UNITS: u32 = 38;
 /// Replays of the baseline, and games made from options strings.
 const REPLAY_GAMES: usize = 6;
-const VARIANT_GAMES: usize = 16;
+const VARIANT_GAMES: usize = 18;
 const BRIDGED_GAMES: u32 = 4;
 
 #[test]
-fn golden_lists_every_game_at_both_stages() {
+fn golden_lists_every_game_at_every_stage() {
     let cases = golden_cases();
-    assert_eq!(cases.len(), 2 * (REPLAY_GAMES + VARIANT_GAMES));
+    assert_eq!(cases.len(), STAGES * (REPLAY_GAMES + VARIANT_GAMES));
     assert_eq!(
         cases.iter().filter(|c| c.options.is_some()).count(),
-        2 * VARIANT_GAMES
+        STAGES * VARIANT_GAMES
     );
     for case in cases {
         assert_eq!(case.values.len(), 29, "{}", case.name);
     }
 }
 
-/// The started game, with its rows before the player maps and at the end.
-fn start(case: &Case) -> Option<(GameStart, Vec<String>, Vec<String>)> {
+/// A started game with its rows at each stage.
+struct Started {
+    game: GameStart,
+    before_units: Vec<String>,
+    before_ai: Vec<String>,
+    end: Vec<String>,
+}
+
+impl Started {
+    fn rows(&self, stage: &str) -> &[String] {
+        match stage {
+            "before_units" => &self.before_units,
+            "before_ai" => &self.before_ai,
+            _ => &self.end,
+        }
+    }
+}
+
+fn start(case: &Case) -> Option<Started> {
     let (game_dir, user_dir) = retail_dirs()?;
     let fs = mount_game_archives(&OsDiskFileHost, &game_dir);
     let mut loader = GameDataLoader::new();
@@ -238,13 +264,23 @@ fn start(case: &Case) -> Option<(GameStart, Vec<String>, Vec<String>)> {
             replay_parms(&fs, &loader, &path, &game_dir, &user_dir)
         }
     }?;
-    let mut before = Vec::new();
-    let game = start_new_game_observed(loader, parms, |sim, players, teams| {
-        before = dump(sim, players, teams);
+    let mut before_units = Vec::new();
+    let mut before_ai = Vec::new();
+    let game = start_new_game_observed(loader, parms, |stage, sim, players, teams| {
+        let rows = dump(sim, players, teams);
+        match stage {
+            StartStage::BeforeStartingUnits => before_units = rows,
+            StartStage::BeforePlayerMaps => before_ai = rows,
+        }
     })
     .expect("start");
     let end = dump(&game.sim, &game.players, &game.teams);
-    Some((game, before, end))
+    Some(Started {
+        game,
+        before_units,
+        before_ai,
+        end,
+    })
 }
 
 /// The starting objects' `(id, position digest)`, in id order.
@@ -323,7 +359,8 @@ fn retail_game_starts_match_the_reference_and_run() {
     let mut differing: BTreeSet<(String, String)> = BTreeSet::new();
     let mut compared = 0;
     let mut bridged_games = 0;
-    let mut started: BTreeMap<&str, (GameStart, Vec<String>, Vec<String>)> = BTreeMap::new();
+    let mut started: BTreeMap<&str, Started> = BTreeMap::new();
+    let mut moved_units = 0;
     for case in &cases {
         let name = case.name.as_str();
         if std::env::var("GAME_START_ONLY").is_ok_and(|only| only != name) {
@@ -337,21 +374,23 @@ fn retail_game_starts_match_the_reference_and_run() {
                 continue;
             };
             compared += 1;
-            check_report(&game.0, &game.1, &mut failures, name);
+            check_report(&game.game, &game.before_ai, &mut failures, name);
             if let Ok(dir) = std::env::var("GAME_START_DUMP") {
-                for (stage, rows) in [("before_ai", &game.1), ("end", &game.2)] {
+                for stage in ["before_units", "before_ai", "end"] {
+                    let rows = game.rows(stage);
                     let file = format!("{}.{stage}.rs.txt", name.trim_end_matches(".rep"));
                     std::fs::write(PathBuf::from(&dir).join(file), rows.join("\n") + "\n")
                         .expect("write dump");
                 }
-                eprintln!("{name}: {:#?}", game.0.report);
+                eprintln!("{name}: {:#?}", game.game.report);
             }
             started.insert(name, game);
         }
-        let Some((game, before, end)) = started.get(name) else {
+        let Some(run) = started.get(name) else {
             continue;
         };
-        let rows = if case.stage == "end" { end } else { before };
+        let game = &run.game;
+        let rows = run.rows(&case.stage);
         let ours = summarize(rows);
         // The port makes no bridge objects, so on such a map only the players and the
         // other map objects, by content, can be compared.
@@ -368,8 +407,13 @@ fn retail_game_starts_match_the_reference_and_run() {
                 let expected: Vec<&str> = value.split(',').filter(|v| !v.is_empty()).collect();
                 // A mobile unit may have been moved; everything else is exact.
                 for (i, (id, got)) in found.iter().enumerate() {
-                    if expected.get(i) != Some(&got.as_str()) && is_immobile(game, *id) {
+                    if expected.get(i) == Some(&got.as_str()) {
+                        continue;
+                    }
+                    if case.stage == "before_units" || is_immobile(game, *id) {
                         failures.push(format!("{name} {}: position of object {id}", case.stage));
+                    } else if case.stage == "before_ai" {
+                        moved_units += 1;
                     }
                 }
                 continue;
@@ -391,6 +435,10 @@ fn retail_game_starts_match_the_reference_and_run() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     if compared == REPLAY_GAMES + VARIANT_GAMES {
         assert_eq!(bridged_games, BRIDGED_GAMES, "maps with bridges");
+        assert_eq!(
+            moved_units, MOVED_UNITS,
+            "mobile starting units that differ"
+        );
         let known = KNOWN_AT_BOTH
             .iter()
             .flat_map(|&(k, _)| [("before_ai", k), ("end", k)])
@@ -406,8 +454,8 @@ fn retail_game_starts_match_the_reference_and_run() {
 }
 
 /// Runs logic frames on each started game, then drops it.
-fn run_all(started: &mut BTreeMap<&str, (GameStart, Vec<String>, Vec<String>)>) {
-    for (name, (mut game, _, _)) in std::mem::take(started) {
+fn run_all(started: &mut BTreeMap<&str, Started>) {
+    for (name, Started { mut game, .. }) in std::mem::take(started) {
         for _ in 0..FRAMES {
             run_frame(&mut game.sim, &mut NoFrameSeams);
         }

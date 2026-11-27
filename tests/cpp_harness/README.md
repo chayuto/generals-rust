@@ -587,3 +587,10 @@ It returns 0 and zeroes the normal, whatever `getGroundHeight` says. The shipped
   archive members; without them the skirmish players get no teams.
 - **A script with an evaluation delay draws from the logic stream** in
   `ScriptEngine::newMap`, before any map object is made.
+- **Any game can be started this way**: swapping a replay's options string (another map,
+  seed or slot list) and running it from a scratch `HOME` records a start that no replay
+  on disk plays.
+- **`populateRandomStartPosition` keeps its old placement loop under `#if 0`.** A reading
+  with the preprocessor lines filtered out runs both.
+- **A looping port hangs the test binary, not only cargo.** A mutation script that times
+  out must kill the whole process group, or the binary outlives it.
