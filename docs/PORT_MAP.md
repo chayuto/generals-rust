@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`258` implemented, `0` seeded skeletons, `205` unported)
-- **Golden Vector Oracles:** `90` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `88` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `91` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `89` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -378,6 +378,7 @@
 | `docs/golden_vectors/PKT399_WeaponEffects.json` | 1500 | no |
 | `docs/golden_vectors/PlayerState.json` | 1000 | yes |
 | `docs/golden_vectors/S0_FrameDriver.json` | 3200 | no |
+| `docs/golden_vectors/S7_LocomotorMovement.json` | 1200 | no |
 | `docs/golden_vectors/SHROUD_UPDATES.json` | 300 | no |
 | `docs/golden_vectors/WP2_1_Xfer.json` | 1000 | no |
 | `docs/golden_vectors/WP2_2a_GameMath.json` | 2000 | no |
@@ -476,6 +477,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt444_messagestream.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_player_state.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s0_frame_driver.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s7_locomotor_movement.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_shroud_updates.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_sleepy_heap.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_1_economy.rs` | `active` |

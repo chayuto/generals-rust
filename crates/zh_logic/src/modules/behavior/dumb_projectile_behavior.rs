@@ -139,7 +139,7 @@ impl ModuleData for DumbProjectileBehaviorModuleData {
 
 /// `Matrix3D::buildTransformMatrix(pos, dir)`: yaw then pitch from the direction's own
 /// components, without trigonometry.
-fn build_transform_matrix(pos: &Coord3D, dir: &Coord3D) -> Matrix3D {
+pub(crate) fn build_transform_matrix(pos: &Coord3D, dir: &Coord3D) -> Matrix3D {
     let len2 = gm_sqrtf((dir.x * dir.x) + (dir.y * dir.y));
     let sinp = dir.z;
     let cosp = len2;

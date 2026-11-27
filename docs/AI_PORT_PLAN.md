@@ -78,6 +78,8 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `set_locomotor_*`, the unused `LocomotorSet`. Closes `PKT-143` properly.
 - Risks: the most trigonometry in the plan (use `gm_*` only), `min`/`max` macro NaN order, three constructor draws already ported.
 - Seen: a unit given one goal point drives, turns and brakes.
+- **Done.** The movement functions are in `combat/locomotor.rs` and drive the real `PhysicsBehavior` (`golden_s7_locomotor_movement`: 1,200 vectors, every appearance, drives to one goal included). `validMovementTerrain` and `getGroundOrStructureHeight` sit behind `LocomotorSeams`, answered from a tape; `scripts/build_oracle.py` now records such calls (`// oracle-wrap:`).
+  - Left: no caller. S8 owns the `LocomotorSet` and wires `set_locomotor_*`; S3 or S9 implements `LocomotorSeams` on the real pathfinder and partition grid. Gaps: `OPEN_DECISIONS.md`.
 
 ### S8. AI module shell, orders, state machine, idle
 - C++: `AIUpdate.cpp` data, orders and `xfer` (1,540); `AIStateMachine.h`, idle, dead and temporary states (about 700). Two workers.

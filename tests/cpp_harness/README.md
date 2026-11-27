@@ -314,6 +314,20 @@ A `Behavior = X` line in a test template is inert until `X` is registered. Once 
 - **What is needed:** `build_oracle.py` has no include path for the device headers. Set `CPATH=vendor/GeneralsX/GeneralsMD/Code/GameEngineDevice/Include:vendor/GeneralsX/Core/GameEngineDevice/Include`; the libraries already link.
 - **Use:** `gen_pkt272_279_minefield.cpp` runs `BaseHeightMapRenderObjClass::isCliffCell` over a `WorldHeightMap` built in zeroed memory. `TerrainLogic::getHighestLayerForDestination` is not virtual; a real bridge (`addBridgeToLogic` with an unknown template name) gives a second layer.
 
+### Recording the calls reference code makes to a library function
+
+- **What:** a line `// oracle-wrap: <archive under the build dir> <member> <mangled symbol>` in a driver makes `build_oracle.py` relink a copy of that member with the symbol hidden from other objects. The driver then defines the function itself; the reference one is `_oracle_real<symbol>`. The vendor archive is only read.
+- **Limits:** calls from inside the same member still reach the reference function. The function must not be inline.
+- **Use:** `gen_s7_locomotor_movement.cpp` tapes `Pathfinder::validMovementTerrain` and `PartitionManager::getGroundOrStructureHeight`.
+
+### Locomotor movement quirks
+
+- **A walker or climber with a positive `MinSpeed` crashes.** `moveTowardsPositionLegs` and `moveTowardsPositionClimb` call `locoUpdate_moveTowardsAngle`, which for a positive minimum speed moves towards a position again, until the stack overflows. The port recurses the same way.
+- **`moveTowardsPositionTreads` can read an uninitialised `relAngle`:** with a turn pivot offset and a goal within 0.1 of the pivot. The port reads 0.
+- **`Object::calculateHeightAboveTerrain` measures from the object's layer,** not the ground as `Thing`'s does. `golden_s7_locomotor_movement` found `PhysicsBehavior` treating an object on a raised layer as airborne.
+- **Positioning an AI unit reads its height.** `setTriggerAreaFlagsForChangeInPosition` calls `Pathfinder::updatePos`, which asks `isDoingGroundMovement`, which calls `isAboveTerrain` first. The cached height survives a following `setLayer`. `set_object_layer` imitates this; `golden_pkt315_379_357_367_exits` depends on it.
+- **`frame + 2.5f * 30` is a float sum,** so the donut timer rounds above frame 2^24.
+
 ### Minefield quirks
 
 - `MinefieldBehavior::setScootParms` never assigns `m_scootVel.z`, so a second scoot starts with the fall speed of the first.
