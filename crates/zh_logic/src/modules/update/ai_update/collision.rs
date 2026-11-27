@@ -2,11 +2,11 @@
 //! `processCollision`, `blockedBy`, the path priority and the speed a blocked
 //! unit may keep.
 //!
-//! `other` is always the AI of the unit collided with. Not here: formations
-//! (no object has a formation id yet, so the formation slow-down never applies).
+//! `other` is always the AI of the unit collided with.
 
 use super::allies::{ai_of, has_status, is_moving_away_from, order_move_away};
 use super::{ai, is_doing_ground_movement, position_of, AiCall, AiCommandParms, AiCommandType};
+use crate::ai::ai_group::NO_FORMATION_ID;
 use crate::ai::ai_state_machine::state_id;
 use crate::arena::{ModuleContext, ObjectSlot};
 use crate::modules::module::CommandSourceType;
@@ -146,7 +146,11 @@ pub(super) fn calculate_max_blocked_speed(
     if dot <= 0.0 {
         return current;
     }
-    let max = away / dot;
+    let mut max = away / dot;
+    let formation = |sim: &dyn SimApi, slot| sim.object(slot).map_or(NO_FORMATION_ID, |o| o.formation_id);
+    if formation(sim, them) != NO_FORMATION_ID && formation(sim, me) == formation(sim, them) {
+        max *= 0.55;
+    }
     if max > current {
         return current;
     }

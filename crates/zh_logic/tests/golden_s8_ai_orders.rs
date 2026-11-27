@@ -208,6 +208,11 @@ impl AiSeams for Seams {
         coord(&self.take(format!("N,{},{}", owner.0, c3(&pos))))
     }
 
+    /// The reference harness replaced the movement states too.
+    fn replaces_state(&mut self, _owner: ObjectId, _state: StateId) -> Bool {
+        TRUE
+    }
+
     fn state_enter(&mut self, owner: ObjectId, state: StateId) -> StateReturnType {
         state_return(&self.take(format!("E,{},{state}", owner.0)))
     }
@@ -681,6 +686,10 @@ fn ai_orders_match_the_reference() {
 struct OwnerSeams(Arc<Mutex<Vec<ObjectId>>>); // determinism-ok: the harness log
 
 impl AiSeams for OwnerSeams {
+    fn replaces_state(&mut self, _owner: ObjectId, _state: StateId) -> Bool {
+        TRUE
+    }
+
     fn state_xfer(
         &mut self,
         owner: ObjectId,

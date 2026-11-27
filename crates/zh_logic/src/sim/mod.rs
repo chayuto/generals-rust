@@ -2185,6 +2185,12 @@ pub trait SimApi: SimView {
     fn ai_construct(&mut self, owner: ObjectSlot);
     /// `Pathfinder::queueForPath`.
     fn queue_for_path(&mut self, id: ObjectId) -> Bool;
+    /// `Pathfinder::removeGoal` on the pathfind map.
+    fn pathfinder_remove_goal(&mut self, owner: ObjectSlot);
+    /// `Pathfinder::snapClosestGoalPosition` on the pathfind map.
+    fn pathfinder_snap_closest_goal_position(&mut self, owner: ObjectSlot, pos: &mut Coord3D);
+    /// `AIGroup::getSpeed` of the unit's group, for a unit in a formation.
+    fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real>;
     /// `TheAI->pathfinder()` out of the sim, for a search that reads the rest of
     /// the world while it changes the map. Hand it back with
     /// [`SimApi::put_pathfinder`].
@@ -11145,6 +11151,23 @@ impl SimApi for SimContext {
         self.world.pathfinder = Some(pathfinder);
     }
 
+    fn pathfinder_remove_goal(&mut self, owner: ObjectSlot) {
+        self.remove_goal_on_map(owner);
+    }
+
+    fn pathfinder_snap_closest_goal_position(&mut self, owner: ObjectSlot, pos: &mut Coord3D) {
+        self.snap_closest_goal_on_map(owner, pos);
+    }
+
+    fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real> {
+        let object = self.world.objects.get(owner)?;
+        if object.formation_id == crate::ai::ai_group::NO_FORMATION_ID {
+            return None;
+        }
+        let group = object.ai_group?;
+        Some(crate::ai::ai_group::speed(self, group))
+    }
+
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         match self.world.pathfinder.as_deref_mut() {
             Some(pathfinder) => Bool::from(pathfinder.queue_for_path(id)),
@@ -12222,6 +12245,15 @@ impl SimApi for MockSimApi {
         self.ctx.put_pathfinder(pathfinder);
     }
 
+    fn pathfinder_remove_goal(&mut self, owner: ObjectSlot) {
+        self.ctx.pathfinder_remove_goal(owner);
+    }
+    fn pathfinder_snap_closest_goal_position(&mut self, owner: ObjectSlot, pos: &mut Coord3D) {
+        self.ctx.pathfinder_snap_closest_goal_position(owner, pos);
+    }
+    fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real> {
+        self.ctx.ai_formation_speed(owner)
+    }
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         self.ctx.queue_for_path(id)
     }

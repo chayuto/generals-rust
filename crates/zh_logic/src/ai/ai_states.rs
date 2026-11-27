@@ -1,11 +1,13 @@
-//! `PKT-429`: `AIStates.cpp`, so far `AIIdleState`, `AIDeadState` and
-//! `AIBusyState`. Packet doc: `packets/phase6/PKT-429_AIStates.md`. Golden test:
+//! `PKT-429`: `AIStates.cpp`, so far `AIIdleState`, `AIDeadState`, `AIBusyState`
+//! and the movement states ([`movement`]). Packet doc: `packets/phase6/PKT-429_AIStates.md`. Golden test:
 //! `tests/golden_s8_ai_orders.rs`.
 //!
-//! Every other state of `AIStateMachine` (movement S10, the rest of the non-combat
-//! states S11, attack S14, guard S18) is answered by [`crate::ai::seams::AiSeams`].
+//! Every other state of `AIStateMachine` (the rest of the non-combat states S11,
+//! attack S14, guard S18) is answered by [`crate::ai::seams::AiSeams`].
 //! A port adds its arm to the three functions here and to
 //! `AiStateMachine::xfer_state`.
+
+pub mod movement;
 
 use crate::ai::ai_state_machine::{self as machine, state_id};
 use crate::ai::seams::ai_seams;
@@ -74,6 +76,7 @@ pub fn on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateR
         }
         state_id::DEAD => dead_on_enter(sim, ctx),
         state_id::BUSY => StateReturnType::Continue,
+        _ if is_ported_movement(sim, ctx, id) => movement::on_enter(sim, ctx, id),
         _ => ai_seams(sim).state_enter(ctx.owner_id, id),
     }
 }
@@ -83,6 +86,7 @@ pub fn update(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateRet
         state_id::IDLE => idle_update(sim, ctx),
         state_id::DEAD => dead_update(sim, ctx),
         state_id::BUSY => StateReturnType::Continue,
+        _ if is_ported_movement(sim, ctx, id) => movement::update(sim, ctx, id),
         _ => ai_seams(sim).state_update(ctx.owner_id, id),
     }
 }
@@ -93,8 +97,14 @@ pub fn on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId, status: St
         state_id::DEAD => {
             sim.clear_model_condition_state(ctx.owner_slot, ModelConditionFlagType::Dying);
         }
+        _ if is_ported_movement(sim, ctx, id) => movement::on_exit(sim, ctx, id),
         _ => ai_seams(sim).state_exit(ctx.owner_id, id, status),
     }
+}
+
+/// A movement state that the seams do not answer in its stead.
+fn is_ported_movement(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
+    movement::is_movement_state(id) && ai_seams(sim).replaces_state(ctx.owner_id, id) == FALSE
 }
 
 /// `AIIdleState::doInitIdleState`.

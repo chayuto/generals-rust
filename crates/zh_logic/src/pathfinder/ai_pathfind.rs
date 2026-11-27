@@ -312,6 +312,19 @@ impl Pathfinder {
             .map(|i| self.map.grid().cell(i).cell_type())
     }
 
+    /// The type of a cell and whether it is pinched.
+    pub fn cell_type_and_pinched(
+        &self,
+        layer: PathfindLayerEnum,
+        x: Int,
+        y: Int,
+    ) -> Option<(CellType, bool)> {
+        self.get_cell(layer, x, y).map(|i| {
+            let cell = self.map.grid().cell(i);
+            (cell.cell_type(), cell.pinched())
+        })
+    }
+
     // ---- wall pieces -----------------------------------------------------
 
     /// `addWallPiece`.

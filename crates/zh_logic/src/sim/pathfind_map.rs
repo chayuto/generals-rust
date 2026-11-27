@@ -8,10 +8,11 @@
 //! `crates/zh_logic/tests/golden_s4_reservations.rs`. How the sim feeds them is
 //! tested in `crates/zh_logic/tests/pathfind_reservations_sim.rs`.
 
-use zh_common::math::{gm_sqrtf, Coord3D, ICoord2D, Region3D};
-use zh_common::types::{ObjectId, Real, Relationship, FALSE};
+use zh_common::math::{Coord3D, ICoord2D, Region3D};
+use zh_common::types::{Int, ObjectId, Real, Relationship, FALSE};
 
-use super::{SimApi, SimContext, SimView};
+use super::{partition_object, SimApi, SimContext, SimView};
+use crate::spatial::partition_query::{DistanceCalculationType, QueryCenter};
 use crate::arena::ObjectSlot;
 use crate::combat::damage::{DamageInfo, HUGE_DAMAGE_AMOUNT};
 use crate::combat::locomotor::LocomotorAppearance;
@@ -251,27 +252,19 @@ impl TallBuildings for SimContext {
         })
     }
 
-    /// The reference asks the partition grid; this walks the objects, so ties
-    /// may go to another building.
+    /// `getClosestObject` from a position by bounding sphere: every building it
+    /// reaches into is at distance zero, and the first one visited wins.
     fn closest_tall_building(&self, pos: &Coord3D, radius: Real) -> Option<TallBuilding> {
-        let mut best: Option<(Real, TallBuilding)> = None;
-        for slot in self.world.objects.world_iter() {
-            let Some(building) = self
-                .world
-                .objects
-                .id_of(slot)
-                .and_then(|id| self.tall_building(id))
-            else {
-                continue;
-            };
-            let dx = building.position.x - pos.x;
-            let dy = building.position.y - pos.y;
-            let distance = gm_sqrtf(dx * dx + dy * dy) - building.radius;
-            if distance <= radius && best.map_or(true, |(d, _)| distance < d) {
-                best = Some((distance, building));
-            }
-        }
-        best.map(|(_, building)| building)
+        let objects = &self.world.objects;
+        let factory = &self.rules.thing_factory;
+        let found = self.world.partition.get_closest_object(
+            QueryCenter::Position(*pos),
+            radius,
+            DistanceCalculationType::FromBoundingSphere2d,
+            &|id| partition_object(objects, factory, id),
+            &mut |id| self.tall_building(id).is_some(),
+        );
+        found.id.and_then(|id| self.tall_building(id))
     }
 }
 
@@ -288,6 +281,28 @@ impl SimContext {
                 .map_or(true, |o| o.ai_slot.is_none())
         {
             return;
+        }
+        // `setTriggerAreaFlagsForChangeInPosition` returns early for these and
+        // while the position truncates to the same integers.
+        if self.object_is_kind_of(slot, KindOfType::Projectile) != FALSE
+            || self.object_is_kind_of(slot, KindOfType::Inert) != FALSE
+        {
+            return;
+        }
+        let Some(pos) = self
+            .world
+            .objects
+            .get(slot)
+            .map(|o| *o.thing.get_position())
+        else {
+            return;
+        };
+        let whole = (pos.x as Int, pos.y as Int);
+        if let Some(ai) = self.resident_ai(slot) {
+            if ai.whole_position == whole {
+                return;
+            }
+            ai.whole_position = whole;
         }
         self.update_pathfind_position(slot);
     }
@@ -425,6 +440,23 @@ impl SimContext {
         self.with_goal_mover(slot, |pf, mover| {
             pf.update_goal(mover, pos, layer, &mut |_| false)
         });
+    }
+
+    /// `Pathfinder::removeGoal`.
+    pub(super) fn remove_goal_on_map(&mut self, slot: ObjectSlot) {
+        self.with_goal_mover(slot, Pathfinder::remove_goal);
+    }
+
+    /// `Pathfinder::snapClosestGoalPosition`.
+    pub(super) fn snap_closest_goal_on_map(&mut self, slot: ObjectSlot, pos: &mut Coord3D) {
+        let Some(agent) = self.path_agent(slot) else {
+            return;
+        };
+        let Some(pathfinder) = self.world.pathfinder.take() else {
+            return;
+        };
+        pathfinder.snap_closest_goal_position(self.terrain.as_ref(), self, &agent, pos);
+        self.world.pathfinder = Some(pathfinder);
     }
 
     /// `Pathfinder::updatePos` for the object where it stands.

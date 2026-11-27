@@ -132,6 +132,7 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Oracle: Trace per order.
 - Seams: `ai_move_to_position`, `ai_move_to_object`, `ai_follow_path`, `ai_follow_exit_production_path` (dispatch `exit_path_orders`).
 - Seen: **first real play test**: order a move, the unit gets there; produced units leave the factory.
+- **Done for the base class.** The states are `ai/ai_states/movement.rs`; `golden_s10_movement_states` traces real orders on 56 scenes (state, path, position bits, save bytes, CRC, RNG seed), and `path_follow_sim` takes a unit to its goal by an order alone. A harness whose reference replaces these states says so with `AiSeams::replaces_state`. Gaps: `OPEN_DECISIONS.md`.
 
 ### S11. Other non-combat states
 - C++: waypoint follow, wander, panic, repulsors, dock, enter, exit, evacuate, face, wait, rappel, crate pickup (about 1,600). Two workers.

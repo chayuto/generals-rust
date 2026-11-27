@@ -1546,6 +1546,15 @@ impl SimApi for EngineSim<'_> {
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         not_wired("queue_for_path")
     }
+    fn pathfinder_remove_goal(&mut self, owner: ObjectSlot) {
+        not_wired("pathfinder_remove_goal")
+    }
+    fn pathfinder_snap_closest_goal_position(&mut self, owner: ObjectSlot, pos: &mut Coord3D) {
+        not_wired("pathfinder_snap_closest_goal_position")
+    }
+    fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real> {
+        not_wired("ai_formation_speed")
+    }
     fn take_pathfinder(&mut self) -> Option<Box<zh_logic::pathfinder::Pathfinder>> {
         not_wired("take_pathfinder")
     }

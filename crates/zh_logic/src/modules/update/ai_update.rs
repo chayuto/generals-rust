@@ -417,6 +417,9 @@ pub struct AiUpdate {
     pub is_in_update: Bool,
     /// `m_retryPath`: the last path only came close.
     pub retry_path: Bool,
+    /// The object's `m_iPos`, kept here for the one reader the port has: the
+    /// pathfind map learns of a move only when it changes.
+    pub whole_position: (Int, Int),
 
     /// What a class derived from `AIUpdateInterface` adds.
     pub derived: DerivedAi,
@@ -501,6 +504,7 @@ impl AiUpdate {
             is_blocked_and_stuck: FALSE,
             is_moving_flag: FALSE,
             is_in_update: FALSE,
+            whole_position: (0, 0),
             retry_path: FALSE,
             derived: DerivedAi::Base,
         }
@@ -523,7 +527,7 @@ impl AiUpdate {
             .and_then(|i| self.locomotor_set.locomotors().get(i))
     }
 
-    fn cur_locomotor_mut(&mut self) -> Option<&mut Locomotor> {
+    pub(crate) fn cur_locomotor_mut(&mut self) -> Option<&mut Locomotor> {
         let index = self.cur_locomotor?;
         self.locomotor_set.get_mut(index)
     }
@@ -616,7 +620,8 @@ impl AiUpdate {
                 | state_id::ATTACK_OBJECT
                 | state_id::FORCE_ATTACK_OBJECT
                 | state_id::ATTACK_AND_FOLLOW_OBJECT
-        )
+        ) || self.machine.current_state_id() == state_id::ATTACK_MOVE_TO
+            && self.machine.moves.attack_move.sub.is_in_attack_state()
     }
 
     /// `setLocomotorGoalPositionExplicit`.
@@ -2171,6 +2176,7 @@ fn on_object_created(sim: &mut dyn SimApi, ctx: ModuleContext) {
         idle.inited = TRUE;
         idle.initial_sleep_offset = offset;
     }
+    ai(sim, ctx).machine.moves.init_attack_move_machine();
     machine::init_default_state(sim, ctx);
     if let Some(o) = sim.object_mut(ctx.owner_slot) {
         o.ai_state_machine_ready = TRUE;

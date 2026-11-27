@@ -9,6 +9,7 @@
 //! data one statement at a time, so a state can order its own unit and the order
 //! reaches the machine while the state is still running.
 
+use crate::ai::ai_states::movement::{self, MoveStates};
 use crate::ai::ai_states::{self, IdleState};
 use crate::ai::seams::SeamsGuard;
 use crate::arena::ModuleContext;
@@ -113,6 +114,8 @@ pub struct AiStateMachine {
     pub idle: IdleState,
     /// The idle states of the three attack-move sub machines.
     pub attack_move_idle: [IdleState; 3],
+    /// The movement state objects.
+    pub moves: MoveStates,
 }
 
 impl Default for AiStateMachine {
@@ -133,6 +136,7 @@ impl Default for AiStateMachine {
             temporary_frame_end: 0,
             idle: IdleState::new(TRUE),
             attack_move_idle: [IdleState::new(FALSE); 3],
+            moves: MoveStates::default(),
         }
     }
 }
@@ -270,6 +274,10 @@ impl AiStateMachine {
             state_id::DEAD | state_id::BUSY => {
                 let mut version: XferVersion = 1;
                 xfer.xfer_version(&mut version, 1)
+            }
+            _ if movement::is_movement_state(id) && seams.replaces_state(owner, id) == FALSE => {
+                self.moves
+                    .xfer(id, &mut self.attack_move_idle[0], xfer, owner, seams)
             }
             _ => seams.state_xfer(owner, id, xfer),
         }

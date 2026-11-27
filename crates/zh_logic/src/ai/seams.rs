@@ -217,6 +217,11 @@ pub trait AiSeams: Send {
 
     /// `onEnter` of a state that is not ported. Without it the unit stays in the
     /// state and does nothing.
+    /// Whether the seams answer a state that is ported (`ai_states::movement`).
+    /// For harnesses whose reference replaced the state too.
+    fn replaces_state(&mut self, _owner: ObjectId, _state: StateId) -> Bool {
+        FALSE
+    }
     fn state_enter(&mut self, _owner: ObjectId, _state: StateId) -> StateReturnType {
         StateReturnType::Continue
     }
@@ -432,6 +437,7 @@ forward! {
     safe_path(owner: ObjectId, from: &Coord3D, repulsor1: &Coord3D, repulsor2: &Coord3D, radius: Real) -> Option<Path>;
     move_away_path(owner: ObjectId, unit: ObjectId, unit_path: &Path, second: Option<ObjectId>, second_path: Option<&Path>) -> Option<Path>;
     attack_path(owner: ObjectId, victim: Option<ObjectId>, victim_pos: &Coord3D) -> Option<Option<Path>>;
+    replaces_state(owner: ObjectId, state: StateId) -> Bool;
     state_enter(owner: ObjectId, state: StateId) -> StateReturnType;
     state_update(owner: ObjectId, state: StateId) -> StateReturnType;
     state_exit(owner: ObjectId, state: StateId, status: StateExitType);

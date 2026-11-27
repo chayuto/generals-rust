@@ -1,13 +1,11 @@
-//! A unit ordered to move on a pathfind map asks for a path and drives it
-//! (slice S9; held to the reference by `golden_s9_path_follow.rs`).
-//!
-//! The move states are not ported (S10): the order enters the `MOVE_TO` state,
-//! which does nothing yet, so [`enter_move_state`] and the arrival check make
-//! the calls that state would make.
+//! A move order alone takes a unit to its goal on a loaded pathfind map: the
+//! movement states ask for the path, drive it and end the move (slices S9 and
+//! S10; held to the reference by `golden_s9_path_follow.rs` and
+//! `golden_s10_movement_states.rs`).
 
 use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::{Coord3D, Matrix3D, Region3D};
-use zh_common::types::{Bool, Real, TeamId, FALSE, TRUE};
+use zh_common::types::{Bool, Real, TeamId, FALSE};
 use zh_logic::ai::ai_state_machine::state_id;
 use zh_logic::arena::{ModuleContext, ModuleSlot, ObjectSlot};
 use zh_logic::combat::locomotor::LocomotorTemplate;
@@ -95,17 +93,14 @@ fn ai(sim: &mut SimContext, ms: ModuleSlot) -> &mut AiUpdate {
         .expect("AIUpdate")
 }
 
-/// `AIInternalMoveToState::onEnter`, as far as a ground unit needs it.
-fn enter_move_state(sim: &mut SimContext, ms: ModuleSlot, ctx: ModuleContext) {
-    let goal = ai(sim, ms).machine.goal_position;
-    ai_update::request_path(sim, ctx, &goal, TRUE);
-    let unit = ai(sim, ms);
-    unit.starting_move();
-    unit.set_goal_position_on_path();
+fn order(sim: &mut SimContext, ctx: ModuleContext, cmd: AiCommandType, points: &[Coord3D]) {
+    let mut parms = AiCommandParms::new(cmd, CommandSourceType::FromPlayer);
+    parms.pos = points[0];
+    parms.coords = points.to_vec();
+    ai_update::execute(sim, ctx, &AiCall::Command(parms));
 }
 
-#[test]
-fn a_move_order_gets_a_path_around_the_wall_and_drives_it() {
+fn settled() -> (SimContext, ObjectSlot, ModuleSlot, ModuleContext) {
     let (mut sim, unit) = world();
     let ms = sim.object(unit).and_then(|o| o.ai_slot).expect("AI");
     let ctx = sim.world.modules.meta(ms).context(ms);
@@ -113,17 +108,50 @@ fn a_move_order_gets_a_path_around_the_wall_and_drives_it() {
     for _ in 0..3 {
         run_frame(&mut sim, &mut NoFrameSeams);
     }
+    (sim, unit, ms, ctx)
+}
+
+/// Steps frames until the unit's machine is idle again; where it was after
+/// each of them.
+fn run_to_idle(sim: &mut SimContext, ms: ModuleSlot, unit: ObjectSlot) -> Vec<Coord3D> {
+    let mut trail = Vec::new();
+    for _ in 0..900 {
+        run_frame(sim, &mut NoFrameSeams);
+        let pos = *sim.object(unit).expect("unit").thing.get_position();
+        assert!(
+            Wall.is_cliff_cell(pos.x, pos.y) == FALSE,
+            "walked into the wall at {pos:?}"
+        );
+        trail.push(pos);
+        if ai(sim, ms).machine.current_state_id() == state_id::IDLE {
+            return trail;
+        }
+    }
+    panic!("still moving at {:?}", trail.last());
+}
+
+fn rests_at(sim: &mut SimContext, ms: ModuleSlot, unit: ObjectSlot, goal: Coord3D) {
+    for _ in 0..30 {
+        run_frame(sim, &mut NoFrameSeams);
+    }
+    let pos = *sim.object(unit).expect("unit").thing.get_position();
+    assert!(
+        (pos.x - goal.x).abs() < 6.0 && (pos.y - goal.y).abs() < 6.0,
+        "rests at {pos:?}"
+    );
+    assert!(ai(sim, ms).is_moving() == FALSE);
+    assert!(ai(sim, ms).waiting_for_path == FALSE);
+}
+
+#[test]
+fn a_move_order_gets_a_path_around_the_wall_and_drives_it() {
+    let (mut sim, unit, ms, ctx) = settled();
     let goal = Coord3D::new(185.0, 45.0, 0.0);
-    let mut parms =
-        AiCommandParms::new(AiCommandType::MoveToPosition, CommandSourceType::FromPlayer);
-    parms.pos = goal;
-    ai_update::execute(&mut sim, ctx, &AiCall::Command(parms));
+    order(&mut sim, ctx, AiCommandType::MoveToPosition, &[goal]);
     assert_eq!(
         ai(&mut sim, ms).machine.current_state_id(),
         state_id::MOVE_TO
     );
-
-    enter_move_state(&mut sim, ms, ctx);
     assert!(ai(&mut sim, ms).waiting_for_path != FALSE);
     run_frame(&mut sim, &mut NoFrameSeams);
 
@@ -136,34 +164,41 @@ fn a_move_order_gets_a_path_around_the_wall_and_drives_it() {
     }
     assert!(highest >= 145.0, "the path goes round the wall: {highest}");
 
-    let mut furthest_y: Real = 0.0;
-    let mut arrived = false;
-    for _ in 0..600 {
-        run_frame(&mut sim, &mut NoFrameSeams);
-        let pos = *sim.object(unit).expect("unit").thing.get_position();
-        assert!(
-            Wall.is_cliff_cell(pos.x, pos.y) == FALSE,
-            "walked into the wall at {pos:?}"
-        );
-        furthest_y = furthest_y.max(pos.y);
-        if ai_update::locomotor_distance_to_goal(&mut sim, ctx) < 2.0 {
-            ai(&mut sim, ms).ending_move();
-            arrived = true;
-            break;
-        }
-    }
-    let pos = *sim.object(unit).expect("unit").thing.get_position();
-    assert!(arrived, "still at {pos:?}");
-    assert!(furthest_y >= 140.0, "went round the wall: {furthest_y}");
-    for _ in 0..30 {
-        run_frame(&mut sim, &mut NoFrameSeams);
-    }
-    let pos = *sim.object(unit).expect("unit").thing.get_position();
-    assert!(
-        (pos.x - goal.x).abs() < 6.0 && (pos.y - goal.y).abs() < 6.0,
-        "rests at {pos:?}"
-    );
-    assert!(ai(&mut sim, ms).path.is_none());
+    let trail = run_to_idle(&mut sim, ms, unit);
+    assert!(trail.iter().any(|p| p.y >= 140.0), "went round the wall");
+    rests_at(&mut sim, ms, unit, goal);
     let cell = ai(&mut sim, ms).pathfind_goal_cell;
     assert_eq!((cell.x, cell.y), (18, 4));
+}
+
+#[test]
+fn an_attack_move_order_without_enemies_goes_the_same_way() {
+    let (mut sim, unit, ms, ctx) = settled();
+    let goal = Coord3D::new(185.0, 45.0, 0.0);
+    order(&mut sim, ctx, AiCommandType::AttackMoveToPosition, &[goal]);
+    assert_eq!(
+        ai(&mut sim, ms).machine.current_state_id(),
+        state_id::ATTACK_MOVE_TO
+    );
+    run_to_idle(&mut sim, ms, unit);
+    rests_at(&mut sim, ms, unit, goal);
+}
+
+#[test]
+fn a_followed_path_visits_each_point() {
+    let (mut sim, unit, ms, ctx) = settled();
+    let points = [
+        Coord3D::new(45.0, 185.0, 0.0),
+        Coord3D::new(185.0, 185.0, 0.0),
+        Coord3D::new(185.0, 45.0, 0.0),
+    ];
+    order(&mut sim, ctx, AiCommandType::FollowPath, &points);
+    let trail = run_to_idle(&mut sim, ms, unit);
+    for point in &points {
+        let passed = trail
+            .iter()
+            .any(|p| (p.x - point.x).abs() < 15.0 && (p.y - point.y).abs() < 15.0);
+        assert!(passed, "never near {point:?}");
+    }
+    rests_at(&mut sim, ms, unit, points[2]);
 }
