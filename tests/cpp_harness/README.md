@@ -142,7 +142,7 @@ A small object normally spans at most two cells per axis, and its cell array has
 ### A weapon's `FireSound` is not played by the logic
 
 - **What happens:** firing a weapon does not reach `TheAudio`, so an audio spy sees nothing. `gen_pkt348_physics.cpp` counts fires through `WeaponTemplate::m_historicDamage` (`HistoricBonusCount` set far out of reach).
-- **Related:** above frame 2^24, `frame + reloadTime` is computed in `float` and can round up, so a freshly loaded temporary weapon refuses to fire. The Rust `fire_weapon_template` stand-in does not model this, and that harness keeps its frames below 2^24.
+- **Related:** above frame 2^24, `frame + reloadTime` is computed in `float` and can round up, so a freshly loaded temporary weapon refuses to fire. The port refuses too (`create_and_fire_temp_weapon`); that harness keeps its frames below 2^24.
 
 ### Host `std::cos` in a harness differs between optimisation levels
 

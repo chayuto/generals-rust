@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`258` implemented, `0` seeded skeletons, `205` unported)
-- **Golden Vector Oracles:** `89` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `87` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `90` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `88` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -305,6 +305,7 @@
 | `zh_ffi` | `crates/zh_ffi/src/test_engine.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/gamelogic/frame.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/object/weapon_effects.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/command_button.rs` | `implemented` |
@@ -374,6 +375,7 @@
 | `docs/golden_vectors/PKT368_314_Ability.json` | 1300 | no |
 | `docs/golden_vectors/PKT374_373_Stealth.json` | 1600 | no |
 | `docs/golden_vectors/PKT383_377_305_Topple.json` | 1800 | no |
+| `docs/golden_vectors/PKT399_WeaponEffects.json` | 1500 | no |
 | `docs/golden_vectors/PlayerState.json` | 1000 | yes |
 | `docs/golden_vectors/S0_FrameDriver.json` | 3200 | no |
 | `docs/golden_vectors/SHROUD_UPDATES.json` | 300 | no |
@@ -465,6 +467,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt388.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt398_thing_template.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt399_weapon.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_pkt399_weapon_effects.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt406_radar.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt413_pathfind_cell.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt418_zone_manager.rs` | `active` |

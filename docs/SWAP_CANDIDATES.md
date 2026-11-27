@@ -19,7 +19,9 @@ modules (**other**).
 |---|---|---|---|
 | `object` | 79 | 12605 | 23 |
 | `rules` | 56 | 10188 | 1 |
-| `object_mut` | 26 | 4801 | 1 |
+| `object_mut` | 37 | 7434 | 1 |
+| `player_battle_plans` | 20 | 4844 | 0 |
+| `weapon_store_state` | 20 | 4844 | 0 |
 | `cave_tracker` | 12 | 1952 | 0 |
 | `cave_tracker_mut` | 12 | 1952 | 0 |
 | `tunnel_tracker` | 12 | 1952 | 0 |
@@ -51,27 +53,27 @@ modules (**other**).
 
 | Module | Instances | Replays | Methods | Services | Other | Data methods |
 |---|---|---|---|---|---|---|
-| `SlowDeathBehavior` | 1429 | 6 | 37 | terrain | 1 | object, rules |
-| `DestroyDie` | 1016 | 6 | 116 | terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
+| `SlowDeathBehavior` | 1429 | 6 | 64 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
+| `DestroyDie` | 1016 | 6 | 134 | client, terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
 | `FXListDie` | 842 | 6 | 7 | - | 1 | object, rules |
-| `OCLSpecialPower` | 774 | 6 | 37 | - | 1 | object, rules |
+| `OCLSpecialPower` | 774 | 6 | 71 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `ActiveBody` | 754 | 6 | 20 | - | 0 | object, object_mut, rules |
 | `FlammableUpdate` | 705 | 6 | 12 | - | 0 | object |
 | `TransitionDamageFX` | 635 | 6 | 5 | - | 0 | object |
 | `StealthUpdate` | 610 | 6 | 39 | - | 0 | object, rules |
 | `AutoHealBehavior` | 449 | 6 | 16 | - | 1 | object, rules |
-| `CreateObjectDie` | 404 | 6 | 116 | terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
-| `PhysicsBehavior` | 379 | 6 | 34 | terrain | 0 | object, object_mut, rules |
+| `CreateObjectDie` | 404 | 6 | 134 | client, terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
+| `PhysicsBehavior` | 379 | 6 | 65 | client, terrain | 0 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `ProductionUpdate` | 347 | 6 | 33 | - | 0 | object, object_mut, rules |
 | `InactiveBody` | 346 | 6 | 2 | - | 0 | object_mut |
 | `StructureBody` | 327 | 6 | 20 | - | 0 | object, object_mut, rules |
 | `ImmortalBody` | 224 | 6 | 20 | - | 0 | object, object_mut, rules |
 | `SupplyWarehouseDockUpdate` | 224 | 6 | 16 | - | 1 | object, rules |
 | `CommandSetUpgrade` | 203 | 6 | 5 | - | 0 | object, rules |
-| `KeepObjectDie` | 188 | 6 | 116 | terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
+| `KeepObjectDie` | 188 | 6 | 134 | client, terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
 | `ToppleUpdate` | 186 | 4 | 21 | - | 0 | object, rules |
 | `TechBuildingBehavior` | 178 | 6 | 11 | - | 0 | object |
-| `SpecialAbility` | 160 | 6 | 37 | - | 1 | object, rules |
+| `SpecialAbility` | 160 | 6 | 71 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `AutoDepositUpdate` | 156 | 6 | 14 | - | 0 | object |
 | `PoisonedBehavior` | 142 | 6 | 6 | - | 0 | object |
 | `SquishCollide` | 141 | 6 | 10 | - | 0 | object, object_mut, rules |
@@ -81,23 +83,23 @@ modules (**other**).
 | `UnpauseSpecialPowerUpgrade` | 113 | 6 | 2 | - | 0 | rules |
 | `CommandButtonHuntUpdate` | 108 | 6 | 31 | - | 0 | object, rules |
 | `PreorderCreate` | 106 | 6 | 4 | - | 0 | object |
-| `CreateCrateDie` | 105 | 6 | 116 | terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
-| `FireWeaponWhenDeadBehavior` | 96 | 6 | 15 | terrain | 1 | object, rules |
+| `CreateCrateDie` | 105 | 6 | 134 | client, terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
+| `FireWeaponWhenDeadBehavior` | 96 | 6 | 47 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `BaseRegenerateUpdate` | 92 | 5 | 8 | - | 0 | object, rules |
-| `CashBountyPower` | 87 | 4 | 37 | - | 1 | object, rules |
+| `CashBountyPower` | 87 | 4 | 71 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `RadarUpgrade` | 80 | 6 | 4 | - | 0 | object |
 | `GrantUpgradeCreate` | 79 | 6 | 2 | - | 0 | object |
 | `GarrisonContain` | 78 | 6 | 88 | terrain | 8 | cave_tracker, cave_tracker_mut, object, rules, tunnel_tracker, tunnel_tracker_mut |
 | `VeterancyGainCreate` | 69 | 3 | 3 | - | 0 | object |
 | `SpectreGunshipDeploymentUpdate` | 64 | 4 | 23 | terrain | 1 | object, object_mut, rules |
 | `FireSpreadUpdate` | 54 | 2 | 8 | - | 0 | object |
-| `FireWeaponCollide` | 54 | 2 | 84 | terrain | 3 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
+| `FireWeaponCollide` | 54 | 2 | 106 | client, terrain | 3 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
 | `HighlanderBody` | 54 | 2 | 20 | - | 0 | object, object_mut, rules |
 | `MinefieldBehavior` | 53 | 5 | 26 | terrain | 0 | object, rules |
 | `HordeUpdate` | 50 | 3 | 20 | client | 0 | object, rules |
-| `RebuildHoleExposeDie` | 49 | 4 | 116 | terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
+| `RebuildHoleExposeDie` | 49 | 4 | 134 | client, terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
 | `ObjectCreationUpgrade` | 42 | 3 | 2 | - | 0 | object |
-| `CashHackSpecialPower` | 41 | 6 | 37 | - | 1 | object, rules |
+| `CashHackSpecialPower` | 41 | 6 | 71 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `GrantScienceUpgrade` | 36 | 4 | 3 | - | 0 | object, rules |
 | `TransportContain` | 29 | 4 | 94 | terrain | 8 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
 | `OverchargeBehavior` | 25 | 6 | 11 | - | 0 | object |
@@ -105,16 +107,16 @@ modules (**other**).
 | `SpawnBehavior` | 23 | 6 | 38 | - | 0 | object, object_mut |
 | `AutoFindHealingUpdate` | 20 | 4 | 11 | - | 0 | object |
 | `HealContain` | 20 | 6 | 82 | terrain | 8 | cave_tracker, cave_tracker_mut, object, rules, tunnel_tracker, tunnel_tracker_mut |
-| `HelicopterSlowDeathBehavior` | 18 | 4 | 50 | terrain | 1 | object, rules |
+| `HelicopterSlowDeathBehavior` | 18 | 4 | 76 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `SupplyCenterDockUpdate` | 18 | 6 | 19 | terrain | 1 | object, rules |
 | `SupplyCenterProductionExitUpdate` | 18 | 6 | 16 | terrain | 0 | object |
-| `DumbProjectileBehavior` | 14 | 1 | 43 | terrain | 0 | object, object_mut, rules |
+| `DumbProjectileBehavior` | 14 | 1 | 66 | client, terrain | 0 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `SpyVisionUpdate` | 13 | 3 | 9 | - | 0 | object, rules |
 | `EjectPilotDie` | 12 | 3 | 4 | - | 0 | object |
-| `FireWeaponWhenDamagedBehavior` | 12 | 2 | 17 | terrain | 1 | object, rules |
+| `FireWeaponWhenDamagedBehavior` | 12 | 2 | 49 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `MoneyCrateCollide` | 12 | 2 | 5 | - | 1 | object, rules |
 | `SlavedUpdate` | 12 | 3 | 36 | client, terrain | 0 | object |
-| `StructureToppleUpdate` | 12 | 2 | 29 | terrain | 0 | object, rules |
+| `StructureToppleUpdate` | 12 | 2 | 58 | client, terrain | 0 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `TensileFormationUpdate` | 12 | 2 | 20 | terrain | 0 | object |
 | `QueueProductionExitUpdate` | 11 | 6 | 23 | terrain | 0 | object |
 | `PowerPlantUpgrade` | 10 | 4 | 6 | - | 0 | object, rules |
@@ -125,10 +127,10 @@ modules (**other**).
 | `ParkingPlaceBehavior` | 4 | 3 | 26 | - | 0 | object, object_mut, rules |
 | `SpawnPointProductionExitUpdate` | 4 | 3 | 16 | - | 0 | object |
 | `MissileLauncherBuildingUpdate` | 3 | 2 | 11 | - | 0 | object, rules |
-| `PointDefenseLaserUpdate` | 3 | 1 | 17 | terrain | 0 | object, rules |
-| `CrushDie` | 2 | 2 | 116 | terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
+| `PointDefenseLaserUpdate` | 3 | 1 | 47 | client, terrain | 0 | object, object_mut, player_battle_plans, rules, weapon_store_state |
+| `CrushDie` | 2 | 2 | 134 | client, terrain | 4 | cave_tracker, cave_tracker_mut, object, object_mut, player_battle_plans, rules, tunnel_tracker, tunnel_tracker_mut, weapon_store_state |
 | `PropagandaTowerBehavior` | 2 | 2 | 21 | - | 0 | object, rules |
 | `BattlePlanUpdate` | 1 | 1 | 34 | - | 0 | object, player_battle_plans_mut, rules |
 | `OCLUpdate` | 1 | 1 | 11 | terrain | 0 | object |
-| `SpyVisionSpecialPower` | 1 | 1 | 37 | - | 1 | object, rules |
+| `SpyVisionSpecialPower` | 1 | 1 | 71 | client, terrain | 1 | object, object_mut, player_battle_plans, rules, weapon_store_state |
 | `TunnelContain` | 1 | 1 | 86 | terrain | 8 | cave_tracker, cave_tracker_mut, object, object_mut, rules, tunnel_tracker, tunnel_tracker_mut |
