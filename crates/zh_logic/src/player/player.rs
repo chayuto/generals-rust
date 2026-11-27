@@ -26,7 +26,7 @@ use crate::player::seams::{
 use crate::player::team::{
     flag, xfer_team_id, RelationMap, TeamFactory, TeamPrototypeId, MAX_GENERIC_SCRIPTS,
 };
-use crate::rules::kind_of::{KindOfMaskType, KINDOF_COUNT, KINDOF_NAMES};
+use crate::rules::kind_of::{KindOfMaskType, KINDOF_NAMES};
 use crate::rules::player_template::{PlayerTemplate, ProductionChangeMap, ProductionVeterancyMap};
 use crate::rules::science::{ScienceType, ScienceVec, SCIENCE_INVALID};
 use crate::rules::upgrade::UpgradeMaskType;
@@ -258,31 +258,8 @@ fn xfer_battle_plan_values(
     xfer.xfer_int(&mut bonuses.bombardment)?;
     xfer.xfer_int(&mut bonuses.hold_the_line)?;
     xfer.xfer_int(&mut bonuses.search_and_destroy)?;
-    xfer_kind_of(xfer, &mut bonuses.valid_kind_of)?;
-    xfer_kind_of(xfer, &mut bonuses.invalid_kind_of)
-}
-
-/// `BitFlags<KINDOF_COUNT>::xfer`. In CRC mode the reference hashes the whole
-/// `std::bitset` (64-bit words), or in retail CRC builds `sizeof(this)`, a
-/// pointer's worth of it.
-fn xfer_kind_of(xfer: &mut dyn Xfer, mask: &mut KindOfMaskType) -> Result<(), XferError> {
-    if xfer.mode() != XferMode::Crc {
-        return mask.xfer_named(xfer, &KINDOF_NAMES);
-    }
-    let mut version: XferVersion = 1;
-    xfer.xfer_version(&mut version, 1)?;
-    let mut raw = [0u8; KINDOF_COUNT.div_ceil(64) * 8];
-    for bit in 0..KINDOF_COUNT {
-        if mask.test(bit as Int) != 0 {
-            raw[bit / 8] |= 1 << (bit % 8);
-        }
-    }
-    let size = if cfg!(feature = "retail-crc") {
-        8
-    } else {
-        raw.len()
-    };
-    xfer.xfer_user(&mut raw[..size])
+    bonuses.valid_kind_of.xfer_named(xfer, &KINDOF_NAMES)?;
+    bonuses.invalid_kind_of.xfer_named(xfer, &KINDOF_NAMES)
 }
 
 /// A presence flag that must match what the player has.
@@ -1001,7 +978,7 @@ impl Player {
                 .collect();
         }
         for change in &mut self.production_changes {
-            xfer_kind_of(xfer, &mut change.kind_of)?;
+            change.kind_of.xfer_named(xfer, &KINDOF_NAMES)?;
             xfer.xfer_real(&mut change.percent)?;
             xfer.xfer_unsigned_int(&mut change.refs)?;
         }

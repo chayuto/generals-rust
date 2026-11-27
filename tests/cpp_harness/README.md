@@ -549,8 +549,8 @@ It returns 0 and zeroes the normal, whatever `getGroundHeight` says. The shipped
   Guard: `golden_players_teams` removes the extra fields only without that feature, and also
   passes with it.
 - **`BitFlags::xfer` in CRC mode hashes the whole `std::bitset`** (`sizeof(*this)`, 64-bit
-  words), not 32 bits. `zh_common`'s `BitFlags::xfer_named` still writes four bytes in CRC mode;
-  `player.rs` writes the full size itself. Guard: `golden_players_teams` hashes battle plan masks.
+  words), not 32 bits. `zh_common`'s `BitFlags::xfer_named` does the same. Guard:
+  `golden_players_teams` hashes battle plan masks through it.
 - **`AIPlayer`'s constructor changes its player** (`setCanBuildUnits(false)`;
   `AISkirmishPlayer` sets it back).
 - **`oracle_wp51::World` leaves state behind** on players (relations, which `init` never

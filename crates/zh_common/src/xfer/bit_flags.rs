@@ -467,9 +467,21 @@ impl<const NUMBITS: usize> BitFlags<NUMBITS> {
                 }
                 Ok(())
             }
+            // `xferUser(this, sizeof(*this))`: the whole `std::bitset`, in 64-bit
+            // words. A retail CRC build passes `sizeof(this)`, a pointer's worth.
             crate::xfer::XferMode::Crc => {
-                let mut raw = self.to_unsigned_int().to_le_bytes();
-                xfer.xfer_user(&mut raw)
+                let mut raw = vec![0u8; NUMBITS.div_ceil(64) * 8];
+                for bit in 0..NUMBITS {
+                    if self.test(bit as Int) != 0 {
+                        raw[bit / 8] |= 1 << (bit % 8);
+                    }
+                }
+                let size = if cfg!(feature = "retail-crc") {
+                    8
+                } else {
+                    raw.len()
+                };
+                xfer.xfer_user(&mut raw[..size])
             }
         }
     }
