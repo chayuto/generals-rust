@@ -16,6 +16,7 @@ use zh_common::io::archive_file_system::ArchiveFilter;
 use zh_common::io::big_file_system::BigFileSystem;
 use zh_common::io::file::LocalFileHost;
 
+use crate::gamelogic::client_name_keys;
 use crate::combat::locomotor::LocomotorTemplate;
 use crate::modules::module::ModuleType;
 use crate::object::object_creation_list::OclRefs;
@@ -373,10 +374,22 @@ impl GameDataLoader {
 
     /// Loads everything `GameEngine::init` loads, then runs the post-load passes.
     pub fn load_startup(&mut self, fs: &BigFileSystem) {
+        // Names are numbered in request order, so a fresh loader starts from an
+        // empty table and interns them where the engine does.
+        let fresh = self.report.files.is_empty();
+        if fresh {
+            self.rules = RulesRegistry::without_startup_names();
+        }
         for path in INIT_PATHS {
+            if fresh {
+                client_name_keys::before_init_path(&mut self.rules, path);
+            }
             for file in file_directory_list(fs, path) {
                 self.load_archive_file(fs, &file, IniLoadType::Overwrite);
             }
+        }
+        if fresh {
+            client_name_keys::after_init_paths(&mut self.rules);
         }
         self.rules.thing_factory.post_process_load();
         self.rules.mark_base_loaded();
@@ -457,9 +470,19 @@ impl GameDataLoader {
             .unwrap_or("")
             .to_owned();
         let resync = next_header(lines, i + 1);
+        // These stores key their templates by name.
+        if matches!(kind, "Weapon" | "ObjectCreationList" | "Locomotor") {
+            self.rules.name_keys.name_to_key(&name);
+        }
         let status = match kind {
-            k if CLIENT_BLOCKS.contains(&k) => Some(BlockStatus::Client),
+            k if CLIENT_BLOCKS.contains(&k) => {
+                let end = next_header(lines, i + 1);
+                let keys = &mut self.rules.name_keys;
+                client_name_keys::intern_client_block(keys, k, &name, &lines[i..end]);
+                Some(BlockStatus::Client)
+            }
             "FXList" => {
+                self.rules.name_keys.name_to_key(&name);
                 self.rules.fx_list_names.insert(name.clone());
                 Some(BlockStatus::NameOnly)
             }
@@ -738,6 +761,7 @@ impl GameDataLoader {
         let name = ini.next_token(SEPS_DEFAULT)?.to_owned();
         let mut button = CommandButton::default();
         let ignored = &mut self.report.ignored_fields;
+        let name_keys = &mut self.rules.name_keys;
         ini.read_block_fields(|field, ini| {
             match field {
                 "Command" => {
@@ -748,7 +772,12 @@ impl GameDataLoader {
                     }
                 }
                 "Object" => button.object = name_or_none(ini.next_token(SEPS_DEFAULT)?),
-                "Upgrade" => button.upgrade = name_or_none(ini.next_token(SEPS_DEFAULT)?),
+                // `parseUpgradeTemplate` looks every token up, `None` too.
+                "Upgrade" => {
+                    let token = ini.next_token(SEPS_DEFAULT)?;
+                    name_keys.name_to_key(token);
+                    button.upgrade = name_or_none(token);
+                }
                 other => *ignored.entry(format!("CommandButton.{other}")).or_insert(0) += 1,
             }
             Ok(())

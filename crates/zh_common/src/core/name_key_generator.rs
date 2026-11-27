@@ -48,6 +48,8 @@ struct Bucket {
 #[derive(Debug, Clone)]
 pub struct NameKeyGenerator {
     next_id: UnsignedInt,
+    /// Keys handed out by [`NameKeyGenerator::class_name_to_key`].
+    class_names: i32,
     sockets: Vec<Vec<Bucket>>,
 }
 
@@ -61,6 +63,7 @@ impl NameKeyGenerator {
     pub fn new() -> Self {
         Self {
             next_id: 0,
+            class_names: 0,
             sockets: vec![Vec::new(); SOCKET_COUNT],
         }
     }
@@ -74,6 +77,7 @@ impl NameKeyGenerator {
             bucket.clear();
         }
         self.next_id = 1;
+        self.class_names = 0;
     }
 
     pub fn lookup_key(&self, name: &str) -> Option<NameKeyType> {
@@ -90,6 +94,22 @@ impl NameKeyGenerator {
             return bucket.key;
         }
         self.create_name_key(hash, name.to_owned())
+    }
+
+    /// A key for a module class name, taken from the top of the range. The
+    /// reference interns such a name only when the class is first asked for its
+    /// key at run time, while the port needs it when the module data is parsed;
+    /// a number from the ordinary sequence there would shift every later key.
+    pub fn class_name_to_key(&mut self, name: &str) -> NameKeyType {
+        if let Some(key) = self.lookup_key(name) {
+            return key;
+        }
+        self.class_names += 1;
+        let key = NameKeyType(NAMEKEY_MAX - self.class_names);
+        let hash = (calc_hash_for_string(name) % SOCKET_COUNT as u32) as usize;
+        let name = name.to_owned();
+        self.sockets[hash].push(Bucket { key, name });
+        key
     }
 
     pub fn name_to_lowercase_key(&mut self, name: &str) -> NameKeyType {

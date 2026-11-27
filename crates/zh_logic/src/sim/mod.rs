@@ -558,40 +558,54 @@ impl Default for RulesRegistry {
 
 impl RulesRegistry {
     pub fn new() -> Self {
-        let mut name_keys = NameKeyGenerator::new();
-        name_keys.init();
-        let mut module_registry = ModuleRegistry::with_builtin_zh_modules(&mut name_keys);
+        let mut rules = Self::without_startup_names();
+        rules.register_module_factory();
+        rules.upgrade_center.init(&mut rules.name_keys);
+        rules
+    }
+
+    /// `ModuleFactory::init`.
+    pub(crate) fn register_module_factory(&mut self) {
+        let name_keys = &mut self.name_keys;
+        let mut module_registry = ModuleRegistry::with_builtin_zh_modules(name_keys);
         // Preserve C++ 1..=198 decorated key interning order by running category registrars
         // strictly after `with_builtin_zh_modules`.
-        crate::modules::body::register_body_modules(&mut module_registry, &mut name_keys);
-        crate::modules::create::register_create_modules(&mut module_registry, &mut name_keys);
-        crate::modules::damage::register_damage_modules(&mut module_registry, &mut name_keys);
-        crate::modules::destroy::register_destroy_modules(&mut module_registry, &mut name_keys);
-        crate::modules::die::register_die_modules(&mut module_registry, &mut name_keys);
-        crate::modules::upgrade::register_upgrade_modules(&mut module_registry, &mut name_keys);
+        crate::modules::body::register_body_modules(&mut module_registry, name_keys);
+        crate::modules::create::register_create_modules(&mut module_registry, name_keys);
+        crate::modules::damage::register_damage_modules(&mut module_registry, name_keys);
+        crate::modules::destroy::register_destroy_modules(&mut module_registry, name_keys);
+        crate::modules::die::register_die_modules(&mut module_registry, name_keys);
+        crate::modules::upgrade::register_upgrade_modules(&mut module_registry, name_keys);
         crate::modules::special_power::register_special_power_modules(
             &mut module_registry,
-            &mut name_keys,
+            name_keys,
         );
-        crate::modules::collide::register_collide_modules(&mut module_registry, &mut name_keys);
-        crate::modules::behavior::register_behavior_modules(&mut module_registry, &mut name_keys);
-        crate::modules::contain::register_contain_modules(&mut module_registry, &mut name_keys);
-        crate::modules::update::register_update_modules(&mut module_registry, &mut name_keys);
+        crate::modules::collide::register_collide_modules(&mut module_registry, name_keys);
+        crate::modules::behavior::register_behavior_modules(&mut module_registry, name_keys);
+        crate::modules::contain::register_contain_modules(&mut module_registry, name_keys);
+        crate::modules::update::register_update_modules(&mut module_registry, name_keys);
         crate::modules::module_data::register_data_only_modules(
             &mut module_registry,
-            &mut name_keys,
+            name_keys,
         );
+        self.module_registry = module_registry;
+    }
 
+    /// The registry before any name has been interned: the data loader runs
+    /// the module factory and `UpgradeCenter::init` where the engine's start
+    /// does, which fixes the `NameKeyType` numbers.
+    pub(crate) fn without_startup_names() -> Self {
+        let mut name_keys = NameKeyGenerator::new();
+        name_keys.init();
         let mut science_store = ScienceStore::new();
         science_store.init();
-        let mut upgrade_center = UpgradeCenter::new();
-        upgrade_center.init(&mut name_keys);
+        let upgrade_center = UpgradeCenter::new();
         let mut crate_system = CrateSystem::new();
         crate_system.init();
         Self {
             name_keys,
             thing_factory: ThingFactory::new(),
-            module_registry,
+            module_registry: ModuleRegistry::new(),
             module_data_store: ModuleDataStore::new(),
             armor_store: ArmorStore::new(),
             weapon_store: WeaponStore::new(),

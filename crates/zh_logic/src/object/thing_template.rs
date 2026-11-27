@@ -1547,8 +1547,7 @@ impl ThingTemplate {
             }
         }
 
-        let tag_key = ctx.name_keys.name_to_key(&module_tag);
-        let mod_name_key = ctx.name_keys.name_to_key(&mod_name);
+        let mod_name_key = ctx.name_keys.class_name_to_key(&mod_name);
         let data_id = match (ctx.module_registry, ctx.module_data_store.as_deref_mut()) {
             (Some(reg), Some(store)) => {
                 let empty_upgrades = UpgradeCenter::new();
@@ -1572,7 +1571,7 @@ impl ThingTemplate {
                     ini,
                     &mod_name,
                     mod_type,
-                    tag_key,
+                    &module_tag,
                     mod_name_key,
                     store,
                     ThingTemplateId(self.template_id as u32),
@@ -1590,6 +1589,7 @@ impl ThingTemplate {
         } else {
             ctx.module_masks.is_ai_module_name(&mod_name)
         };
+        let tag_key = ctx.name_keys.name_to_key(&module_tag);
         let target = match mod_type {
             ModuleType::Behavior => &mut self.behavior_module_info,
             ModuleType::Draw => &mut self.draw_module_info,

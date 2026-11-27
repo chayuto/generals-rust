@@ -242,6 +242,7 @@ impl<T: 'static> MultiIniFieldParse<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct IniReader<'a> {
     filename: String,
     load_type: IniLoadType,

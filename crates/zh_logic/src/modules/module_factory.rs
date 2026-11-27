@@ -409,18 +409,84 @@ const NESTED_MODULE_BLOCKS: [&str; 7] = [
 ];
 
 /// Consumes a module block that has no parser, up to its own `End`.
-fn skip_module_block(ini: &mut IniReader<'_>) -> Result<(), IniError> {
+fn skip_module_block(
+    ini: &mut IniReader<'_>,
+    mut draw_keys: Option<&mut NameKeyGenerator>,
+) -> Result<(), IniError> {
     ini.read_block_fields(|field, ini| {
+        if let Some(keys) = draw_keys.as_deref_mut() {
+            // On a copy: the nesting test below reads the same value.
+            intern_draw_field(field, &mut ini.clone(), keys);
+        }
         let nested = match field {
             "Turret" | "AltTurret" => ini.next_token_or_null(SEPS_DEFAULT).is_none(),
             _ => NESTED_MODULE_BLOCKS.contains(&field),
         };
         if nested {
-            skip_module_block(ini)
+            skip_module_block(ini, draw_keys.as_deref_mut())
         } else {
             Ok(())
         }
     })
+}
+
+/// `findFXList` and `findObjectCreationList` intern every name they are asked
+/// for, so a reference to a list that does not exist takes a number while the
+/// module data is read, ahead of the module tag. This reads ahead in a copy of
+/// the block for those. Only the two death families name such lists in the
+/// retail data.
+fn intern_unknown_references(
+    module: &str,
+    mut ini: IniReader<'_>,
+    ctx: &mut ModuleParseContext<'_>,
+) -> Result<(), IniError> {
+    const SEPS: &str = " \n\r\t=";
+    // A slow death names a phase before its lists.
+    let skip = match module {
+        "SlowDeathBehavior" | "NeutronMissileSlowDeathBehavior" | "HelicopterSlowDeathBehavior"
+        | "JetSlowDeathBehavior" | "BattleBusSlowDeathBehavior" => 1,
+        "InstantDeathBehavior" => 0,
+        _ => return Ok(()),
+    };
+    ini.read_block_fields(|field, ini| {
+        let known = match field {
+            "FX" => ctx.fx_list_names,
+            "OCL" => ctx.ocl_names,
+            _ => return Ok(()),
+        };
+        for _ in 0..skip {
+            ini.next_token_or_null(SEPS);
+        }
+        while let Some(name) = ini.next_token_or_null(SEPS) {
+            if !name.eq_ignore_ascii_case("None") && !known.contains(name) {
+                ctx.name_keys.name_to_key(name);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// The keys `W3DModelDrawModuleData` interns while reading one of its fields
+/// (`parseBoneNameKey`, `parseLowercaseNameKey` and the names of a transition
+/// state), all lowercased. Only those draw modules have these fields.
+fn intern_draw_field(field: &str, ini: &mut IniReader<'_>, keys: &mut NameKeyGenerator) {
+    const SEPS: &str = " \n\r\t=";
+    let (count, none_is_invalid) = match field {
+        "Turret" | "TurretPitch" | "AltTurret" | "AltTurretPitch" => (1, true),
+        "TransitionKey" | "WaitForStateToFinishIfPossible" => (1, false),
+        "TransitionState" => (2, false),
+        _ => return,
+    };
+    for _ in 0..count {
+        // A `Turret` block of a tank draw module has no value.
+        let Some(name) = ini.next_token_or_null(SEPS) else {
+            return;
+        };
+        let name = name.to_ascii_lowercase();
+        if !(none_is_invalid && name == "none") {
+            keys.name_to_key(&name);
+        }
+    }
 }
 
 /// Deterministic registry mirroring `ModuleFactory` (`PKT-164`).
@@ -589,7 +655,7 @@ impl ModuleRegistry {
         ini: &mut IniReader<'_>,
         name: &str,
         mod_type: ModuleType,
-        tag_key: NameKeyType,
+        tag: &str,
         mod_name_key: NameKeyType,
         store: &mut ModuleDataStore,
         template_id: ThingTemplateId,
@@ -597,10 +663,16 @@ impl ModuleRegistry {
     ) -> Result<ModuleDataId, IniError> {
         if let Some(desc) = self.find_descriptor(name, mod_type) {
             if let Some(parse_fn) = desc.parse_data {
+                intern_unknown_references(name, ini.clone(), parse_ctx)?;
+                let tag_key = parse_ctx.name_keys.name_to_key(tag);
                 let data = parse_fn(ini, tag_key, mod_name_key, parse_ctx)?;
                 return Ok(store.insert_for_template(template_id, tag_key, data));
             }
-            skip_module_block(ini)?;
+            // A draw module's data interns its bone and transition names, and the
+            // reference interns the tag after the data.
+            let draw = (mod_type == ModuleType::Draw).then_some(&mut *parse_ctx.name_keys);
+            skip_module_block(ini, draw)?;
+            let tag_key = parse_ctx.name_keys.name_to_key(tag);
             let stub = Box::new(StubModuleData {
                 module_name: desc.name.clone(),
                 tag_key,
@@ -612,7 +684,8 @@ impl ModuleRegistry {
             return Ok(store.insert_for_template(template_id, tag_key, stub));
         }
 
-        skip_module_block(ini)?;
+        skip_module_block(ini, None)?;
+        let tag_key = parse_ctx.name_keys.name_to_key(tag);
         let stub = Box::new(StubModuleData {
             module_name: name.to_owned(),
             tag_key,
