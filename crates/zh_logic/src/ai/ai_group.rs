@@ -32,7 +32,7 @@ use crate::rules::science::SCIENCE_INVALID;
 use crate::rules::upgrade::UpgradeType;
 use crate::sim::{SimApi, SimContext, SimView};
 use crate::spatial::partition_query::iterator_merge_sort;
-use zh_common::math::{gm_cosf, gm_sinf, Coord2D, Coord3D, Region3D};
+use zh_common::math::{gm_cosf, gm_sinf, reference_div_f32, Coord2D, Coord3D, Region3D};
 use zh_common::types::{
     Bool, Int, NameKeyType, ObjectId, Real, UnsignedInt, XferVersion, FALSE, TRUE,
 };
@@ -504,9 +504,9 @@ pub fn center(sim: &SimContext, group: GroupId) -> (bool, Coord3D) {
             count += 1;
         }
     }
-    center.x /= count as Real;
-    center.y /= count as Real;
-    center.z /= count as Real;
+    center.x = reference_div_f32(center.x, count as Real);
+    center.y = reference_div_f32(center.y, count as Real);
+    center.z = reference_div_f32(center.z, count as Real);
     (count > 0, center)
 }
 
@@ -536,9 +536,9 @@ pub fn min_max_and_center(sim: &SimContext, group: GroupId) -> (bool, Coord2D, C
         }
         count += 1;
     }
-    center.x /= count as Real;
-    center.y /= count as Real;
-    center.z /= count as Real;
+    center.x = reference_div_f32(center.x, count as Real);
+    center.y = reference_div_f32(center.y, count as Real);
+    center.z = reference_div_f32(center.z, count as Real);
     (id != NO_FORMATION_ID && count >= 2, min, max, center)
 }
 
