@@ -115,6 +115,8 @@ pub struct Thing {
     cached_altitude_above_terrain: Cell<Real>,
     cached_altitude_above_terrain_or_water: Cell<Real>,
     cache_flags: Cell<Int>,
+    /// `Object::m_layer`, which `Object::calculateHeightAboveTerrain` measures from.
+    height_layer: PathfindLayerEnum,
 }
 
 impl Thing {
@@ -128,6 +130,7 @@ impl Thing {
             cached_altitude_above_terrain: Cell::new(0.0),
             cached_altitude_above_terrain_or_water: Cell::new(0.0),
             cache_flags: Cell::new(0),
+            height_layer: PathfindLayerEnum::Ground,
         }
     }
 
@@ -320,8 +323,16 @@ impl Thing {
     #[inline]
     pub fn calculate_height_above_terrain(&self, terrain: &dyn ThingTerrainAccess) -> Real {
         let pos = self.get_position();
-        let terrain_z = terrain.get_ground_height(pos.x, pos.y, None);
+        let terrain_z = match self.height_layer {
+            PathfindLayerEnum::Ground => terrain.get_ground_height(pos.x, pos.y, None),
+            layer => terrain.get_layer_height(pos.x, pos.y, layer, None, TRUE),
+        };
         pos.z - terrain_z
+    }
+
+    /// Follows `Object::setLayer`. The cached altitude is kept, as in the reference.
+    pub fn set_height_layer(&mut self, layer: PathfindLayerEnum) {
+        self.height_layer = layer;
     }
 
     pub fn get_height_above_terrain(&self, terrain: &dyn ThingTerrainAccess) -> Real {

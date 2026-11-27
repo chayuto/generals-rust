@@ -6169,7 +6169,9 @@ impl SimView for SimContext {
             crate::modules::update::physics_update::physics(self, owner).is_some_and(|p| {
                 p.flag(crate::modules::update::physics_update::ALLOW_TO_FALL)
             });
-        Bool::from(!(allowed_to_fall && self.object_is_above_terrain(owner) != FALSE))
+        // The height is read (and cached) first, as in the reference.
+        let above = self.object_is_above_terrain(owner) != FALSE;
+        Bool::from(!(above && allowed_to_fall))
     }
 
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
@@ -9251,7 +9253,14 @@ impl SimApi for SimContext {
 
     fn set_object_layer(&mut self, owner: ObjectSlot, layer: PathfindLayerEnum) {
         if let Some(obj) = self.world.objects.get_mut(owner) {
+            // In the reference an AI unit's height was already read, from the old
+            // layer, when it was positioned (`Pathfinder::updatePos`, unported). The
+            // cached value outlives the layer change.
+            if obj.ai_slot.is_some() {
+                obj.thing.get_height_above_terrain(self.terrain.as_ref());
+            }
             obj.layer = layer;
+            obj.thing.set_height_layer(layer);
         }
     }
 
