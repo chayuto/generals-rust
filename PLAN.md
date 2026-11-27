@@ -1,6 +1,6 @@
 # Architectural & Execution Plan: Zero Hour Engine Port to Rust (`generals-rust`)
 
-> **Goal (owner, 2026-11-27):** the whole game in Rust, with no C++. This plan stops at a headless simulator; `docs/FULL_PORT_PLAN.md` covers the whole game.
+> **Goal (owner, 2026-11-27):** the whole game in Rust, with no C++. This document covers the Stage 1 headless simulator core (`WP-0.1`–`WP-7.3`). For the end-to-end 6-stage blueprint and detailed completion roadmaps, see [docs/FULL_PORT_PLAN.md](docs/FULL_PORT_PLAN.md), [docs/STAGE1_COMPLETION_PLAN.md](docs/STAGE1_COMPLETION_PLAN.md) (`L1`–`L12`), and [docs/CLIENT_ARCHITECTURE_PLAN.md](docs/CLIENT_ARCHITECTURE_PLAN.md) (Stages 2–6).
 
 ## 1. Objective & Milestones
 
@@ -453,9 +453,9 @@ Full operational specification: [docs/AGENT_WORKFLOW_AND_CI.md](docs/AGENT_WORKF
 
 ---
 
-### Stage 2 (Future): Native Client & `wgpu`/Metal Renderer
-Once Stage 1 is complete and signed off:
-- Implement `WgpuClientSink` in `crates/zh_client` using `wgpu` (Metal backend on macOS Apple Silicon): `.w3d` hierarchical mesh/bone/animation loader, `.dds`/`.tga` texture pipeline, terrain heightmap/road/water renderer, particle system, `.wnd` UI layout engine, and MiniAudio/cpal audio output driving `SimContext` at 30 Hz logic / unlocked render framerate.
+### Stages 2–6: Assets, Native `wgpu` Renderer, UI/Input, Audio/Video & Lockstep Network
+Alongside and following Stage 1 (`zh-sim` parity):
+- See [docs/FULL_PORT_PLAN.md](docs/FULL_PORT_PLAN.md) and [docs/CLIENT_ARCHITECTURE_PLAN.md](docs/CLIENT_ARCHITECTURE_PLAN.md) for the pure-Rust `zh_assets` / `zh_client_core` / `zh_net` core and the hardware-shell crates (`zh_render` on `wgpu`, `zh_audio` on `cpal` + `symphonia`, `zh_video` for `.bik`, and `zh_app` on `winit`, gated on Owner Decision #12), driving `GameSession` at 30 Hz logic with interpolated rendering and retiring `zh_ffi` at Stage 6.
 
 ---
 

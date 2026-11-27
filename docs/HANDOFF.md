@@ -7,11 +7,15 @@ History is in `git log`; gaps module by module are in `OPEN_DECISIONS.md`.
 ## Goal and owner's direction
 
 - **A full Rust port of the whole game, client included. No C++** in the result
-  (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`, six stages).
+  (`OPEN_DECISIONS.md` item 10, [FULL_PORT_PLAN.md](FULL_PORT_PLAN.md), six stages).
+- **Completion blueprints:** See [FULL_PORT_PLAN.md](FULL_PORT_PLAN.md) (all 6 stages),
+  [STAGE1_COMPLETION_PLAN.md](STAGE1_COMPLETION_PLAN.md) (`L1`–`L12` to headless replay CRC parity),
+  and [CLIENT_ARCHITECTURE_PLAN.md](CLIENT_ARCHITECTURE_PLAN.md) (Stages 2–6: assets, `wgpu` renderer, UI/input, audio/video, lockstep network).
 - Faithful: the exact behaviour of the original. Decide faithful-port design questions
   yourself. The aim is a playable game.
 - **Client crates: ask the owner before adding the first one**, naming them and their use
-  (item 12). The simulation stays bit-exact and free of external crates.
+  (item 12; candidate table prepared in `CLIENT_ARCHITECTURE_PLAN.md`). The simulation
+  stays bit-exact and free of external crates.
 - Keep building while it makes token sense: compute is cheap, tokens are not. The owner
   allowed up to 5 parallel workers when their work is independent.
 - Batch pushes (Actions quota); `env:ephemeral-web` assignments are paused.
@@ -170,7 +174,7 @@ have run low.
 
 ## Waiting on the owner
 
-- Item 12, client crates: ask when first needed.
+- Item 12, client crates: ask when first needed (`CLIENT_ARCHITECTURE_PLAN.md` §2 documents the proposed crate table and the pure-Rust vs FFmpeg `.bik` video option; Stage 2 `zh_assets`, pure-Rust `zh_client_core`, and `zh_net` require zero external crates).
 - Whether a searchable copy of the reference source under another folder name may be made
   for workers. It would sidestep the isolation check, so it needs a yes.
 - The other unanswered items in `OPEN_DECISIONS.md`.

@@ -18,11 +18,11 @@
 
 The SAGE engine in *Zero Hour* contains ~330,000 lines of C++ across `GameLogic` and `Common` (`833` source/header files mapped into `463` atomic translation packets). Unlike a ground-up rewrite that approximates gameplay mechanics, `generals-rust` uses the engine's built-in multiplayer lockstep checksum pipeline (`XferCRC` / `GameLogic::getCRC()`) as a **mathematical verification oracle**:
 
-1. **Stage 1 — Bit-Exact Headless Simulation (`Phase 0` – `Phase 7`):**
-   - Incrementally replace C++ subsystems in `GameLogic` and `Common` with idiomatic, deterministic Rust crates (`zh_common`, `zh_logic`, `zh_ffi`) using a **Strangler-Fig C-ABI FFI bridge** against the cross-platform reference build (`fbraz3/GeneralsX` at pinned commit `84a7a20769aa5749f388b1f49bd542c79b3c33e8`).
+1. **Stage 1 — Bit-Exact Headless Simulation (`Phase 0` – `Phase 7`, [docs/STAGE1_COMPLETION_PLAN.md](docs/STAGE1_COMPLETION_PLAN.md)):**
+   - Incrementally replace C++ subsystems in `GameLogic` and `Common` with idiomatic, deterministic Rust crates (`zh_common`, `zh_logic`, `zh_sim`, `zh_ffi`) using a **Strangler-Fig C-ABI FFI bridge** against the cross-platform reference build (`fbraz3/GeneralsX` at pinned commit `84a7a20769aa5749f388b1f49bd542c79b3c33e8`).
    - Run headless replays at 30 logic frames per second (`LOGICFRAMES_PER_SECOND = 30`) and match the C++ reference engine's per-frame `GameLogic::getCRC()` bit-for-bit across all replay frames.
-2. **Stage 2 — Native Rust Client & Renderer:**
-   - Replace the headless `ClientSink` no-op adapter with a native `wgpu` rendering and audio frontend reading `.big`, `.map`, and `.w3d` assets directly.
+2. **Stages 2–6 — Pure-Rust Assets, Native Renderer, UI, A/V & Multiplayer ([docs/FULL_PORT_PLAN.md](docs/FULL_PORT_PLAN.md), [docs/CLIENT_ARCHITECTURE_PLAN.md](docs/CLIENT_ARCHITECTURE_PLAN.md)):**
+   - Expand `zh_assets` and build a zero-external-crate `zh_client_core` + `zh_net` alongside `wgpu` rendering (`zh_render`), `cpal`/`symphonia` audio (`zh_audio`), Bink `.bik` video (`zh_video`), and `winit` shell (`zh_app`) until the entire game runs cleanly in Rust with zero C++.
 
 ---
 
@@ -60,7 +60,10 @@ flowchart LR
 
 | Document / Path | Description |
 | :--- | :--- |
-| **[PLAN.md](PLAN.md)** | Master architectural blueprint, 3-layer `SimContext` design, FFI strangler patterns, and Work Packages `WP-0.1`..`WP-7.3`. |
+| **[PLAN.md](PLAN.md)** | Stage 1 architectural blueprint, 3-layer `SimContext` design, FFI strangler patterns, and Work Packages `WP-0.1`..`WP-7.3`. |
+| **[docs/FULL_PORT_PLAN.md](docs/FULL_PORT_PLAN.md)** | Master 6-stage architecture, verified codebase census, full-game workspace map, risk register, and owner decision gates. |
+| **[docs/STAGE1_COMPLETION_PLAN.md](docs/STAGE1_COMPLETION_PLAN.md)** | Slice-by-slice engineering plan (`L1`–`L12`) from current simulation state to standalone headless replay CRC parity (`zh-sim`). |
+| **[docs/CLIENT_ARCHITECTURE_PLAN.md](docs/CLIENT_ARCHITECTURE_PLAN.md)** | Stages 2–6 architecture (`zh_assets`, `zh_client_core`, `zh_render`, `zh_audio`, `zh_video`, `zh_net`, `zh_app`), logic-client boundary, and proposed external crate table. |
 | **[docs/MULTI_AGENT_ROADMAP.md](docs/MULTI_AGENT_ROADMAP.md)** | End-to-end multi-agent task dependency DAG (`Blocked By` $\rightarrow$ `Unblocks`), 6 master unblockers, parallel swarm fan-out windows, and Milestones `M0`–`M7`. |
 | **[AGENTS.md](AGENTS.md)** | Contributors & multi-agent constitution, V&V Golden Rule (*"Never build something you cannot verify"*), 2D task classification (`tier:*` $\times$ `env:*`), and GitHub Issue claiming protocol. |
 | **[docs/ARCHITECTURE_SPEC.md](docs/ARCHITECTURE_SPEC.md)** | Frozen Rust & C-ABI (`zh_ffi.h`) interface contracts for `SimWorld::with_module_dispatch`, `Pattern 1–3` FFI bridges, and the Gate V2 Golden-Vector JSON schema. |
