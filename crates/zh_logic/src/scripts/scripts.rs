@@ -1700,6 +1700,44 @@ impl ScriptList {
         chunk_writer.close_data_chunk()
     }
 
+    /// The `ScriptList` chunks of an open `PlayerScriptsList` chunk, which a map
+    /// nests inside its `SidesList` chunk.
+    pub fn read_player_scripts_chunk<Ctx>(
+        input: &mut DataChunkInput<'_, Ctx>,
+        lists: &mut Vec<ScriptList>,
+        nkg: &mut NameKeyGenerator,
+        provider: &dyn ScriptTemplateProvider,
+    ) -> Result<(), DataChunkError> {
+        while !input.at_end_of_chunk() {
+            let (label, _) = input.open_data_chunk()?;
+            if label == "ScriptList" {
+                if lists.len() >= MAX_PLAYER_COUNT {
+                    return Err(DataChunkError::CorruptFormat);
+                }
+                let mut list = ScriptList::new();
+                while !input.at_end_of_chunk() {
+                    let (child_label, child_version) = input.open_data_chunk()?;
+                    match child_label.as_str() {
+                        "Script" => {
+                            let script = parse_script_chunk(input, child_version, nkg, provider)?;
+                            list.scripts.push(script);
+                        }
+                        "ScriptGroup" => {
+                            let group =
+                                parse_script_group_chunk(input, child_version, nkg, provider)?;
+                            list.groups.push(group);
+                        }
+                        _ => {}
+                    }
+                    input.close_data_chunk()?;
+                }
+                lists.push(list);
+            }
+            input.close_data_chunk()?;
+        }
+        Ok(())
+    }
+
     pub fn parse_scripts_data_chunk<S: ChunkInputStream>(
         stream: &mut S,
         nkg: &mut NameKeyGenerator,
@@ -1717,43 +1755,7 @@ impl ScriptList {
                 if root_version != K_SCRIPTS_DATA_VERSION_1 {
                     // Continue supporting the same nested layout under legacy root versions.
                 }
-                while !input.at_end_of_chunk() {
-                    let (label, _) = input.open_data_chunk()?;
-                    if label == "ScriptList" {
-                        if lists.len() >= MAX_PLAYER_COUNT {
-                            return Err(DataChunkError::CorruptFormat);
-                        }
-                        let mut list = ScriptList::new();
-                        while !input.at_end_of_chunk() {
-                            let (child_label, child_version) =
-                                input.open_data_chunk()?;
-                            match child_label.as_str() {
-                                "Script" => {
-                                    let script = parse_script_chunk(
-                                        &mut input,
-                                        child_version,
-                                        nkg,
-                                        provider,
-                                    )?;
-                                    list.scripts.push(script);
-                                }
-                                "ScriptGroup" => {
-                                    let group = parse_script_group_chunk(
-                                        &mut input,
-                                        child_version,
-                                        nkg,
-                                        provider,
-                                    )?;
-                                    list.groups.push(group);
-                                }
-                                _ => {}
-                            }
-                            input.close_data_chunk()?;
-                        }
-                        lists.push(list);
-                    }
-                    input.close_data_chunk()?;
-                }
+                Self::read_player_scripts_chunk(&mut input, &mut lists, nkg, provider)?;
             }
             input.close_data_chunk()?;
         }
