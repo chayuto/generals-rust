@@ -98,6 +98,7 @@ impl WellKnownSidesKeys {
 }
 
 /// Lightweight deterministic `ScriptList` adapter matching the `PKT-154` C++ oracle codec.
+/// It is not the script chunk format of map files; `scripts::ScriptList` reads that.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SidesScriptList {
     pub has_script: Bool,
@@ -1034,21 +1035,14 @@ impl SidesList {
         Ok(())
     }
 
-    pub fn parse_sides_chunk_stream(
+    /// The sides, build lists and teams of an open `SidesList` chunk. The script
+    /// lists that follow, and `validateSides`, are left to the caller.
+    pub fn read_sides_and_teams<Ctx>(
         &mut self,
-        stream: &mut dyn ChunkInputStream,
-        keys: &WellKnownSidesKeys,
+        input: &mut DataChunkInput<'_, Ctx>,
+        version: DataChunkVersionType,
         name_keys: &mut NameKeyGenerator,
     ) -> Result<(), SidesError> {
-        let mut input: DataChunkInput<'_, ()> = DataChunkInput::new(stream);
-        if !input.is_valid_file_type() {
-            return Err(SidesError::CorruptFormat);
-        }
-        input.reset()?;
-        let (label, version) = input.open_data_chunk()?;
-        if label != "SidesList" {
-            return Err(SidesError::CorruptFormat);
-        }
         let side_count = input.read_int()?.max(0);
         self.clear();
         for i in 0..side_count {
@@ -1108,6 +1102,25 @@ impl SidesList {
                 self.team_rec.add_team(Some(&dict));
             }
         }
+        Ok(())
+    }
+
+    pub fn parse_sides_chunk_stream(
+        &mut self,
+        stream: &mut dyn ChunkInputStream,
+        keys: &WellKnownSidesKeys,
+        name_keys: &mut NameKeyGenerator,
+    ) -> Result<(), SidesError> {
+        let mut input: DataChunkInput<'_, ()> = DataChunkInput::new(stream);
+        if !input.is_valid_file_type() {
+            return Err(SidesError::CorruptFormat);
+        }
+        input.reset()?;
+        let (label, version) = input.open_data_chunk()?;
+        if label != "SidesList" {
+            return Err(SidesError::CorruptFormat);
+        }
+        self.read_sides_and_teams(&mut input, version, name_keys)?;
 
         if !input.at_end_of_chunk() {
             let (label, script_version) = input.open_data_chunk()?;

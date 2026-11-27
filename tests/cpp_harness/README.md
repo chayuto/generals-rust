@@ -541,3 +541,23 @@ It returns 0 and zeroes the normal, whatever `getGroundHeight` says. The shipped
 
 - `Object::reactToTransformChange` calls it for any object with an AI, so a tape of one caller has
   to gate the recording.
+
+## Players and teams (`gen_players_teams.cpp`)
+
+- **The reference library writes the retail save format.** `RETAIL_COMPATIBLE_XFER_SAVE` is 1,
+  so `Money::xfer` is version 1, while the port without `retail-xfer-save` writes version 2.
+  Guard: `golden_players_teams` removes the extra fields only without that feature, and also
+  passes with it.
+- **`BitFlags::xfer` in CRC mode hashes the whole `std::bitset`** (`sizeof(*this)`, 64-bit
+  words), not 32 bits. `zh_common`'s `BitFlags::xfer_named` still writes four bytes in CRC mode;
+  `player.rs` writes the full size itself. Guard: `golden_players_teams` hashes battle plan masks.
+- **`AIPlayer`'s constructor changes its player** (`setCanBuildUnits(false)`;
+  `AISkirmishPlayer` sets it back).
+- **`oracle_wp51::World` leaves state behind** on players (relations, which `init` never
+  clears) and in the team id counters. Replace the maps and call `TheTeamFactory->reset()`
+  before comparing with a fresh game.
+- **A `MemoryPoolObject` that is also a `Snapshot` needs `static_cast`**, not
+  `reinterpret_cast`: the second base is at an offset.
+- **Relation maps are `std::unordered_map`**: their save order follows libc++ bucketing,
+  which survives `clear()`.
+- **Map waypoints need `W3DTerrainLogic::loadMap`**: the base loader alone sees no map objects.
