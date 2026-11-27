@@ -42,22 +42,21 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 
 ## Not verified
 
-- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the swapped parts (`BASELINE.md`); the Rust sim has no frame driver or game-wide CRC.
+- "Verified" for the module ports means golden vectors, Gate V1 and local tests. Gate 0 is still open (the public replays mismatch the local data). `check_replays.py` covers only the swapped parts (`BASELINE.md`); the Rust sim has a frame step (`gamelogic/frame.rs`) that only its test calls, and no game-wide CRC.
 - `PORT_MAP.md` counts `PKT-216 FireWeaponPower` as implemented, but it is not bit-exact (`OPEN_DECISIONS.md`).
 - No status comments were posted on GitHub Issues or Discussions. The `WP-5.3` issue (#24) is still open with its old labels.
 
 ## Next
 
-- `AI_PORT_PLAN.md` slices the unit AI port; see `OPEN_DECISIONS.md` item 11 before going past S0. Packet counts overstate completeness (see the known gaps).
-- `MODULE_USAGE.md` (from `python3 scripts/module_census.py`) ranks the unported behavior modules by how much the replays create them. Pick from the top.
-- **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game). The one-module trial is done and its measured cost is recorded there. It decides whether more module ports are the best use of effort.
-- Cheap further swaps: the byte CRC (inline in a header, so it forces a large rebuild) and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
-- If module porting continues: `PKT-348 PhysicsUpdate` (read, not started; it needs a `set_object_transform` on `SimApi`, Matrix3D X/Y rotations, a deferred op for re-entrant forces, and `get_mass` to include contained items), or `PKT-284 OverlordContain` (needs the remaining containment hooks, `OPEN_DECISIONS.md` item 5).
+- **Owner first:** `OPEN_DECISIONS.md` item 10 (how ported Rust reaches the playable game), then item 11 (whether to port the unit AI beyond slice S0, `AI_PORT_PLAN.md`). The AI classes are the only behavior modules the replays create that are not ported.
+- Smaller work that needs no decision: the entries under "Known gaps" in `OPEN_DECISIONS.md`; vectors for the paths the two joined oracles leave uncovered; the behavior modules the replays never create (`PORT_MAP.md`, phase 5).
+- Packet counts overstate completeness (see the known gaps): `Locomotor` has no movement code and weapons do no damage.
+- Cheap further engine swaps: the byte CRC and other self-contained translation units. Add each to `SWAPS` in `scripts/build_rust_engine.py` with its own fault variant.
 - Spatial grid Stage 4c remains deferred per `PARTITION_SCOPE.md`.
 
 ## Waiting on the owner
 
-- `OPEN_DECISIONS.md` item 10, and the other unanswered items there.
+- `OPEN_DECISIONS.md` items 10 and 11, and the other unanswered items there.
 
 ## Cost of module ports
 
@@ -67,12 +66,15 @@ One worker per packet, with a script-built reading bundle: about 305k tokens for
 
 1. C++ oracle in `tests/cpp_harness/`, built three ways with `scripts/build_oracle.py` (`--opt O0`, `--opt O2`, `--opt O2 --sanitize`), run with `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy`. The three outputs must be byte-identical.
 2. Rust suite in `crates/zh_logic/tests/` against the JSON in `docs/golden_vectors/`.
-3. Mutation check: plant bugs in a copy of the tree and confirm the suite fails each one. A suite that passes first time is not proof until this is done.
-4. For engine swaps: `python3 scripts/build_rust_engine.py`, then `check_replays.py --check --expect-rust --binary ...` and the fault variants (`BASELINE.md`). State the stock CRC leaves out needs the witness check there.
-5. `python3 scripts/lint_determinism.py crates/`; `cargo check --workspace --tests` with `--features zh_logic/retail-crc` and again with `zh_logic/retail-xfer-save`; `cargo test --workspace`; `python3 scripts/port_map.py --check`.
+3. Modules that pass alone can disagree together: `golden_joins_modules` and `golden_joins2_modules` run ported modules in one world with no Rust stand-ins. Add new modules there.
+4. CI runs on x86: run `cargo test --workspace --target x86_64-apple-darwin` before pushing and check the CI result after.
+5. Mutation check: plant bugs in a copy of the tree and confirm the suite fails each one. A suite that passes first time is not proof until this is done.
+6. For engine swaps: `python3 scripts/build_rust_engine.py`, then `check_replays.py --check --expect-rust --binary ...` and the fault variants (`BASELINE.md`). State the stock CRC leaves out needs the witness check there.
+7. `python3 scripts/lint_determinism.py crates/`; `cargo check --workspace --tests` with `--features zh_logic/retail-crc` and again with `zh_logic/retail-xfer-save`; `cargo test --workspace`; `python3 scripts/port_map.py --check`.
 
 ## Practical notes
 
 - The repo is not `cargo fmt` clean. Do not reformat files you are not changing.
+- Concurrent porting branches added the same methods independently; after merging them, search for duplicated methods and tables before testing.
 - `env:ephemeral-web` assignments are paused and the Actions quota is nearly used up (`AGENTS.md` §4.4). Batch pushes.
 - A harness that touches shroud cells must replace the local player, or the cells call the absent display. See `gen_partition_shroud.cpp`.
