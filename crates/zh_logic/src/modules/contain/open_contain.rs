@@ -1021,9 +1021,7 @@ pub fn scatter_to_nearby_position(sim: &mut dyn SimApi, container: ObjectSlot, r
     if sim.has_ai(rider) != FALSE {
         sim.set_object_position(rider, &c_pos);
         #[cfg(not(feature = "retail-crc"))]
-        if let Some(o) = sim.object_mut(rider) {
-            o.ai_goal_object = None;
-        }
+        sim.ai_clear_goal_object(rider);
         sim.ai_move_to_position(rider, &pos, CommandSourceType::FromAi);
     } else {
         sim.set_object_position(rider, &pos);

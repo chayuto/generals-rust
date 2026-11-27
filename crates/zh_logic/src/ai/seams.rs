@@ -1,13 +1,21 @@
 //! What the AI asks of code that is not ported yet. A test answers these from a
 //! tape of what the reference did; later slices implement them for real.
 //!
-//! Only [`PathServices`] has a caller today. [`PathUnitQueries`] and
+//! [`PathServices`] and [`AiSeams`] have callers. [`PathUnitQueries`] and
 //! [`MapTerrain`] fix the questions the pathfinder and the AI ask, taken from the
 //! calls in the reference; nothing implements or checks them yet.
 
+use crate::combat::locomotor::LocomotorSeams;
+use crate::modules::module::CommandSourceType;
 use crate::object::thing::ThingTerrainAccess;
+use crate::rules::combat_types::LocomotorSurfaceTypeMask;
+use crate::sim::SimView;
+use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use zh_common::core::state_machine::{StateExitType, StateId, StateReturnType};
 use zh_common::math::{Coord3D, ICoord2D, Region3D};
-use zh_common::types::{Bool, ObjectId, FALSE};
+use zh_common::types::{Bool, ObjectId, Real, UpdateSleepTime, FALSE};
+use zh_common::xfer::{Xfer, XferError};
 
 /// `TheAI->pathfinder()` as far as the frame step and the AI orders use it. The
 /// searches join this trait with the slices that port them.
@@ -79,4 +87,231 @@ pub trait MapTerrain: ThingTerrainAccess {
     fn waypoint_by_id(&self, id: u32) -> Option<WaypointInfo>;
     /// `getWaypointByName`, as an id.
     fn waypoint_by_name(&self, name: &str) -> Option<u32>;
+}
+
+/// `ActionManager` questions the AI asks before taking an order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiActionQuery {
+    /// `canGetHealedAt`.
+    GetHealedAt,
+    /// `canGetRepairedAt`.
+    GetRepairedAt,
+    /// `canEnterObject` without a capacity check.
+    Enter,
+}
+
+/// What `AIUpdateInterface` and its states ask of code that is not ported yet.
+///
+/// Every method has the answer of a world without that code, so a plain
+/// [`NoAiSeams`] gives units that take orders and idle. A test answers from a
+/// tape of the reference's calls.
+pub trait AiSeams: Send {
+    /// `Pathfinder::validMovementTerrain` (S3).
+    fn valid_movement_terrain(
+        &mut self,
+        _layer: PathfindLayerEnum,
+        _surfaces: LocomotorSurfaceTypeMask,
+        _pos: &Coord3D,
+    ) -> Bool {
+        1
+    }
+    /// `PartitionManager::getGroundOrStructureHeight` (S3 or S9).
+    fn ground_or_structure_height(&mut self, _x: Real, _y: Real) -> Real {
+        0.0
+    }
+    /// `Pathfinder::chooseBestLocomotorForPosition` (S3): the index in the set.
+    /// Without a pathfinder the first entry is taken.
+    fn choose_best_locomotor(
+        &mut self,
+        _owner: ObjectId,
+        _layer: PathfindLayerEnum,
+        _count: usize,
+        _pos: &Coord3D,
+    ) -> Option<usize> {
+        Some(0)
+    }
+    /// `Pathfinder::updateGoal` (S4).
+    fn update_goal(&mut self, _owner: ObjectId, _pos: &Coord3D, _layer: PathfindLayerEnum) {}
+    /// `Pathfinder::updatePos` (S4).
+    fn update_pos(&mut self, _owner: ObjectId, _pos: &Coord3D) {}
+    /// `Pathfinder::goalPosition` (S4).
+    fn goal_position(&mut self, _owner: ObjectId) -> Option<Coord3D> {
+        None
+    }
+    /// `Pathfinder::snapPosition` (S4).
+    fn snap_position(&mut self, _owner: ObjectId, pos: Coord3D) -> Coord3D {
+        pos
+    }
+    /// `Pathfinder::clientSafeQuickDoesPathExist` for the unit's locomotors (S5).
+    fn quick_path_exists(&mut self, _owner: ObjectId, _to: &Coord3D) -> Bool {
+        1
+    }
+    /// The searches of `AIUpdateInterface::doPathfind` and `computeQuickPath`
+    /// (S5, S6, S9). Answers whether the unit has a path afterwards.
+    fn compute_path(&mut self, _owner: ObjectId) -> Bool {
+        FALSE
+    }
+    /// `Path::computePointOnPath` or `computeFlightDistToGoal` (S3, S9): the
+    /// point to steer for and the distance along the path.
+    fn point_on_path(&mut self, _owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real) {
+        (*pos, 0.0)
+    }
+    /// `Path::xfer` (S3).
+    fn path_xfer(&mut self, _owner: ObjectId, _xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        Err(XferError::InvalidData)
+    }
+
+    /// `onEnter` of a state that is not ported. Without it the unit stays in the
+    /// state and does nothing.
+    fn state_enter(&mut self, _owner: ObjectId, _state: StateId) -> StateReturnType {
+        StateReturnType::Continue
+    }
+    /// `update` of a state that is not ported.
+    fn state_update(&mut self, _owner: ObjectId, _state: StateId) -> StateReturnType {
+        StateReturnType::Continue
+    }
+    /// `onExit` of a state that is not ported.
+    fn state_exit(&mut self, _owner: ObjectId, _state: StateId, _status: StateExitType) {}
+    /// `xfer` of a state that is not ported. Saving such a unit fails.
+    fn state_xfer(
+        &mut self,
+        _owner: ObjectId,
+        _state: StateId,
+        _xfer: &mut dyn Xfer,
+    ) -> Result<(), XferError> {
+        Err(XferError::InvalidData)
+    }
+
+    /// `TurretAI::updateTurretAI` (S14).
+    fn turret_update(&mut self, _owner: ObjectId, _turret: usize) -> UpdateSleepTime {
+        UpdateSleepTime::FOREVER
+    }
+    /// `TurretAI::xfer` (S14).
+    fn turret_xfer(
+        &mut self,
+        _owner: ObjectId,
+        _turret: usize,
+        _xfer: &mut dyn Xfer,
+    ) -> Result<(), XferError> {
+        Err(XferError::InvalidData)
+    }
+
+    /// `AIUpdateInterface::getNextMoodTarget` (S12).
+    fn next_mood_target(
+        &mut self,
+        _owner: ObjectId,
+        _called_by_ai: Bool,
+        _during_idle: Bool,
+    ) -> Option<ObjectId> {
+        None
+    }
+    /// `AI::findClosestRepulsor` (S12).
+    fn closest_repulsor(&mut self, _owner: ObjectId, _range: Real) -> Option<ObjectId> {
+        None
+    }
+    /// The partition search of `privateAttackPosition` for a weapon that keeps
+    /// attacking around the spot (S12).
+    fn closest_attack_victim(
+        &mut self,
+        _owner: ObjectId,
+        _pos: &Coord3D,
+        _range: Real,
+        _source: CommandSourceType,
+    ) -> Option<ObjectId> {
+        None
+    }
+    /// `ActionManager` (S19).
+    fn can_act_on(
+        &mut self,
+        _query: AiActionQuery,
+        _owner: ObjectId,
+        _target: ObjectId,
+        _source: CommandSourceType,
+    ) -> Bool {
+        FALSE
+    }
+    /// `TerrainLogic::findClosestEdgePoint` (S1).
+    fn closest_edge_point(&mut self, pos: &Coord3D) -> Coord3D {
+        *pos
+    }
+}
+
+/// A world without any of the code behind [`AiSeams`].
+pub struct NoAiSeams;
+
+impl AiSeams for NoAiSeams {}
+
+/// The seams as [`crate::sim::SimContext`] holds them.
+pub type SharedAiSeams = Arc<Mutex<dyn AiSeams>>; // determinism-ok: single-threaded handle to unported code, not simulation state
+
+pub fn shared<T: AiSeams + 'static>(seams: T) -> SharedAiSeams {
+    Arc::new(Mutex::new(seams))
+}
+
+fn lock(seams: &SharedAiSeams) -> MutexGuard<'_, dyn AiSeams + 'static> {
+    seams.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The seams of the world, locked for one question. Do not keep the result across
+/// a call into the world.
+pub struct SeamsGuard(SharedAiSeams);
+
+impl SeamsGuard {
+    pub fn new(seams: SharedAiSeams) -> Self {
+        Self(seams)
+    }
+}
+
+macro_rules! forward {
+    ($($name:ident($($arg:ident: $ty:ty),*) $(-> $ret:ty)?;)*) => {
+        impl SeamsGuard {
+            $(pub fn $name(&mut self, $($arg: $ty),*) $(-> $ret)? {
+                lock(&self.0).$name($($arg),*)
+            })*
+        }
+    };
+}
+
+forward! {
+    valid_movement_terrain(layer: PathfindLayerEnum, surfaces: LocomotorSurfaceTypeMask, pos: &Coord3D) -> Bool;
+    ground_or_structure_height(x: Real, y: Real) -> Real;
+    choose_best_locomotor(owner: ObjectId, layer: PathfindLayerEnum, count: usize, pos: &Coord3D) -> Option<usize>;
+    update_goal(owner: ObjectId, pos: &Coord3D, layer: PathfindLayerEnum);
+    update_pos(owner: ObjectId, pos: &Coord3D);
+    goal_position(owner: ObjectId) -> Option<Coord3D>;
+    snap_position(owner: ObjectId, pos: Coord3D) -> Coord3D;
+    quick_path_exists(owner: ObjectId, to: &Coord3D) -> Bool;
+    compute_path(owner: ObjectId) -> Bool;
+    point_on_path(owner: ObjectId, pos: &Coord3D) -> (Coord3D, Real);
+    path_xfer(owner: ObjectId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
+    state_enter(owner: ObjectId, state: StateId) -> StateReturnType;
+    state_update(owner: ObjectId, state: StateId) -> StateReturnType;
+    state_exit(owner: ObjectId, state: StateId, status: StateExitType);
+    state_xfer(owner: ObjectId, state: StateId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
+    turret_update(owner: ObjectId, turret: usize) -> UpdateSleepTime;
+    turret_xfer(owner: ObjectId, turret: usize, xfer: &mut dyn Xfer) -> Result<(), XferError>;
+    next_mood_target(owner: ObjectId, called_by_ai: Bool, during_idle: Bool) -> Option<ObjectId>;
+    closest_repulsor(owner: ObjectId, range: Real) -> Option<ObjectId>;
+    closest_attack_victim(owner: ObjectId, pos: &Coord3D, range: Real, source: CommandSourceType) -> Option<ObjectId>;
+    can_act_on(query: AiActionQuery, owner: ObjectId, target: ObjectId, source: CommandSourceType) -> Bool;
+    closest_edge_point(pos: &Coord3D) -> Coord3D;
+}
+
+impl LocomotorSeams for SeamsGuard {
+    fn valid_movement_terrain(
+        &mut self,
+        layer: PathfindLayerEnum,
+        surfaces: LocomotorSurfaceTypeMask,
+        pos: &Coord3D,
+    ) -> Bool {
+        lock(&self.0).valid_movement_terrain(layer, surfaces, pos)
+    }
+
+    fn ground_or_structure_height(&mut self, x: Real, y: Real) -> Real {
+        lock(&self.0).ground_or_structure_height(x, y)
+    }
+}
+
+pub fn ai_seams(sim: &(impl SimView + ?Sized)) -> SeamsGuard {
+    SeamsGuard::new(sim.shared_ai_seams())
 }

@@ -388,7 +388,7 @@ impl ParachuteContain {
                     LocomotorSetType::Freefall
                 },
             );
-            let locomotor = sim.object(me).and_then(|o| o.ai_locomotor.as_ref()).map(|l| {
+            let locomotor = sim.cur_locomotor(me).map(|l| {
                 (
                     l.template.pitch_stiffness,
                     l.template.roll_stiffness,

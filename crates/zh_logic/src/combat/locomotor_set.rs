@@ -83,6 +83,7 @@ impl LocomotorSet {
         self.locomotors.iter().find(|l| (l.get_legal_surfaces() & surfaces) != 0)
     }
     pub fn locomotors(&self) -> &[Locomotor] { &self.locomotors }
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Locomotor> { self.locomotors.get_mut(index) }
     pub fn get_valid_surfaces(&self) -> LocomotorSurfaceTypeMask { self.valid_surfaces }
     pub fn is_downhill_only(&self) -> Bool { self.downhill_only }
 }
@@ -155,6 +156,11 @@ impl LocomotorSet {
         store: &LocomotorStore,
         cur_name: Option<&str>,
     ) -> Result<Option<&mut Locomotor>, XferError> {
+        // `xferSelfAndCurLocoPtr` goes through `xferSnapshot`, which in CRC mode
+        // calls the empty `LocomotorSet::crc`, and then writes nothing either.
+        if xfer.mode() == XferMode::Crc {
+            return Ok(None);
+        }
         self.xfer_with_store(xfer, store)?;
         match xfer.mode() {
             XferMode::Save | XferMode::Crc => {

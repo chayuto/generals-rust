@@ -503,3 +503,23 @@ It returns 0 and zeroes the normal, whatever `getGroundHeight` says. The shipped
 - **A load is not a round trip.** `ParkingPlaceBehavior::xfer` builds its spaces and runways while
   loading, so a module saved before they exist saves more afterwards. Compare with what the
   reference saves after the load, not with the bytes loaded.
+
+## Found by the AI orders oracle (`gen_s8_ai_orders.cpp`)
+
+### `AIUpdateInterface::loadPostProcess` passes an unset `z`
+
+- **Where:** the moving branch of `AIUpdateInterface::loadPostProcess`.
+- **What happens:** it sets `goalPos.x` and `goalPos.y` from the goal cell and passes the point to
+  `updateGoal` with `z` never written. A tape that records it differs between `-O0` and `-O2`.
+- **Guard:** the harness records that `z` as zero; `golden_s8_ai_orders` expects zero.
+
+### The AI's CRC leaves out its sub-objects
+
+- **What happens:** `AIUpdateInterface::crc` runs its `xfer`, but the state machine, path,
+  locomotor set and turrets go through `xferSnapshot`, which in CRC mode calls their empty `crc`.
+- **Guard:** `golden_s8_ai_orders` compares the CRC of every unit after every step.
+
+### Wrapped `Pathfinder::updatePos` also fires on every move
+
+- `Object::reactToTransformChange` calls it for any object with an AI, so a tape of one caller has
+  to gate the recording.

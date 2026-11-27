@@ -464,6 +464,12 @@ pub trait BehaviorModule: Send {
         None
     }
 
+    /// The command entry of a resident AI module: orders go there instead of to
+    /// its `&mut self` facet methods.
+    fn ai_call_entry(&self) -> Option<crate::modules::update::ai_update::AiCallEntry> {
+        None
+    }
+
     /// Work the C++ module constructor does against the live world (PRNG draws, status bits).
     /// Runs once, in module order, while the owner is still being constructed.
     fn on_construct(&mut self, _sim: &mut dyn SimApi, _ctx: ModuleContext) {}
@@ -2028,6 +2034,14 @@ pub trait AiUpdateFacet {
     }
     fn has_cur_locomotor(&self) -> Bool {
         FALSE
+    }
+    /// `getCurLocomotor` of an AI that owns its locomotors.
+    fn cur_locomotor(&self) -> Option<&crate::combat::locomotor::Locomotor> {
+        None
+    }
+    /// The state machine's goal object id and goal position.
+    fn goal_of(&self) -> (Option<ObjectId>, Coord3D) {
+        (None, Coord3D::default())
     }
     /// Orders of `AICommandInterface` only a port of the AI can carry out. Like
     /// every command, an implementation records `cmd_source` as the owner's

@@ -228,8 +228,7 @@ pub fn unwrap_special_zero_slot_rider(sim: &dyn SimView, rider: ObjectSlot) -> O
 
 /// `Object::isUsingAirborneLocomotor`.
 pub fn is_using_airborne_locomotor(sim: &dyn SimView, obj: ObjectSlot) -> bool {
-    sim.object(obj)
-        .and_then(|o| o.ai_locomotor.as_ref())
+    sim.cur_locomotor(obj)
         .is_some_and(|l| (l.get_legal_surfaces() & (LocomotorSurfaceType::Air as Int)) != 0)
 }
 

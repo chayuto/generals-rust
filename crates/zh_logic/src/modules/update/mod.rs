@@ -1,5 +1,6 @@
 //! `WP-5.4`: `UpdateModule` leaf modules.
 
+pub mod ai_update;
 pub mod auto_deposit_update;
 pub mod base_renerate_update;
 pub mod battle_plan_update;
@@ -56,6 +57,16 @@ use zh_common::core::name_key_generator::NameKeyGenerator;
 
 /// Replaces the built-in stubs of the ported update modules.
 pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerator) {
+    reg.register_module(
+        nk,
+        "AIUpdateInterface",
+        ModuleType::Behavior,
+        FacetMask(0x001 | FacetMask::AI_UPDATE.0),
+        SleepyUpdatePhase::Initial,
+        true,
+        ai_update::parse_ai_update_data,
+        ai_update::create_ai_update,
+    );
     reg.register_module(
         nk,
         "BattlePlanUpdate",

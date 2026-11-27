@@ -39,8 +39,9 @@ use crate::modules::{
     JetAiState, ParkingPlaceInfo, StealthParams,
 };
 use crate::modules::module::SupplyTruckAiFacet;
-use crate::ai::seams::{NoPathServices, PathServices};
+use crate::ai::seams::{NoPathServices, PathServices, NoAiSeams, SharedAiSeams};
 use crate::modules::module::AiUpdateFacet;
+use crate::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType};
 use crate::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use crate::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
 use crate::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
@@ -530,6 +531,8 @@ pub struct RulesRegistry {
     pub special_power_store: SpecialPowerStore,
     pub crate_system: CrateSystem,
     pub global_data: GlobalData,
+    /// `TAiData::m_forceIdleFramesCount` (`ForceIdleMSEC` in `AIData.ini`).
+    pub ai_force_idle_frames_count: UnsignedInt,
     pub fx_list_names: BTreeSet<String>,
     pub damage_fx_names: BTreeSet<String>,
     pub ocl_names: BTreeSet<String>,
@@ -589,6 +592,7 @@ impl RulesRegistry {
             special_power_store: SpecialPowerStore::new(),
             crate_system,
             global_data: GlobalData::new(),
+            ai_force_idle_frames_count: 1,
             fx_list_names: BTreeSet::new(),
             damage_fx_names: BTreeSet::new(),
             ocl_names: BTreeSet::new(),
@@ -1405,6 +1409,19 @@ pub trait SimView {
     ) -> CanAttackResult;
     /// `AIUpdateInterface::getLastCommandSource`.
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType;
+    /// The AI seams, for [`crate::ai::seams::ai_seams`].
+    fn shared_ai_seams(&self) -> SharedAiSeams;
+    /// `getAI()->getCurLocomotor()`, from the AI module or the stand-in record.
+    fn cur_locomotor(&self, owner: ObjectSlot) -> Option<&Locomotor>;
+    /// The id of the object a module belongs to.
+    fn module_owner_id(&self, module: ModuleSlot) -> Option<ObjectId>;
+    /// The AI goal object id and goal position of the owner.
+    fn ai_goal_of(&self, owner: ObjectSlot) -> (Option<ObjectId>, Coord3D);
+    /// `CollideModuleInterface::wouldLikeToCollideWith` of any collide module of
+    /// `crate_slot`.
+    fn would_like_to_collide(&self, crate_slot: ObjectSlot, other: ObjectSlot) -> bool;
+    /// The members of a team, from the head of its list.
+    fn team_members_of(&self, team: TeamId) -> Vec<ObjectSlot>;
     /// The controlling player's objects, in `Player::iterateObjects` order.
     fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot>;
     /// The objects of every player who counts `team_id`'s player as an enemy, in player order.
@@ -2100,6 +2117,21 @@ pub trait SimApi: SimView {
     );
     /// PRNG-visible part of the `AIUpdateInterface` constructor: `chooseLocomotorSet(NORMAL)`.
     fn ai_construct(&mut self, owner: ObjectSlot);
+    /// `Pathfinder::queueForPath`.
+    fn queue_for_path(&mut self, id: ObjectId) -> Bool;
+    /// `TheLocomotorStore->newLocomotor` by name; draws from the logic stream.
+    fn new_locomotor(&mut self, name: &str) -> Option<Locomotor>;
+    /// `ContainModuleInterface::markAllPassengersDetected`.
+    fn contain_mark_all_detected(&mut self, owner: ObjectSlot);
+    /// `ContainModuleInterface::orderAllPassengersToExit`.
+    fn contain_order_all_to_exit(
+        &mut self,
+        owner: ObjectSlot,
+        cmd_source: CommandSourceType,
+        instantly: Bool,
+    );
+    /// `friend_setGoalObject(nullptr)` of the owner's AI.
+    fn ai_clear_goal_object(&mut self, owner: ObjectSlot);
     /// PRNG-visible part of `AIUpdateInterface::onObjectCreated` (state machine creation).
     fn ai_init_state_machine(&mut self, owner: ObjectSlot);
     /// `AIUpdateInterface::chooseLocomotorSet`.
@@ -2672,6 +2704,8 @@ pub struct SimContext {
     pub client: Box<dyn ClientSink>,
     /// The path queue, until the pathfinder is ported into the world.
     pub paths: Box<dyn PathServices>,
+    /// What the unit AI asks of code that is not ported yet.
+    pub ai_seams: SharedAiSeams,
 }
 
 impl Default for SimContext {
@@ -2688,6 +2722,7 @@ impl SimContext {
             terrain: Box::new(FlatTerrain),
             client: Box::new(NoopClientSink),
             paths: Box::new(NoPathServices),
+            ai_seams: crate::ai::seams::shared(NoAiSeams),
         }
     }
 
@@ -2707,6 +2742,69 @@ impl SimContext {
             .id_of(owner)
             .and_then(|id| self.world.attack_abilities.get(&id).copied())
             .unwrap_or_default()
+    }
+
+    /// Delivers `call` to the owner's AI if that is a resident module with a
+    /// command entry. `false` for module stand-ins.
+    fn call_ai(&mut self, owner: ObjectSlot, call: &AiCall) -> bool {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.ai_slot) else {
+            return false;
+        };
+        let Some(entry) = self
+            .world
+            .modules
+            .payload(ms)
+            .and_then(|m| m.ai_call_entry())
+        else {
+            return false;
+        };
+        let ctx = self.world.modules.meta(ms).context(ms);
+        entry(self, ctx, call);
+        true
+    }
+
+    /// [`Self::call_ai`] with a command.
+    fn command_ai(
+        &mut self,
+        owner: ObjectSlot,
+        cmd: AiCommandType,
+        cmd_source: CommandSourceType,
+        fill: impl FnOnce(&SimContext, &mut AiCommandParms),
+    ) -> bool {
+        let mut parms = AiCommandParms::new(cmd, cmd_source);
+        fill(self, &mut parms);
+        self.call_ai(owner, &AiCall::Command(parms))
+    }
+
+    /// Records an order and sends it to a resident AI. `false`, and nothing
+    /// done, for a module stand-in.
+    fn resident_order(
+        &mut self,
+        owner: ObjectSlot,
+        order: &str,
+        cmd: AiCommandType,
+        cmd_source: CommandSourceType,
+        fill: impl FnOnce(&SimContext, &mut AiCommandParms),
+    ) -> bool {
+        let Some((obj_id, ms)) = self
+            .world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot.map(|ms| (o.id, ms)))
+        else {
+            return false;
+        };
+        let resident = self
+            .world
+            .modules
+            .payload(ms)
+            .and_then(|m| m.ai_call_entry())
+            .is_some();
+        if !resident {
+            return false;
+        }
+        self.world.ai_commands.push((obj_id, order.to_owned()));
+        self.command_ai(owner, cmd, cmd_source, fill)
     }
 
     /// Sends an order to the owner's AI module, which is where the AI port reacts to it.
@@ -4364,6 +4462,16 @@ impl SimContext {
         // `register_update_module`.
         for &(ms, _) in &behaviors {
             if self.world.modules.is_alive(ms) {
+                let entry = self
+                    .world
+                    .modules
+                    .payload(ms)
+                    .and_then(|m| m.ai_call_entry());
+                if let Some(entry) = entry {
+                    let ctx = self.world.modules.meta(ms).context(ms);
+                    entry(self, ctx, &AiCall::ObjectCreated);
+                    continue;
+                }
                 let _ = self.dispatch_module(ms, |m, sim, ctx| {
                     m.on_object_created(sim, ctx);
                 });
@@ -5325,10 +5433,15 @@ impl SimView for SimContext {
     }
 
     fn object_ai_goal_object(&self, owner: ObjectSlot) -> Option<ObjectSlot> {
-        self.world
-            .objects
-            .get(owner)
-            .and_then(|o| o.ai_goal_object)
+        let obj = self.world.objects.get(owner)?;
+        // The AI holds the goal as an id. The record field is only written for an
+        // object whose goal is set up without an order.
+        obj.ai_slot
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .and_then(|ai| ai.goal_of().0)
+            .and_then(|id| self.find_object(id))
+            .or(obj.ai_goal_object)
     }
 
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
@@ -5414,8 +5527,7 @@ impl SimView for SimContext {
     }
 
     fn ai_cur_locomotor_preferred_height(&self, owner: ObjectSlot) -> Option<Real> {
-        let obj = self.world.objects.get(owner)?;
-        obj.ai_locomotor.as_ref().map(|l| l.preferred_height)
+        self.cur_locomotor(owner).map(|l| l.preferred_height)
     }
 
     fn terrain_extent(&self) -> Region3D {
@@ -6157,7 +6269,7 @@ impl SimView for SimContext {
         if valid_surfaces == air {
             return FALSE;
         }
-        let Some(loco) = obj.ai_locomotor.as_ref() else {
+        let Some(loco) = self.cur_locomotor(owner) else {
             return FALSE;
         };
         if loco.get_legal_surfaces() & air != 0
@@ -6319,6 +6431,55 @@ impl SimView for SimContext {
         _cmd_source: CommandSourceType,
     ) -> CanAttackResult {
         self.attack_ability(owner).weapon_against_target
+    }
+
+    fn shared_ai_seams(&self) -> SharedAiSeams {
+        self.ai_seams.clone()
+    }
+
+    fn cur_locomotor(&self, owner: ObjectSlot) -> Option<&Locomotor> {
+        let obj = self.world.objects.get(owner)?;
+        obj.ai_slot
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .and_then(|ai| ai.cur_locomotor())
+            .or(obj.ai_locomotor.as_deref())
+    }
+
+    fn module_owner_id(&self, module: ModuleSlot) -> Option<ObjectId> {
+        if !self.world.modules.is_alive(module) {
+            return None;
+        }
+        let slot = self.world.modules.meta(module).owner_slot;
+        self.world.objects.id_of(slot)
+    }
+
+    fn ai_goal_of(&self, owner: ObjectSlot) -> (Option<ObjectId>, Coord3D) {
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.ai_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_ai())
+            .map_or((None, Coord3D::default()), |ai| ai.goal_of())
+    }
+
+    fn would_like_to_collide(&self, crate_slot: ObjectSlot, other: ObjectSlot) -> bool {
+        let Some(obj) = self.world.objects.get(crate_slot) else {
+            return false;
+        };
+        obj.behaviors.iter().any(|&(ms, _)| {
+            let ctx = self.world.modules.meta(ms).context(ms);
+            self.world
+                .modules
+                .payload(ms)
+                .and_then(|m| m.as_collide())
+                .is_some_and(|c| c.would_like_to_collide_with(self, ctx, other) != FALSE)
+        })
+    }
+
+    fn team_members_of(&self, team: TeamId) -> Vec<ObjectSlot> {
+        self.world.team_members.get(&team).cloned().unwrap_or_default()
     }
 
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
@@ -6640,34 +6801,55 @@ impl CollisionHost for SimContext {
 
 impl SimApi for SimContext {
     fn ai_busy(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiBusy", AiCommandType::Busy, cmd_source, |_, _| {}) {
+            return;
+        }
         self.order_ai(owner, "aiBusy", |ai, sim, ctx| ai.ai_busy(sim, ctx, cmd_source));
     }
 
     fn ai_move_to_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiMoveToObject", AiCommandType::MoveToObject, cmd_source, |s, p| p.obj = s.world.objects.id_of(target)) {
+            return;
+        }
         self.order_ai(owner, "aiMoveToObject", |ai, sim, ctx| {
             ai.ai_move_to_object(sim, ctx, target, cmd_source)
         });
     }
 
     fn ai_attack_object(&mut self, owner: ObjectSlot, target: ObjectSlot, max_shots: Int, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiAttackObject", AiCommandType::AttackObject, cmd_source, |s, p| {
+            p.obj = s.world.objects.id_of(target);
+            p.int_value = max_shots;
+        }) {
+            return;
+        }
         self.order_ai(owner, "aiAttackObject", |ai, sim, ctx| {
             ai.ai_attack_object(sim, ctx, target, max_shots, cmd_source)
         });
     }
 
     fn ai_face_object(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiFaceObject", AiCommandType::FaceObject, cmd_source, |s, p| p.obj = s.world.objects.id_of(target)) {
+            return;
+        }
         self.order_ai(owner, "aiFaceObject", |ai, sim, ctx| {
             ai.ai_face_object(sim, ctx, target, cmd_source)
         });
     }
 
     fn ai_face_position(&mut self, owner: ObjectSlot, pos: &Coord3D, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiFacePosition", AiCommandType::FacePosition, cmd_source, |_, p| p.pos = *pos) {
+            return;
+        }
         self.order_ai(owner, "aiFacePosition", |ai, sim, ctx| {
             ai.ai_face_position(sim, ctx, pos, cmd_source)
         });
     }
 
     fn ai_enter(&mut self, owner: ObjectSlot, target: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiEnter", AiCommandType::Enter, cmd_source, |s, p| p.obj = s.world.objects.id_of(target)) {
+            return;
+        }
         self.order_ai(owner, "aiEnter", |ai, sim, ctx| ai.ai_enter(sim, ctx, target, cmd_source));
     }
 
@@ -8075,6 +8257,11 @@ impl SimApi for SimContext {
     }
 
     fn set_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType) {
+        // `LocomotorSetUpgrade` calls `setLocomotorUpgrade(true)`.
+        let upgraded = Bool::from(set_type == LocomotorSetType::NormalUpgraded);
+        if self.call_ai(owner, &AiCall::SetLocomotorUpgrade(upgraded)) {
+            return;
+        }
         if let Some(obj) = self.world.objects.get_mut(owner) {
             obj.cur_locomotor_set = set_type;
         }
@@ -9567,6 +9754,12 @@ impl SimApi for SimContext {
     }
 
     fn ai_mark_as_dead(&mut self, owner: ObjectSlot) {
+        if self.call_ai(owner, &AiCall::MarkAsDead) {
+            if let Some(obj) = self.world.objects.get_mut(owner) {
+                obj.ai_dead = TRUE;
+            }
+            return;
+        }
         let ai_slot = match self.world.objects.get_mut(owner) {
             Some(obj) if obj.ai_slot.is_some() => {
                 obj.ai_dead = TRUE;
@@ -9829,6 +10022,12 @@ impl SimApi for SimContext {
         max_shots_to_fire: Int,
         cmd_source: CommandSourceType,
     ) {
+        if self.resident_order(owner, "aiForceAttackObject", AiCommandType::ForceAttackObject, cmd_source, |s, p| {
+            p.obj = s.world.objects.id_of(victim);
+            p.int_value = max_shots_to_fire;
+        }) {
+            return;
+        }
         self.order_ai(owner, "aiForceAttackObject", |ai, sim, ctx| {
             ai.ai_force_attack_object(sim, ctx, victim, max_shots_to_fire, cmd_source);
         });
@@ -9841,6 +10040,12 @@ impl SimApi for SimContext {
         max_shots_to_fire: Int,
         cmd_source: CommandSourceType,
     ) {
+        if self.resident_order(owner, "aiAttackPosition", AiCommandType::AttackPosition, cmd_source, |_, p| {
+            p.pos = *pos;
+            p.int_value = max_shots_to_fire;
+        }) {
+            return;
+        }
         let pos = *pos;
         self.order_ai(owner, "aiAttackPosition", |ai, sim, ctx| {
             ai.ai_attack_position(sim, ctx, &pos, max_shots_to_fire, cmd_source);
@@ -10103,6 +10308,9 @@ impl SimApi for SimContext {
     }
 
     fn ai_idle(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiIdle", AiCommandType::Idle, cmd_source, |_, _| {}) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10140,6 +10348,9 @@ impl SimApi for SimContext {
     }
 
     fn ai_hunt(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiHunt", AiCommandType::Hunt, cmd_source, |_, _| {}) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10164,6 +10375,9 @@ impl SimApi for SimContext {
         pos: &Coord3D,
         cmd_source: CommandSourceType,
     ) {
+        if self.resident_order(owner, "aiMoveToPosition", AiCommandType::MoveToPosition, cmd_source, |_, p| p.pos = *pos) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10191,6 +10405,12 @@ impl SimApi for SimContext {
         ignore_obj: Option<ObjectSlot>,
         cmd_source: CommandSourceType,
     ) {
+        if self.resident_order(owner, "aiFollowPath", AiCommandType::FollowPath, cmd_source, |s, p| {
+            p.coords = path.to_vec();
+            p.obj = ignore_obj.and_then(|o| s.world.objects.id_of(o));
+        }) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10212,6 +10432,9 @@ impl SimApi for SimContext {
     }
 
     fn ai_hack_internet(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
+        if self.resident_order(owner, "aiHackInternet", AiCommandType::HackInternet, cmd_source, |_, _| {}) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10254,6 +10477,9 @@ impl SimApi for SimContext {
     }
 
     fn ai_wake_up_and_attempt_to_target(&mut self, owner: ObjectSlot) {
+        if self.call_ai(owner, &AiCall::WakeUpAndAttemptToTarget) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10429,6 +10655,16 @@ impl SimApi for SimContext {
         ignore_obj: Option<ObjectSlot>,
         cmd_source: CommandSourceType,
     ) {
+        // A resident AI takes the order; the record below is kept for both.
+        self.command_ai(
+            owner,
+            AiCommandType::FollowExitProductionPath,
+            cmd_source,
+            |s, p| {
+                p.coords = path.to_vec();
+                p.obj = ignore_obj.and_then(|o| s.world.objects.id_of(o));
+            },
+        );
         let Some(obj_id) = self.world.objects.id_of(owner) else {
             return;
         };
@@ -10589,6 +10825,9 @@ impl SimApi for SimContext {
         heal_unit: ObjectSlot,
         cmd_source: CommandSourceType,
     ) {
+        if self.resident_order(owner, "aiGetHealed", AiCommandType::GetHealed, cmd_source, |s, p| p.obj = s.world.objects.id_of(heal_unit)) {
+            return;
+        }
         let Some((obj_id, ai_ms)) = self
             .world
             .objects
@@ -10638,6 +10877,52 @@ impl SimApi for SimContext {
         .unwrap_or(FALSE)
     }
 
+    fn queue_for_path(&mut self, id: ObjectId) -> Bool {
+        self.paths.queue_for_path(id)
+    }
+
+    fn new_locomotor(&mut self, name: &str) -> Option<Locomotor> {
+        let frame = self.world.frame;
+        let template = self.rules.locomotor_store.find_by_name(name)?;
+        Some(Locomotor::new(template, &mut self.world.rng, frame))
+    }
+
+    fn contain_mark_all_detected(&mut self, owner: ObjectSlot) {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, sim, ctx| {
+            if let Some(contain) = m.as_contain_mut() {
+                contain.mark_all_passengers_detected(sim, ctx);
+            }
+        });
+    }
+
+    fn contain_order_all_to_exit(
+        &mut self,
+        owner: ObjectSlot,
+        cmd_source: CommandSourceType,
+        instantly: Bool,
+    ) {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.contain_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, sim, ctx| {
+            if let Some(contain) = m.as_contain_mut() {
+                contain.order_all_passengers_to_exit(sim, ctx, cmd_source, instantly);
+            }
+        });
+    }
+
+    fn ai_clear_goal_object(&mut self, owner: ObjectSlot) {
+        if self.call_ai(owner, &AiCall::SetGoalObject(None)) {
+            return;
+        }
+        if let Some(o) = self.world.objects.get_mut(owner) {
+            o.ai_goal_object = None;
+        }
+    }
+
     fn ai_construct(&mut self, owner: ObjectSlot) {
         self.ai_choose_locomotor_set(owner, LocomotorSetType::Normal);
     }
@@ -10657,6 +10942,9 @@ impl SimApi for SimContext {
     }
 
     fn ai_choose_locomotor_set(&mut self, owner: ObjectSlot, set_type: LocomotorSetType) {
+        if self.call_ai(owner, &AiCall::ChooseLocomotorSet(set_type)) {
+            return;
+        }
         let Some(obj) = self.world.objects.get(owner) else {
             return;
         };
@@ -10786,6 +11074,24 @@ impl MockSimApi {
 }
 
 impl SimView for MockSimApi {
+    fn shared_ai_seams(&self) -> SharedAiSeams {
+        self.ctx.shared_ai_seams()
+    }
+    fn cur_locomotor(&self, owner: ObjectSlot) -> Option<&Locomotor> {
+        self.ctx.cur_locomotor(owner)
+    }
+    fn module_owner_id(&self, module: ModuleSlot) -> Option<ObjectId> {
+        self.ctx.module_owner_id(module)
+    }
+    fn ai_goal_of(&self, owner: ObjectSlot) -> (Option<ObjectId>, Coord3D) {
+        self.ctx.ai_goal_of(owner)
+    }
+    fn would_like_to_collide(&self, crate_slot: ObjectSlot, other: ObjectSlot) -> bool {
+        self.ctx.would_like_to_collide(crate_slot, other)
+    }
+    fn team_members_of(&self, team: TeamId) -> Vec<ObjectSlot> {
+        self.ctx.team_members_of(team)
+    }
     fn object_jet_ai(&self, owner: ObjectSlot) -> Option<JetAiState> {
         self.ctx.object_jet_ai(owner)
     }
@@ -11588,6 +11894,26 @@ impl SimView for MockSimApi {
 }
 
 impl SimApi for MockSimApi {
+    fn queue_for_path(&mut self, id: ObjectId) -> Bool {
+        self.ctx.queue_for_path(id)
+    }
+    fn new_locomotor(&mut self, name: &str) -> Option<Locomotor> {
+        self.ctx.new_locomotor(name)
+    }
+    fn contain_mark_all_detected(&mut self, owner: ObjectSlot) {
+        self.ctx.contain_mark_all_detected(owner);
+    }
+    fn contain_order_all_to_exit(
+        &mut self,
+        owner: ObjectSlot,
+        cmd_source: CommandSourceType,
+        instantly: Bool,
+    ) {
+        self.ctx.contain_order_all_to_exit(owner, cmd_source, instantly);
+    }
+    fn ai_clear_goal_object(&mut self, owner: ObjectSlot) {
+        self.ctx.ai_clear_goal_object(owner);
+    }
     fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {
         self.ctx.ai_set_turret_enabled(owner, turret, enabled);
     }

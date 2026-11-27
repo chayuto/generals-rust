@@ -34,8 +34,9 @@ use zh_logic::modules::{
     JetAiState, ParkingPlaceInfo, StealthParams,
 };
 use zh_logic::modules::module::SupplyTruckAiFacet;
-use zh_logic::ai::seams::{NoPathServices, PathServices};
+use zh_logic::ai::seams::{NoPathServices, PathServices, NoAiSeams, SharedAiSeams};
 use zh_logic::modules::module::AiUpdateFacet;
+use zh_logic::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType};
 use zh_logic::rules::special_power::{SpecialPowerObjectAccess, SpecialPowerTemplate};
 use zh_logic::modules::update::special_ability_update::{AbilityFeedback, SpecialAbilityUpdateModuleData};
 use zh_logic::rules::command_button::{CommandButtonId, CommandStore, ControlBarOverrideKey};
@@ -633,6 +634,24 @@ impl SimView for EngineSim<'_> {
     }
     fn ai_last_command_source(&self, owner: ObjectSlot) -> CommandSourceType {
         not_wired("ai_last_command_source")
+    }
+    fn shared_ai_seams(&self) -> SharedAiSeams {
+        not_wired("shared_ai_seams")
+    }
+    fn cur_locomotor(&self, owner: ObjectSlot) -> Option<&Locomotor> {
+        not_wired("cur_locomotor")
+    }
+    fn module_owner_id(&self, module: ModuleSlot) -> Option<ObjectId> {
+        not_wired("module_owner_id")
+    }
+    fn ai_goal_of(&self, owner: ObjectSlot) -> (Option<ObjectId>, Coord3D) {
+        not_wired("ai_goal_of")
+    }
+    fn would_like_to_collide(&self, crate_slot: ObjectSlot, other: ObjectSlot) -> bool {
+        not_wired("would_like_to_collide")
+    }
+    fn team_members_of(&self, team: TeamId) -> Vec<ObjectSlot> {
+        not_wired("team_members_of")
     }
     fn controlling_player_objects(&self, team_id: TeamId) -> Vec<ObjectSlot> {
         not_wired("controlling_player_objects")
@@ -1467,6 +1486,21 @@ impl SimApi for EngineSim<'_> {
     }
     fn ai_construct(&mut self, owner: ObjectSlot) {
         not_wired("ai_construct")
+    }
+    fn queue_for_path(&mut self, id: ObjectId) -> Bool {
+        not_wired("queue_for_path")
+    }
+    fn new_locomotor(&mut self, name: &str) -> Option<Locomotor> {
+        not_wired("new_locomotor")
+    }
+    fn contain_mark_all_detected(&mut self, owner: ObjectSlot) {
+        not_wired("contain_mark_all_detected")
+    }
+    fn contain_order_all_to_exit( &mut self, owner: ObjectSlot, cmd_source: CommandSourceType, instantly: Bool, ) {
+        not_wired("contain_order_all_to_exit")
+    }
+    fn ai_clear_goal_object(&mut self, owner: ObjectSlot) {
+        not_wired("ai_clear_goal_object")
     }
     fn ai_init_state_machine(&mut self, owner: ObjectSlot) {
         not_wired("ai_init_state_machine")

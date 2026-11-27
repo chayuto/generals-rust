@@ -9,7 +9,7 @@ A plan only; nothing here is ported yet. Reference: `vendor/GeneralsX` at the pi
 - Already usable: pathfind cell, cell info, cell list and zone manager (`PKT-413..418`), partition grid, physics, the sleepy-update heap, `zh_common::core::state_machine`.
 - Ground height is computed in device code that is **not in the manifest**: `W3DTerrainLogic.cpp`, `BaseHeightMap.cpp`, `WorldHeightMap.cpp`. Rust has only `FlatTerrain`, and no map loader.
 - The Rust sim has no frame driver and no game-wide CRC.
-- `AIUpdateInterface::crc` calls its `xfer`, so the whole AI state (state machine, path, locomotor) is in the game CRC. `AI::crc` adds the pathfinder, AI data and every group.
+- `AIUpdateInterface::crc` calls its `xfer`, so the module's own members are in the game CRC. The state machine, path, locomotor set and turrets are **not**: `xfer` reaches them through `xferSnapshot`, which in CRC mode calls their empty `crc` (found in S8). `AI::crc` adds the pathfinder, AI data and every group.
 - The reference build has `RETAIL_COMPATIBLE_PATHFINDING=1`, `..._ALLOCATION=1`, `..._AIGROUP=1` and `..._XFER_SAVE=1`. `AIUpdateInterface` therefore saves version 4, while a default Rust build would write 5.
 - The local replays create `AIUpdateInterface` 178 times, Dozer 45, Worker 30, SupplyTruck 26, Chinook 18, Transport 11, HackInternet 8 (`MODULE_USAGE.md`).
 
@@ -90,6 +90,11 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `is_idle`, `is_ai_in_dead_state`, `mark_as_dead`, `ai_busy`, `ai_idle`, `set_attitude`, `has_cur_locomotor`, `ignore_obstacle`, `get_ignored_obstacle_id`, `ai_construct`, `ai_init_state_machine`, `ai_last_command_source`.
 - Risks: draws move from the stand-ins into here (four at start, one per idle entry). Their order must not change, so rerun every older suite. `ai_goal_object` must hold an ID, not an arena slot.
 - Seen: every unit has a real AI; its CRC contribution matches while idle.
+- **Done for the base class.** `AIUpdateInterface` is a registered resident module (`modules/update/ai_update.rs`), the state machine is `ai/ai_state_machine.rs`, and idle, dead and busy are in `ai/ai_states.rs`. `golden_s8_ai_orders` compares save bytes (version 4), CRC and seed after every order and update. All other states, the pathfinder, turrets, mood targets and the action manager are `ai::seams::AiSeams`, answered from a tape.
+  - Orders reach the module through `AiCall` (`BehaviorModule::ai_call_entry`). `ai_construct` and `ai_init_state_machine` remain for the module stand-ins of older suites.
+  - A game CRC has to call `xfer` in CRC mode for this module: it needs the next call frame, which `BehaviorModule::crc` cannot reach.
+  - Derived classes: none yet. They need hooks on `update`, `execute_command` and `xfer`, and their own states.
+  - Left: request paths, `computeQuickPath`, `computePath`, the on-path drive and collisions (S9); `Object::reactToTransformChange`'s `updatePos` for AI objects (S4); squads, polygon areas, waypoint objects, `privateMoveAwayFromUnit`, command buttons; loading a save.
 
 ### S9. Path following inside the AI update
 - C++: `AIUpdate.cpp` path request, `doPathfind`, `computePath`, `doLocomotor`, blocked and collision handling (1,630). One worker, tight; split collisions off if needed.

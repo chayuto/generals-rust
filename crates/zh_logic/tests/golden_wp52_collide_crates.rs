@@ -1604,9 +1604,10 @@ fn wp52_collide_crates_golden_vectors() {
                 !un_before.contains(s) && api.object(*s).is_some_and(|o| !o.is_destroyed())
             })
             .collect();
-        // Advance 5 GameLogic PRNG steps per spawned Cr52_SpawnedUnit to match C++
-        // `newObject` + unported `PartitionManager::findPositionAround` draws.
-        for _ in 0..(un_created.len() * 5) {
+        // Advance 1 GameLogic PRNG step per spawned Cr52_SpawnedUnit for the unported
+        // `PartitionManager::findPositionAround` draw. The four draws of its AI's
+        // state machine are made by the ported `AIUpdateInterface`.
+        for _ in 0..un_created.len() {
             let _ = api.rng_logic_real(0.0, 1.0);
         }
         let un_post_rng_crc = api.ctx.world.rng.get_game_logic_random_seed_crc();

@@ -22,10 +22,14 @@
 //! * anything that does call out is an entry point, or a function called by one,
 //!   taking `(&mut dyn SimApi, ModuleContext)` and never `&mut self`.
 //!
-//! Orders still arrive through `AiUpdateFacet` methods, which take `&mut self`.
-//! That is safe for the module stand-ins there are now; the AI module port has to
-//! turn the orders that act into entry points here.
+//! Orders that act arrive through the module's command entry
+//! ([`crate::modules::BehaviorModule::ai_call_entry`]), not through the
+//! `&mut self` methods of `AiUpdateFacet`; those stay for module stand-ins and for
+//! setters that only touch the module. The module itself is
+//! [`crate::modules::update::ai_update`].
 
+pub mod ai_state_machine;
+pub mod ai_states;
 pub mod seams;
 
 use crate::arena::ModuleContext;
