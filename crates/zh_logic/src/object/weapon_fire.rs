@@ -5,8 +5,9 @@
 //! that reach the weapon itself only restate values it already holds.
 //!
 //! `WeaponTemplate::fireWeaponTemplate` and the damage it deals are in
-//! [`super::weapon_effects`]. Unported: `DAMAGE_DEPLOY`'s assault order,
-//! `processRequestAssistance` and the victim effects of `DAMAGE_DISARM`.
+//! [`super::weapon_effects`]. `DAMAGE_DEPLOY`'s assault order is asked of
+//! [`crate::ai::seams::AiSeams::begin_assault`]. Firing from the weapon set is in
+//! [`super::weapon_actions`].
 //!
 //! Golden test: `crates/zh_logic/tests/golden_wp55_fire.rs`.
 
@@ -19,8 +20,10 @@ use super::weapon::{
     WEAPON_COLLIDE_ENEMIES, WEAPON_COLLIDE_PROJECTILES, WEAPON_COLLIDE_SHRUBBERY,
     WEAPON_COLLIDE_SMALL_MISSILES, WEAPON_COLLIDE_STRUCTURES, WEAPON_COLLIDE_WALLS,
 };
+use super::weapon_actions;
 use super::weapon_effects::{self, Shot};
 use super::weapon_set::WeaponSlotType;
+use crate::ai::seams::ai_seams;
 use crate::arena::ObjectSlot;
 use crate::gamelogic::global_data::{WeaponBonus, WeaponBonusField};
 use crate::modules::update::physics_update;
@@ -165,12 +168,29 @@ fn private_fire_weapon(
         FireMode::Detonation(flags) => Some(flags),
         _ => None,
     };
+    // A networked weapon tells everyone nearby, whether or not it then fires.
+    let assist_range = weapon.template.request_assist_range;
+    if let Some(v) = victim {
+        if assist_range != 0.0 {
+            weapon_actions::process_request_assistance(sim, assist_range, owner, v);
+        }
+    }
     if weapon.template.leech_range_weapon != FALSE {
         weapon.set_leech_range_active(TRUE);
     }
 
+    if weapon.template.damage_type == DamageType::Deploy {
+        let victim_id = victim.and_then(|v| sim.object(v)).map(|o| o.id);
+        if let Some((id, true)) = sim.object(owner).map(|o| (o.id, o.ai_slot.is_some())) {
+            ai_seams(sim).begin_assault(id, victim_id);
+        }
+    }
+
     let auto_reloads = weapon.template.reload_type == WeaponReloadType::AutoReload;
     if weapon.template.damage_type == DamageType::Disarm {
+        if let Some(v) = victim {
+            sim.disarm_weapon_victim(owner, v);
+        }
         // No status check here, so an empty clip wraps around.
         weapon.max_shot_count = weapon.max_shot_count.wrapping_sub(1);
         weapon.ammo_in_clip = weapon.ammo_in_clip.wrapping_sub(1);
@@ -389,8 +409,7 @@ pub fn position_projectile_for_launch(
     }
 }
 
-/// `WeaponTemplate::shouldProjectileCollideWith`. The sneaky-targeting immunity of
-/// `JetAIUpdate` is not modelled (that AI is unported).
+/// `WeaponTemplate::shouldProjectileCollideWith`.
 pub fn should_projectile_collide_with(
     sim: &dyn SimView,
     weapon_name: Option<&str>,
@@ -427,6 +446,13 @@ pub fn should_projectile_collide_with(
         && sim.object_has_reserved_space(other, intended_victim_id) != FALSE
     {
         return false;
+    }
+
+    // A jet dodging with a sneaky offset cannot be hit by accident.
+    if let Some((id, true)) = sim.object(other).map(|o| (o.id, o.ai_slot.is_some())) {
+        if ai_seams(sim).sneaky_targeting_offset(id).is_some() {
+            return false;
+        }
     }
 
     let mut required = match sim.player_relationship(projectile, other) {

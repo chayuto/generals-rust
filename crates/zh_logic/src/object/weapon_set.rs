@@ -332,7 +332,10 @@ impl WeaponSet {
         self.rebuild_masks();
     }
     pub fn release_weapon_lock(&mut self, lock: WeaponLockType) {
-        if self.cur_weapon_locked_status == lock { self.cur_weapon_locked_status = WeaponLockType::NotLocked; }
+        // Releasing a permanent lock releases any lock.
+        if lock == WeaponLockType::LockedPermanently || self.cur_weapon_locked_status == lock {
+            self.cur_weapon_locked_status = WeaponLockType::NotLocked;
+        }
     }
     pub fn is_shared_reload_time(&self) -> Bool {
         self.cur_weapon_template_set.as_ref().map_or(FALSE, |t| t.is_shared_reload_time())

@@ -15,6 +15,7 @@
 //! `POSITION_ON_PATH` drive (S9); turrets (S14); mood targets (S12); the derived
 //! AI classes (S15 to S18); groups, command buttons and `privateMoveAwayFromUnit`.
 
+use crate::object::weapon_queries;
 use crate::ai::ai_state_machine::{self as machine, state_id, AiStateMachine};
 use crate::ai::ai_states;
 use crate::ai::seams::{ai_seams, AiActionQuery};
@@ -1881,6 +1882,16 @@ fn private_follow_path_append(
     private_follow_path(sim, ctx, &path, None, source, false);
 }
 
+/// `isWithinAttackRange(pos)` of the current weapon.
+fn current_weapon_reaches(sim: &dyn SimApi, owner: ObjectSlot, pos: &Coord3D) -> bool {
+    sim.object(owner).is_some_and(|o| {
+        let slot = o.weapon_set.get_cur_weapon_slot();
+        o.weapon_set.get_weapon_in_weapon_slot(slot).is_some_and(|w| {
+            weapon_queries::is_within_attack_range_of_position(w, sim, owner, pos) != FALSE
+        })
+    })
+}
+
 /// `privateAttackPosition`.
 fn private_attack_position(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiCommandParms) {
     let owner = ctx.owner_slot;
@@ -1912,9 +1923,10 @@ fn private_attack_position(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiC
         }
         max_shots = 1;
     }
-    // The reference also asks for the weapon to be out of range here, which is
-    // part of S13; a contact weapon with no path to the spot is enough here.
+    // A contact weapon out of range of a spot it has no path to goes somewhere
+    // nearby instead. `retail-crc` does not ask about the range.
     if weapon(sim).is_some_and(|w| w.1 != FALSE)
+        && (cfg!(feature = "retail-crc") || !current_weapon_reaches(sim, owner, &pos))
         && ai_seams(sim).quick_path_exists(ctx.owner_id, &pos) == FALSE
     {
         let options = FindPositionOptions {

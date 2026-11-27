@@ -3,12 +3,11 @@
 //!
 //! Packet PKT-399. Golden test: `crates/zh_logic/tests/golden_pkt399_weapon_effects.rs`.
 //!
-//! Client work (fire FX, recoil, the laser beam) goes to the `ClientSink`. Not modelled, all
-//! for want of the unported unit AI or bridge terrain: the sneaky targeting offset of
-//! `JetAIUpdate`, bridge attack points (a bridge is aimed at like any object) and the
-//! locomotor set test before a missile is reported to countermeasures. A projectile without a
-//! `ProjectileUpdateInterface` is put at its destination, as C++ does; that includes every
-//! `MissileAIUpdate` projectile, which therefore never detonates.
+//! Client work (fire FX, recoil, the laser beam) goes to the `ClientSink`. The sneaky
+//! targeting offset of `JetAIUpdate` and the records of bridges are asked of
+//! [`crate::ai::seams::AiSeams`]. A projectile without a `ProjectileUpdateInterface` is put
+//! at its destination, as C++ does; that includes every `MissileAIUpdate` projectile, which
+//! therefore never detonates.
 
 use std::collections::BTreeMap;
 
@@ -21,8 +20,10 @@ use super::weapon::{
     WEAPON_AFFECTS_NOT_SIMILAR, WEAPON_AFFECTS_SELF, WEAPON_AFFECTS_SUICIDE,
 };
 use super::weapon_fire;
+use crate::ai::seams::ai_seams;
 use crate::arena::ObjectSlot;
 use crate::combat::damage::DamageInfo;
+use crate::combat::locomotor_set::LocomotorSetType;
 use crate::gamelogic::global_data::WeaponBonus;
 use crate::modules::update::battle_plan_update;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
@@ -116,6 +117,62 @@ fn has_projectile(sim: &dyn SimView, template: &WeaponTemplate) -> bool {
             .is_some()
 }
 
+/// Where a shot goes: the victim it still has, the position aimed at and the squared
+/// distance the range checks use.
+struct Aim {
+    victim: Option<ObjectSlot>,
+    pos: Coord3D,
+    dist_sqr: Real,
+}
+
+fn aim_at(sim: &dyn SimView, source: ObjectSlot, shot: &Shot<'_>) -> Aim {
+    let distance = |victim, pos: &Coord3D| {
+        sim.partition_distance_squared(source, victim, pos, ATTACK_RANGE)
+    };
+    let Some(v) = shot.victim else {
+        return Aim {
+            victim: None,
+            pos: shot.victim_pos,
+            dist_sqr: distance(None, &shot.victim_pos),
+        };
+    };
+    let mut pos = position_of(sim, v);
+    if let Some((id, true)) = sim.object(v).map(|o| (o.id, o.ai_slot.is_some())) {
+        if let Some(offset) = ai_seams(sim).sneaky_targeting_offset(id) {
+            pos.x += offset.x;
+            pos.y += offset.y;
+            pos.z += offset.z;
+            // A dodging jet is shot at as a position.
+            return Aim {
+                victim: None,
+                pos,
+                dist_sqr: distance(None, &pos),
+            };
+        }
+    }
+    if !is_kind(sim, v, KindOfType::Bridge) {
+        return Aim {
+            victim: Some(v),
+            pos,
+            dist_sqr: distance(Some(v), &pos),
+        };
+    }
+    // A bridge is aimed at the nearer of its two attack points.
+    let points = ai_seams(sim).bridge_attack_points(id_of(sim, v), &pos);
+    let mut dist_sqr = distance(None, &points[0]);
+    pos = points[0];
+    let second = distance(None, &points[1]);
+    if dist_sqr > second {
+        dist_sqr = second;
+        pos = points[1];
+    }
+    Aim {
+        victim: Some(v),
+        pos,
+        dist_sqr,
+    }
+}
+
 /// `WeaponTemplate::fireWeaponTemplate`. Returns the projectile it launched, if any.
 pub fn fire_weapon_template(
     sim: &mut dyn SimApi,
@@ -127,11 +184,12 @@ pub fn fire_weapon_template(
     let source_pos = position_of(sim, source);
     let template = weapon.template.clone();
     let bonus = shot.bonus;
-    let victim = shot.victim;
-
-    let victim_pos = victim.map_or(shot.victim_pos, |v| position_of(sim, v));
+    let Aim {
+        victim,
+        pos: victim_pos,
+        dist_sqr,
+    } = aim_at(sim, source, shot);
     let victim_id = victim.map_or(ObjectId::INVALID, |v| id_of(sim, v));
-    let dist_sqr = sim.partition_distance_squared(source, victim, &victim_pos, ATTACK_RANGE);
 
     if shot.ignore_ranges == FALSE
         && template.leech_range_weapon == FALSE
@@ -320,10 +378,13 @@ fn launch(
     }
 
     if let Some(v) = victim {
+        // Only a jet that is not supersonic may drop decoys.
         if is_kind(sim, projectile, KindOfType::SmallMissile)
-            && sim
-                .object(v)
-                .is_some_and(|o| o.countermeasures_slot.is_some() && o.ai_slot.is_some())
+            && sim.object(v).is_some_and(|o| {
+                o.countermeasures_slot.is_some()
+                    && o.ai_slot.is_some()
+                    && o.cur_locomotor_set != LocomotorSetType::Supersonic
+            })
         {
             sim.report_missile_to_countermeasures(v, projectile);
         }

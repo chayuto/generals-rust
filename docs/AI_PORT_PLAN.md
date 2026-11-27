@@ -144,6 +144,9 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `fire_weapon_template`, `projectile_detonations`, the weapon-set write-back gap, `onWeaponBonusChange`, barrel counts (open item 9). Fix `PKT-216` here.
 - Risks: scatter and infantry inaccuracy draws, range float compares.
 - Seen: scripted shots, projectiles and mines deal damage.
+- **Done, without a caller.** `zh_logic::object::weapon_queries` (ranges, approach target, line of sight, pitch, estimate) and `weapon_actions` (firing from the weapon set, pre-attack, reload all, assistance); `PKT-216` reloads and orders an attack. Direct: `golden_s13_weapon_firing`.
+  - S14 calls `fire_current_weapon_at_object` / `_position` and `pre_fire_current_weapon`, which report to the firing tracker.
+  - Line of sight is the terrain trait; bridge points, sneaky offsets, aircraft adjustment and the assault order are `AiSeams`. Barrel counts (open item 9) are still an input. Gaps: `OPEN_DECISIONS.md`.
 
 ### S14. Attack states and turrets
 - C++: `AIStates.cpp` attack, approach, pursue, aim, fire, squad, hunt, attack area (1,670); wiring of the ported `TurretAI` (about 1,000 C++ lines, already written). Two workers: states, then turrets and the weapon half of the AI update.

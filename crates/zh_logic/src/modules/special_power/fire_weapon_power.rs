@@ -1,17 +1,17 @@
 //! `PKT-216`: `FireWeaponPower` (`FireWeaponPower.h` / `FireWeaponPower.cpp`).
 
-use crate::object::weapon_fire;
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
-use crate::modules::module::{BehaviorModule, ModuleData, SpecialPowerFacet};
+use crate::modules::module::{BehaviorModule, CommandSourceType, ModuleData, SpecialPowerFacet};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::special_power::special_power_module::{
     impl_special_power_behavior, parse_special_power_data_with, SpecialPowerBehaviorImpl,
     SpecialPowerModule, SpecialPowerModuleData,
 };
-use crate::sim::{SimApi, SimView};
+use crate::object::weapon_actions;
+use crate::sim::SimApi;
 use zh_common::ini::{IniError, IniReader};
 use zh_common::math::Coord3D;
-use zh_common::types::{NameKeyType, Real, UnsignedInt};
+use zh_common::types::{Int, NameKeyType, Real, UnsignedInt, TRUE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FireWeaponPowerModuleData {
@@ -81,17 +81,22 @@ impl FireWeaponPower {
         })
     }
 
-    fn resolve_primary_weapon_name(sim: &dyn SimView, ctx: ModuleContext) -> String {
-        let Some(obj) = sim.object(ctx.owner_slot) else {
-            return String::new();
-        };
-        obj.thing
-            .template_override()
-            .get_final(&sim.rules().thing_factory)
-            .and_then(|t| t.find_weapon_template_set(&obj.weapon_set_flags))
-            .and_then(|s| s.templates[0].as_ref())
-            .map(|w| w.name.clone())
-            .unwrap_or_default()
+    /// The reload and the attack order every overload ends with. The reference
+    /// orders only an object with an AI; the order methods do nothing without one.
+    fn order_attack(
+        &self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        target: Option<ObjectSlot>,
+        pos: &Coord3D,
+    ) {
+        weapon_actions::reload_all_ammo(sim, ctx.owner_slot, TRUE);
+        let max_shots = self.max_shots_to_fire as Int;
+        let source = CommandSourceType::FromAi;
+        match target {
+            Some(target) => sim.ai_attack_object(ctx.owner_slot, target, max_shots, source),
+            None => sim.ai_attack_position(ctx.owner_slot, pos, max_shots, source),
+        }
     }
 }
 
@@ -118,8 +123,7 @@ impl SpecialPowerBehaviorImpl for FireWeaponPower {
             .object(ctx.owner_slot)
             .map(|o| *o.thing.get_position())
             .unwrap_or_default();
-        let wpn = Self::resolve_primary_weapon_name(sim, ctx);
-        weapon_fire::create_and_fire_temp_weapon(sim, ctx.owner_slot, &wpn, &pos);
+        self.order_attack(sim, ctx, None, &pos);
     }
 
     fn do_special_power_at_location(
@@ -141,8 +145,7 @@ impl SpecialPowerBehaviorImpl for FireWeaponPower {
             angle,
             command_options,
         );
-        let wpn = Self::resolve_primary_weapon_name(sim, ctx);
-        weapon_fire::create_and_fire_temp_weapon(sim, ctx.owner_slot, &wpn, loc);
+        self.order_attack(sim, ctx, None, loc);
     }
 
     fn do_special_power_at_object(
@@ -162,8 +165,7 @@ impl SpecialPowerBehaviorImpl for FireWeaponPower {
             target,
             command_options,
         );
-        let wpn = Self::resolve_primary_weapon_name(sim, ctx);
-        weapon_fire::create_and_fire_temp_weapon_at_object(sim, ctx.owner_slot, &wpn, target);
+        self.order_attack(sim, ctx, Some(target), &Coord3D::default());
     }
 }
 

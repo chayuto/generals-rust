@@ -9,6 +9,7 @@ use zh_logic::modules::update::battle_plan_update::{self, PlayerBattlePlans};
 use zh_logic::rules::AcademyClassificationType;
 use zh_logic::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
+use zh_logic::combat::firing_tracker::FiredWeaponInfo;
 use zh_logic::arena::{
     DeferredSelfOp, FacetMask, ModuleArena, ModuleContext, ModuleDataId, ModuleMeta,
     ModuleSidecar, ModuleSlot, ObjectArena, ObjectSlot, TakeError, ThingTemplateId,
@@ -313,6 +314,15 @@ impl SimView for EngineSim<'_> {
     }
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot> {
         not_wired("find_objects_in_range")
+    }
+    fn estimate_object_damage(&self, owner: ObjectSlot, damage: &DamageInfo) -> Real {
+        not_wired("estimate_object_damage")
+    }
+    fn spawn_slave_count(&self, owner: ObjectSlot) -> Option<Int> {
+        not_wired("spawn_slave_count")
+    }
+    fn consecutive_shots_at_target(&self, owner: ObjectSlot, victim: Option<ObjectSlot>) -> Int {
+        not_wired("consecutive_shots_at_target")
     }
     fn find_potential_collisions( &self, pos: &Coord3D, geom: &GeometryInfo, angle: Real, use_2d: Bool, ) -> Vec<ObjectSlot> {
         not_wired("find_potential_collisions")
@@ -1129,6 +1139,12 @@ impl SimApi for EngineSim<'_> {
     }
     fn reveal_map_for_player(&mut self, team_id: TeamId) {
         not_wired("reveal_map_for_player")
+    }
+    fn notify_firing_tracker_shot_fired( &mut self, owner: ObjectSlot, fired: &FiredWeaponInfo, victim: ObjectId, ) {
+        not_wired("notify_firing_tracker_shot_fired")
+    }
+    fn disarm_weapon_victim(&mut self, source: ObjectSlot, victim: ObjectSlot) {
+        not_wired("disarm_weapon_victim")
     }
     fn record_weapon_fire( &mut self, owner: ObjectSlot, weapon_name: &str, target: Option<ObjectSlot>, target_pos: &Coord3D, detonation: Option<UnsignedInt>, ) -> Bool {
         not_wired("record_weapon_fire")

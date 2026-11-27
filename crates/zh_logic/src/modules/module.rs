@@ -6,6 +6,7 @@
 //! Reference C++ packets: `packets/phase5/PKT-163_Module.md`
 //! Golden Vector test: `crates/zh_logic/tests/golden_pkt164_module_factory.rs`
 
+use crate::combat::firing_tracker::FiringTracker;
 use crate::combat::WhichTurretType;
 use crate::rules::command_button::CommandButton;
 use std::any::Any;
@@ -662,6 +663,12 @@ pub trait BehaviorModule: Send {
         None
     }
     fn as_assisted_targeting_mut(&mut self) -> Option<&mut dyn AssistedTargetingFacet> {
+        None
+    }
+    fn as_firing_tracker(&self) -> Option<&FiringTracker> {
+        None
+    }
+    fn as_firing_tracker_mut(&mut self) -> Option<&mut FiringTracker> {
         None
     }
     fn as_spawn_behavior(&self) -> Option<&dyn SpawnBehaviorFacet> {

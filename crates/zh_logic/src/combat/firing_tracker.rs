@@ -1,10 +1,11 @@
 //! `PKT-142`: Shot history, continuous-fire ramp/cooldown, auto-reload-when-idle, and
 //! looping fire-sound tracker (`GameLogic/FiringTracker.h`, `GameLogic/Object/FiringTracker.cpp`).
 
-use crate::arena::{FacetMask, ModuleContext};
+use crate::arena::{FacetMask, ModuleContext, ModuleSlot};
 use crate::gamelogic::global_data::WeaponBonusConditionType;
 use crate::modules::{BehaviorModule, ModuleData, ModuleSnapshotHeader, UpdateFacet};
 use crate::object::weapon::WeaponTemplate;
+use crate::object::weapon_actions;
 use crate::rules::disabled_types::DisabledMaskType;
 use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
 use crate::scheduler::{SleepyUpdatePhase, UpdateModuleScheduleState};
@@ -122,6 +123,8 @@ pub struct FiringTracker {
     frame_to_force_reload: UnsignedInt,
     frame_to_stop_looping_sound: UnsignedInt,
     audio_handle: UnsignedInt,
+    /// Where the module is filed, for the live sleep schedule its save carries.
+    mod_slot: Option<ModuleSlot>,
 }
 
 impl Default for FiringTracker {
@@ -145,7 +148,21 @@ impl FiringTracker {
             frame_to_force_reload: 0,
             frame_to_stop_looping_sound: 0,
             audio_handle: AHSV_NO_SOUND,
+            mod_slot: None,
         }
+    }
+
+    /// [`FiringTracker::shot_fired`] on the tracker's own object.
+    pub fn shot_fired_by(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        weapon_fired: &FiredWeaponInfo,
+        victim_id: ObjectId,
+    ) {
+        self.mod_slot = Some(ctx.mod_slot);
+        let mut host = SimFiringTrackerHost { sim, ctx };
+        self.shot_fired(&mut host, weapon_fired, victim_id);
     }
 
     /// Releases any active looping audio handle (`FiringTracker::~FiringTracker`).
@@ -467,8 +484,21 @@ impl BehaviorModule for FiringTracker {
         self.crc_snapshot(xfer);
     }
 
-    fn xfer(&mut self, xfer: &mut dyn Xfer, _sim: &dyn SimView) -> Result<(), XferError> {
+    fn xfer(&mut self, xfer: &mut dyn Xfer, sim: &dyn SimView) -> Result<(), XferError> {
+        if xfer.mode() == XferMode::Save {
+            if let Some(live) = self.mod_slot.and_then(|s| sim.module_schedule(s)) {
+                self.schedule = live;
+            }
+        }
         self.xfer_snapshot(xfer)
+    }
+
+    fn as_firing_tracker(&self) -> Option<&FiringTracker> {
+        Some(self)
+    }
+
+    fn as_firing_tracker_mut(&mut self) -> Option<&mut FiringTracker> {
+        Some(self)
     }
 
     fn as_update(&self) -> Option<&dyn UpdateFacet> {
@@ -482,6 +512,7 @@ impl BehaviorModule for FiringTracker {
 
 impl UpdateFacet for FiringTracker {
     fn update(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) -> UpdateSleepTime {
+        self.mod_slot = Some(ctx.mod_slot);
         let mut host = SimFiringTrackerHost { sim, ctx };
         self.update_with_host(&mut host)
     }
@@ -544,13 +575,8 @@ impl FiringTrackerHost for SimFiringTrackerHost<'_> {
         // Headless SimApi models drawable condition flags on the client side.
     }
 
-    fn reload_all_ammo(&mut self, _now: Bool) {
-        let frame = self.sim.frame();
-        if let Some(obj) = self.sim.object_mut(self.ctx.owner_slot) {
-            for w in obj.weapon_set.weapons.iter_mut().flatten() {
-                w.set_clip_percent_full(1.0_f32, zh_common::types::FALSE, frame);
-            }
-        }
+    fn reload_all_ammo(&mut self, now: Bool) {
+        weapon_actions::reload_all_ammo(self.sim, self.ctx.owner_slot, now);
     }
 
     fn is_audio_playing(&self, _handle: UnsignedInt) -> Bool {

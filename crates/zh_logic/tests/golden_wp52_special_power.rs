@@ -899,8 +899,9 @@ End
             0,
         );
     });
-    assert_eq!(sim.world.weapon_fires.len(), 1);
-    assert_eq!(sim.world.weapon_fires[0].1, "WP52_Wpn");
+    // The power reloads and orders an attack; it fires nothing itself. The order is
+    // compared with the reference in `golden_s13_weapon_firing`.
+    assert_eq!(sim.world.weapon_fires.len(), 0);
 
     let baik = sim.spawn_object(id_of("Obj_Baikonur", &sim), team_a, Coord3D::default(), 0.0);
     let baik_ms = find_sp_module(&sim, baik);

@@ -15,6 +15,7 @@ use crate::rules::AcademyClassificationType;
 use crate::modules::module::{CanMakeType, ProductionFacet};
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::combat::firing_tracker::FiredWeaponInfo;
 use crate::arena::{
     DeferredSelfOp, FacetMask, ModuleArena, ModuleContext, ModuleDataId, ModuleMeta,
     ModuleSidecar, ModuleSlot, ObjectArena, ObjectSlot, TakeError, ThingTemplateId,
@@ -1222,6 +1223,12 @@ pub trait SimView {
     /// `ITER_FASTEST` and no filters; the caller applies its own. Only objects filed
     /// by the last [`SimContext::update_partition`] and strictly closer than `radius`.
     fn find_objects_in_range(&self, center: &Coord3D, radius: Real) -> Vec<ObjectSlot>;
+    /// `Object::estimateDamage`: what the body says the damage would do.
+    fn estimate_object_damage(&self, owner: ObjectSlot, damage: &DamageInfo) -> Real;
+    /// `SpawnBehaviorInterface::getSlaveCount`; `None` without the module.
+    fn spawn_slave_count(&self, owner: ObjectSlot) -> Option<Int>;
+    /// `Object::getNumConsecutiveShotsFiredAtTarget`.
+    fn consecutive_shots_at_target(&self, owner: ObjectSlot, victim: Option<ObjectSlot>) -> Int;
     /// `PartitionManager::iteratePotentialCollisions`: the objects `geom` at `pos` would
     /// collide with.
     fn find_potential_collisions(
@@ -1843,6 +1850,16 @@ pub trait SimApi: SimView {
         add: Bool,
     );
     fn reveal_map_for_player(&mut self, team_id: TeamId);
+    /// `FiringTracker::shotFired` of the owner's tracker.
+    fn notify_firing_tracker_shot_fired(
+        &mut self,
+        owner: ObjectSlot,
+        fired: &FiredWeaponInfo,
+        victim: ObjectId,
+    );
+    /// What a `DAMAGE_DISARM` shot does to `victim`: a land mine is disarmed, any
+    /// other mine or trap destroyed, and the academy told.
+    fn disarm_weapon_victim(&mut self, source: ObjectSlot, victim: ObjectSlot);
     /// Notes a shot where `Weapon::privateFireWeapon` calls `fireWeaponTemplate`. `detonation`
     /// carries the bonus flags of a projectile's warhead. `FALSE` means the template is not to
     /// be run: differential suites whose oracle replaces `fireWeaponTemplate` ask for that.
@@ -5519,6 +5536,35 @@ impl SimView for SimContext {
         )
     }
 
+    fn estimate_object_damage(&self, owner: ObjectSlot, damage: &DamageInfo) -> Real {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.body_slot) else {
+            return 0.0;
+        };
+        let context = self.world.modules.meta(ms).context(ms);
+        self.world
+            .modules
+            .payload(ms)
+            .and_then(|m| m.as_body())
+            .map_or(0.0, |body| body.estimate_damage(self, context, damage))
+    }
+
+    fn spawn_slave_count(&self, owner: ObjectSlot) -> Option<Int> {
+        let ms = self.world.objects.get(owner)?.spawn_slot?;
+        let spawn = self.world.modules.payload(ms)?.as_spawn_behavior()?;
+        Some(spawn.get_slave_count())
+    }
+
+    fn consecutive_shots_at_target(&self, owner: ObjectSlot, victim: Option<ObjectSlot>) -> Int {
+        let victim = victim.and_then(|v| self.world.objects.id_of(v));
+        self.world
+            .objects
+            .get(owner)
+            .and_then(|o| o.firing_tracker_slot)
+            .and_then(|ms| self.world.modules.payload(ms))
+            .and_then(|m| m.as_firing_tracker())
+            .map_or(0, |t| t.get_num_consecutive_shots_at_victim(victim))
+    }
+
     fn find_potential_collisions(
         &self,
         pos: &Coord3D,
@@ -8863,6 +8909,48 @@ impl SimApi for SimContext {
         }
     }
 
+    fn notify_firing_tracker_shot_fired(
+        &mut self,
+        owner: ObjectSlot,
+        fired: &FiredWeaponInfo,
+        victim: ObjectId,
+    ) {
+        let Some(ms) = self.world.objects.get(owner).and_then(|o| o.firing_tracker_slot) else {
+            return;
+        };
+        let _ = self.dispatch_module(ms, |m, sim, ctx| {
+            if let Some(tracker) = m.as_firing_tracker_mut() {
+                tracker.shot_fired_by(sim, ctx, fired, victim);
+            }
+        });
+    }
+
+    fn disarm_weapon_victim(&mut self, source: ObjectSlot, victim: ObjectSlot) {
+        let mut found = false;
+        let land_mine = self.world.objects.get(victim).and_then(|o| o.land_mine_slot);
+        if let Some(ms) = land_mine {
+            let _ = self.dispatch_module(ms, |m, sim, ctx| {
+                if let Some(mine) = m.as_land_mine_mut() {
+                    mine.disarm(sim, ctx);
+                }
+            });
+            found = true;
+        }
+        let is = |sim: &Self, kind| sim.object_is_kind_of(victim, kind) != FALSE;
+        if (!found && is(self, KindOfType::Mine))
+            || is(self, KindOfType::BoobyTrap)
+            || is(self, KindOfType::Demotrap)
+        {
+            self.destroy_object(victim);
+            found = true;
+        }
+        if let Some(team) = self.world.objects.get(source).map(|o| o.team_id) {
+            if found {
+                self.academy(team).record_mine_cleared();
+            }
+        }
+    }
+
     fn record_weapon_fire(
         &mut self,
         owner: ObjectSlot,
@@ -11510,6 +11598,18 @@ impl SimView for MockSimApi {
         self.ctx.find_objects_in_range(center, radius)
     }
 
+    fn estimate_object_damage(&self, owner: ObjectSlot, damage: &DamageInfo) -> Real {
+        self.ctx.estimate_object_damage(owner, damage)
+    }
+
+    fn spawn_slave_count(&self, owner: ObjectSlot) -> Option<Int> {
+        self.ctx.spawn_slave_count(owner)
+    }
+
+    fn consecutive_shots_at_target(&self, owner: ObjectSlot, victim: Option<ObjectSlot>) -> Int {
+        self.ctx.consecutive_shots_at_target(owner, victim)
+    }
+
     fn find_potential_collisions(
         &self,
         pos: &Coord3D,
@@ -12865,6 +12965,19 @@ impl SimApi for MockSimApi {
 
     fn reveal_map_for_player(&mut self, team_id: TeamId) {
         self.ctx.reveal_map_for_player(team_id);
+    }
+
+    fn notify_firing_tracker_shot_fired(
+        &mut self,
+        owner: ObjectSlot,
+        fired: &FiredWeaponInfo,
+        victim: ObjectId,
+    ) {
+        self.ctx.notify_firing_tracker_shot_fired(owner, fired, victim);
+    }
+
+    fn disarm_weapon_victim(&mut self, source: ObjectSlot, victim: ObjectSlot) {
+        self.ctx.disarm_weapon_victim(source, victim);
     }
 
     fn record_weapon_fire(

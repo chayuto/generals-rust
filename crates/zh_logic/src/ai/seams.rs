@@ -296,6 +296,34 @@ pub trait AiSeams: Send {
         _location: &Coord3D,
     ) {
     }
+    /// `AIUpdateInterface::getSneakyTargetingOffset` (`JetAIUpdate`, S17): where
+    /// shots at `victim` go while it is dodging.
+    fn sneaky_targeting_offset(&mut self, _victim: ObjectId) -> Option<Coord3D> {
+        None
+    }
+    /// `TerrainLogic::getBridgeAttackPoints`. Without a record of the bridge the
+    /// reference gives the bridge's own position twice.
+    fn bridge_attack_points(&mut self, _bridge: ObjectId, pos: &Coord3D) -> [Coord3D; 2] {
+        [*pos, *pos]
+    }
+    /// `AIUpdateInterface::isAircraftThatAdjustsDestination` (S17).
+    fn is_aircraft_that_adjusts_destination(&mut self, _owner: ObjectId) -> Bool {
+        0
+    }
+    /// `Pathfinder::adjustTargetDestination` (S4): the approach spot to use.
+    fn adjust_target_destination(
+        &mut self,
+        _owner: ObjectId,
+        _target: Option<ObjectId>,
+        _target_pos: &Coord3D,
+        _weapon: &str,
+        approach: Coord3D,
+    ) -> Coord3D {
+        approach
+    }
+    /// `AssaultTransportAIInterface::beginAssault` (S15), asked of every owner
+    /// with an AI; only an assault transport acts on it.
+    fn begin_assault(&mut self, _owner: ObjectId, _victim: Option<ObjectId>) {}
 }
 
 /// A world without any of the code behind [`AiSeams`].
@@ -363,6 +391,11 @@ forward! {
     is_line_passable(owner: ObjectId, surfaces: LocomotorSurfaceTypeMask, layer: PathfindLayerEnum, from: &Coord3D, to: &Coord3D) -> Bool;
     find_ground_path(from: &Coord3D, to: &Coord3D, diameter: Int) -> Option<Vec<Coord3D>>;
     map_extent(extent: Region3D, maximum_pathfind: bool) -> Region3D;
+    sneaky_targeting_offset(victim: ObjectId) -> Option<Coord3D>;
+    bridge_attack_points(bridge: ObjectId, pos: &Coord3D) -> [Coord3D; 2];
+    is_aircraft_that_adjusts_destination(owner: ObjectId) -> Bool;
+    adjust_target_destination(owner: ObjectId, target: Option<ObjectId>, target_pos: &Coord3D, weapon: &str, approach: Coord3D) -> Coord3D;
+    begin_assault(owner: ObjectId, victim: Option<ObjectId>);
     can_do_special_power(owner: ObjectId, power: UnsignedInt, target: (Option<ObjectId>, Option<Coord3D>), options: UnsignedInt) -> Bool;
     sell_object(owner: ObjectId);
     override_special_power_destination(owner: ObjectId, power_type: Int, location: &Coord3D);

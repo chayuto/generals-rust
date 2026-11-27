@@ -106,7 +106,7 @@ struct Clump {
 
 /// The common part of the four `distCalcProc_*` functions: the squared distance
 /// and the vector from the center to `other`.
-fn measure(
+pub(crate) fn measure(
     rule: DistanceCalculationType,
     center_pos: &Coord3D,
     center: Option<&PartitionObject>,

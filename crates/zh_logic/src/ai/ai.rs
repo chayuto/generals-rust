@@ -24,6 +24,7 @@ use zh_common::math::{gm_sqrtf, Coord2D, Coord3D};
 use zh_common::types::{Bool, Int, ObjectId, Real, Relationship, UnsignedInt, FALSE, TRUE};
 use zh_common::xfer::{Snapshot, Xfer, XferError};
 
+use crate::object::weapon_queries;
 use crate::arena::ObjectSlot;
 use crate::modules::module::CommandSourceType;
 use crate::object::weapon_fire::compute_bonus;
@@ -544,6 +545,16 @@ impl AttackPriorityInfo {
     }
 }
 
+/// `PartitionFilterWithinAttackRange`: whether any weapon `me` holds reaches `other`.
+pub fn within_any_weapon_range(sim: &dyn SimView, me: ObjectSlot, other: ObjectSlot) -> Bool {
+    let Some(object) = sim.object(me) else {
+        return FALSE;
+    };
+    Bool::from(object.weapon_set.weapons.iter().flatten().any(|w| {
+        weapon_queries::is_within_attack_range(w, sim, me, other) != FALSE
+    }))
+}
+
 /// The answers targeting needs from code that is not ported. A test answers them
 /// from a tape of what the reference did.
 pub trait TargetingSeams {
@@ -560,7 +571,9 @@ pub trait TargetingSeams {
     /// `Weapon::isWithinAttackRange(me, other)` of any weapon `me` holds
     /// (`PartitionFilterWithinAttackRange`).
     fn within_attack_range(&mut self, sim: &dyn SimView, me: ObjectSlot, other: ObjectSlot)
-        -> Bool;
+        -> Bool {
+        within_any_weapon_range(sim, me, other)
+    }
 
     /// `Object::getLargestWeaponRange`, ported; see [`largest_weapon_range`].
     fn largest_weapon_range(&mut self, sim: &dyn SimView, me: ObjectSlot) -> Real {
