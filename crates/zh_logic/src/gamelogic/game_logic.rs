@@ -19,7 +19,7 @@ use zh_common::io::data_chunk::{
 };
 use zh_common::io::map_object::{MapObject, FLAG_BRIDGE_FLAGS, FLAG_ROAD_FLAGS};
 use zh_common::io::recorder::{GameOptions, ReplayRules, ReplaySlot};
-use zh_common::math::{gm_sqrtf, normalize_angle, Coord2D, Coord3D, ICoord2D, Region3D};
+use zh_common::math::{gm_sqrtf, Coord2D, Coord3D, ICoord2D, Region3D};
 use zh_common::types::{
     Bool, Int, ObjectId, Real, TeamId, UnsignedInt, UnsignedShort, VeterancyLevel, FALSE, TRUE,
 };
@@ -27,6 +27,7 @@ use zh_common::xfer::{Xfer, XferError};
 
 use crate::ai::ai_player::{players_new_map, AiPlayer};
 use crate::arena::{FacetMask, ModuleSlot, ObjectSlot};
+use crate::combat::turret_ai::normalize_angle_cpp;
 use crate::player::build_assistant::{on_structure_construction_complete, BuildContext};
 use crate::terrain::bridge::Bridge;
 use crate::terrain::bridge_load::{
@@ -1386,7 +1387,7 @@ fn load_bridge_like_objects(loader: &mut Loader<'_>, map_objects: &[MapObject], 
         let pos = map_position(loader.sim, object);
         loader
             .sim
-            .set_object_orientation(slot, normalize_angle(object.angle()));
+            .set_object_orientation(slot, normalize_angle_cpp(object.angle()));
         loader.sim.set_object_position(slot, &pos);
         if is_bridge {
             loader.report.bridge_towers += loader.sim.add_landmark_bridge(slot);
@@ -1442,7 +1443,7 @@ fn load_map_objects(
             continue;
         }
         let pos = map_position(loader.sim, object);
-        let angle = normalize_angle(object.angle());
+        let angle = normalize_angle_cpp(object.angle());
         let owner = object.properties().get_ascii_string(owner_key, None);
         let (team, _) = env.run(loader.sim, stores, loader.report, |e| {
             players.validate_team(&owner, teams, e)

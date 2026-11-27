@@ -4,12 +4,14 @@
 
 use zh_common::crc::Crc;
 use zh_common::ini::{IniLoadType, IniReader};
-use zh_common::math::{Coord3D, Region3D};
+use zh_common::math::{Coord3D, Matrix3D, Region3D};
 use zh_common::types::{ObjectId, TeamId, FALSE, TRUE};
-use zh_common::xfer::{XferLoad, XferSave};
+use zh_common::xfer::{XferError, XferLoad, XferSave};
 use zh_logic::arena::{ModuleSlot, ObjectSlot};
 use zh_logic::combat::damage::DamageInfo;
-use zh_logic::modules::update::bone_fx_update::BoneFXUpdate;
+use zh_logic::gamelogic::global_data::BodyDamageType;
+use zh_logic::modules::module::BehaviorModule;
+use zh_logic::modules::update::bone_fx_update::{BoneEffect, BoneFXUpdate};
 use zh_logic::rules::combat_types::DamageType;
 use zh_logic::sim::{SimApi, SimContext, SimWorld};
 
@@ -206,4 +208,102 @@ fn bone_fx_update_matches_reference() {
         }
     }
     assert_eq!((trials, ops), (60, 1440));
+}
+
+#[test]
+fn bone_fx_update_covers_bones_rubble_and_particle_ids() {
+    let default_effect = BoneEffect::default();
+    assert_eq!(default_effect.delay_low, 0.0);
+    assert_eq!(default_effect.delay_high, 0.0);
+
+    let lines = lines();
+    let mut sim = new_sim(&lines, 1, 100);
+    let custom = "\
+Object G_FxCustom
+  KindOf = STRUCTURE
+  Body = ActiveBody ModuleTag_Body
+    MaxHealth = 100.0
+    InitialHealth = 100.0
+  End
+  Behavior = BoneFXDamage ModuleTag_Damage
+  End
+  Behavior = BoneFXUpdate ModuleTag_Fx
+    PristineFXList1 = bone:B1 onlyonce:Yes 0 0 fxlist:FX_B
+    RubbleOCL1 = bone:B1 onlyonce:Yes 0 0 ocl:OCL_B
+  End
+End
+";
+    let mut reader = IniReader::new("custom.ini", custom.as_bytes(), IniLoadType::Overwrite);
+    sim.rules
+        .load_thing_templates_from_ini(&mut reader)
+        .expect("custom object");
+    sim.rules.thing_factory.post_process_load();
+
+    let mut bone = Matrix3D::identity();
+    bone.rows[0][3] = 12.345;
+    bone.rows[1][3] = -67.89;
+    bone.rows[2][3] = 3.125;
+    sim.world
+        .pristine_bones
+        .insert(("G_FxCustom".to_owned(), "B1".to_owned()), vec![bone]);
+
+    let tmpl = sim
+        .rules
+        .thing_factory
+        .find_template_id("G_FxCustom")
+        .expect("G_FxCustom");
+    let slot = sim.factory_new_object(tmpl, TeamId(1));
+    sim.set_object_position(slot, &Coord3D::new(100.0, 200.0, 0.0));
+    let module = module_of(&sim, slot);
+
+    sim.dispatch_module(module, |m, sim, ctx| {
+        m.as_update_mut().expect("update").update(sim, ctx);
+    })
+    .expect("module");
+    assert_eq!(
+        sim.world.triggered_fx_lists,
+        vec![("FX_B".to_owned(), Coord3D::new(112.345, 132.11, 3.125))]
+    );
+    check_load(&mut sim, module);
+
+    // Transition all the way to Rubble (`cur_body_state == 3`) and fire `RubbleOCL1`.
+    sim.dispatch_module(module, |m, sim, ctx| {
+        m.as_update_mut()
+            .expect("update")
+            .change_body_damage_state(sim, ctx, BodyDamageType::Pristine, BodyDamageType::Rubble);
+        m.as_update_mut().expect("update").update(sim, ctx);
+    })
+    .expect("module");
+    assert_eq!(sim.world.spawned_ocls.len(), 1);
+    assert_eq!(sim.world.spawned_ocls[0].0, "OCL_B");
+
+    // Non-empty `particle_system_ids` roundtrip and non-empty load guard.
+    let mut fresh = sim
+        .world
+        .modules
+        .payload(module)
+        .and_then(|p| p.as_any())
+        .and_then(|a| a.downcast_ref::<BoneFXUpdate>())
+        .expect("BoneFXUpdate")
+        .clone();
+    fresh.particle_system_ids = vec![11, 22];
+    let mut saver = XferSave::new();
+    fresh.xfer(&mut saver, &sim).expect("save with psys ids");
+    let saved = saver.as_bytes().to_vec();
+
+    let mut non_empty = fresh.clone();
+    let mut bad_load = XferLoad::new(&saved);
+    assert!(matches!(
+        non_empty.xfer(&mut bad_load, &sim),
+        Err(XferError::InvalidData)
+    ));
+
+    let mut empty = fresh;
+    empty.particle_system_ids.clear();
+    let mut load = XferLoad::new(&saved);
+    empty.xfer(&mut load, &sim).expect("load psys ids");
+    assert_eq!(empty.particle_system_ids, vec![11, 22]);
+    let mut resaved = XferSave::new();
+    empty.xfer(&mut resaved, &sim).expect("resave psys ids");
+    assert_eq!(resaved.as_bytes(), saved);
 }

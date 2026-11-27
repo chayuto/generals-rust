@@ -492,9 +492,9 @@ pub fn update(cx: &mut BuildContext<'_>, player: PlayerIndex) {
 }
 
 /// `doUpgradesAndSkills`: once the player has points to spend, a skirmish AI picks
-/// one of its side's skill sets at random, and buys from it.
+/// one of its side's skill sets at random, and attempts to purchase each science from it.
 ///
-/// Not ported: the purchase itself (`attemptToPurchaseScience`).
+/// Script notification is passed as `None` until [`BuildContext`] carries scripts.
 fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     // Nothing in the first two frames.
     if cx.sim.world.frame < 2 {
@@ -506,17 +506,18 @@ fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     if p.science_purchase_points <= 0 {
         return;
     }
-    let Some(info) = cx
+    let Some(side_idx) = cx
         .sim
         .rules
         .ai_data
         .side_info
         .iter()
-        .find(|info| info.side == p.side)
+        .position(|info| info.side == p.side)
     else {
         return;
     };
-    let sizes: [usize; 5] = std::array::from_fn(|i| info.skill_sets[i].len());
+    let sizes: [usize; 5] =
+        std::array::from_fn(|i| cx.sim.rules.ai_data.side_info[side_idx].skill_sets[i].len());
     let Some(ai) = cx.sim.world.ai_players.get(&player) else {
         return;
     };
@@ -534,8 +535,11 @@ fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         }
     }
     let set = usize::try_from(selector).ok().filter(|&i| i < 5).unwrap_or(0);
-    if sizes[set] > 0 {
-        cx.unported("Player::attemptToPurchaseScience");
+    let skills: Vec<_> = cx.sim.rules.ai_data.side_info[side_idx].skill_sets[set].clone();
+    for science in skills {
+        crate::player::science_purchase::attempt_to_purchase_science(
+            cx.sim, cx.players, None, player, science,
+        );
     }
 }
 

@@ -7036,12 +7036,41 @@ impl SimContext {
 
         if (options.flags & FPF_IGNORE_ALL_OBJECTS) == 0 {
             // `iteratePotentialCollisions` with a sphere of radius 5.
-            let probe = CollideInfo {
-                pos,
-                geometry: GeometryInfo::new(GeometryType::Sphere, TRUE, 5.0, 5.0, 5.0),
-                angle,
+            let probe_geom = GeometryInfo::new(GeometryType::Sphere, TRUE, 5.0, 5.0, 5.0);
+            let candidates = if self.world.partition.updated_since_last_reset() {
+                SimView::find_potential_collisions(self, &pos, &probe_geom, angle, TRUE)
+            } else {
+                // Synthetic unit tests where `PartitionGrid` was never updated.
+                let probe = CollideInfo {
+                    pos,
+                    geometry: probe_geom,
+                    angle,
+                };
+                self.world_object_slots()
+                    .into_iter()
+                    .filter(|&other| {
+                        let Some(o) = self.world.objects.get(other) else {
+                            return false;
+                        };
+                        let opos = o.thing.get_position();
+                        let dx = opos.x - pos.x;
+                        let dy = opos.y - pos.y;
+                        // Within 1.1 sphere radii of the other's bounding circle, and touching.
+                        let gap =
+                            gm_sqrtf(dx * dx + dy * dy) - o.geometry.get_bounding_circle_radius();
+                        if gap >= 5.0_f32 * 1.1_f32 {
+                            return false;
+                        }
+                        let shape = CollideInfo {
+                            pos: *opos,
+                            geometry: o.geometry.clone(),
+                            angle: o.thing.get_orientation(),
+                        };
+                        geom_collides_with_geom(&probe, &shape)
+                    })
+                    .collect()
             };
-            for other in self.world_object_slots() {
+            for other in candidates {
                 if Some(other) == options.ignore_object || Some(other) == options.source_to_path_to_dest {
                     continue;
                 }
@@ -7049,22 +7078,6 @@ impl SimContext {
                     continue;
                 };
                 if o.is_destroyed() || o.contained_by.is_some() {
-                    continue;
-                }
-                let opos = o.thing.get_position();
-                let dx = opos.x - pos.x;
-                let dy = opos.y - pos.y;
-                // Within 1.1 sphere radii of the other's bounding circle, and touching.
-                let gap = gm_sqrtf(dx * dx + dy * dy) - o.geometry.get_bounding_circle_radius();
-                if gap >= 5.0_f32 * 1.1_f32 {
-                    continue;
-                }
-                let shape = CollideInfo {
-                    pos: *opos,
-                    geometry: o.geometry.clone(),
-                    angle: o.thing.get_orientation(),
-                };
-                if !geom_collides_with_geom(&probe, &shape) {
                     continue;
                 }
                 if let Some(rel_slot) = options.relationship_object {
@@ -14095,5 +14108,60 @@ impl SimApi for MockSimApi {
 
     fn auto_deposit_boost_upgrade(&mut self, name: &str) -> Option<UpgradeMaskType> {
         self.ctx.auto_deposit_boost_upgrade(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_position_around_ignores_dirty_objects_after_partition_update() {
+        let mut sim = SimContext::new();
+        sim.init_partition(
+            20.0,
+            Region3D {
+                lo: Coord3D::new(0.0, 0.0, 0.0),
+                hi: Coord3D::new(200.0, 200.0, 100.0),
+            },
+        );
+        let center_a = Coord3D::new(50.0, 50.0, 0.0);
+        let center_b = Coord3D::new(100.0, 100.0, 0.0);
+        let opts = FindPositionOptions {
+            flags: FPF_NONE,
+            min_radius: 0.0,
+            max_radius: 0.0,
+            start_angle: Some(0.0),
+            ..FindPositionOptions::default()
+        };
+        let geom = GeometryInfo::new(GeometryType::Sphere, TRUE, 10.0, 10.0, 10.0);
+
+        // Before `update_partition()` has ever run, the synthetic fallback detects objects.
+        let early = sim.spawn_object_with_status(
+            ThingTemplateId(1),
+            TeamId(1),
+            center_a,
+            0.0,
+            ObjectStatusMaskType::new(),
+        );
+        SimApi::set_geometry_info(&mut sim, early, &geom);
+        assert!(!sim.world.partition.updated_since_last_reset());
+        assert_eq!(sim.find_position_around(&center_a, &opts), None);
+
+        // Once `update_partition()` runs, newly spawned dirty objects are ignored until updated.
+        sim.update_partition();
+        assert!(sim.world.partition.updated_since_last_reset());
+        let late = sim.spawn_object_with_status(
+            ThingTemplateId(1),
+            TeamId(1),
+            center_b,
+            0.0,
+            ObjectStatusMaskType::new(),
+        );
+        SimApi::set_geometry_info(&mut sim, late, &geom);
+        assert_eq!(sim.find_position_around(&center_b, &opts), Some(center_b));
+
+        sim.update_partition();
+        assert_eq!(sim.find_position_around(&center_b, &opts), None);
     }
 }
