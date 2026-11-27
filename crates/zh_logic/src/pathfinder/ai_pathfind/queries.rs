@@ -56,6 +56,23 @@ pub trait PathUnits {
     fn is_non_enemy_object(&self, _agent: ObjectId, _other: ObjectId) -> bool {
         false
     }
+    /// `findObjectByID` for the airfield check of `findClosestPath`.
+    fn goal_object(&self, _id: ObjectId) -> Option<GoalObject> {
+        None
+    }
+    /// The object exists, has an AI and the AI is idle.
+    fn is_idle(&self, _id: ObjectId) -> bool {
+        false
+    }
+}
+
+/// A structure under or next to a path goal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GoalObject {
+    pub position: Coord3D,
+    pub layer: PathfindLayerEnum,
+    /// `KINDOF_FS_AIRFIELD`.
+    pub airfield: bool,
 }
 
 /// A world without units.

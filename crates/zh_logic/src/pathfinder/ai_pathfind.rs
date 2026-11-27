@@ -29,6 +29,7 @@ use crate::pathfinder::pathfind_zone_manager::{
 use crate::terrain::bridge::BridgeGeometry;
 use crate::terrain::{ElevatedLayers, TerrainEffects, TerrainLogic};
 
+mod closest;
 mod goals;
 mod hierarchical;
 mod queries;
