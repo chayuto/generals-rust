@@ -195,14 +195,16 @@ impl AiSeams for Seams {
         owner: ObjectId,
         called_by_ai: Bool,
         during_idle: Bool,
-    ) -> Option<ObjectId> {
+    ) -> Option<Option<ObjectId>> {
         // The reference's stand-in answers nothing, unrecorded, for an idle unit.
         if during_idle != FALSE {
-            return None;
+            return Some(None);
         }
-        let answer = self.answer(format!("T,{},{called_by_ai}", owner.0))?;
+        let Some(answer) = self.answer(format!("T,{},{called_by_ai}", owner.0)) else {
+            return Some(None);
+        };
         let id = number(&answer) as i32;
-        (id != 0).then_some(ObjectId(id))
+        Some((id != 0).then_some(ObjectId(id)))
     }
     fn state_exit(&mut self, owner: ObjectId, state: StateId, status: StateExitType) {
         self.call(format!("X,{},{state},{}", owner.0, status as Int));
