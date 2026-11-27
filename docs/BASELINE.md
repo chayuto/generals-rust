@@ -30,6 +30,11 @@ A full check takes about 10 seconds. The baseline is `docs/baselines/replay_crc.
 | Player money (members and `xfer` stay in C++) | `GeneralsMD/.../Common/RTS/Money.cpp` | `PKT-121` |
 | Player power (members and `xfer` stay in C++) | `GeneralsMD/.../Common/RTS/Energy.cpp` | `PKT-118` |
 | `LifetimeUpdate`, a behavior module (`m_dieFrame`, `crc` and `xfer` stay in C++) | `GeneralsMD/.../GameLogic/Object/Update/LifetimeUpdate.cpp` | `PKT-339` |
+| `SupplyWarehouseCreate::onCreate` (the walk over the players' managers is the C++ callback) | `.../Object/Create/SupplyWarehouseCreate.cpp` | `PKT-183` |
+| `ArmorUpgrade::upgradeImplementation` (the upgrade mux and the terrain decal stay in C++) | `.../Object/Upgrade/ArmorUpgrade.cpp` | `PKT-194` |
+| `ModelConditionUpgrade::upgradeImplementation` (the upgrade mux stays in C++) | `.../Object/Upgrade/ModelConditionUpgrade.cpp` | `PKT-223` |
+| `RadarUpdate`, `extendRadar` and `update` (members, `crc` and `xfer` stay in C++) | `.../Object/Update/RadarUpdate.cpp` | `PKT-358` |
+| `PowerPlantUpdate`, constructor, `extendRods` and `update` (`m_extended`, `crc` and `xfer` stay in C++) | `.../Object/Update/PowerPlantUpdate.cpp` | `PKT-351` |
 | The sleepy-update heap, which orders every module update (`m_sleepyUpdates` stays the storage) | `GeneralsMD/.../GameLogic/System/GameLogic.cpp`, the heap functions and the early returns of `friend_awakenUpdateModule` | `WP-7.1` |
 
 Nothing else. `zh_ffi` also exports the byte CRC, but the engine does not call it.
@@ -38,7 +43,7 @@ A swapped function that tells the engine about a change must store the change fi
 
 ## Running a ported module in the engine
 
-Behavior modules are written against the `SimView`/`SimApi` traits. `zh_ffi::engine_sim::EngineSim` implements both over C++ callbacks, bound to one object for one call. `scripts/gen_engine_sim.py` writes the impl; a method it does not connect aborts the game with its name. To connect one, add it to `WIRED` in the script, write `engine_<name>` in `engine_sim.rs`, extend `ZhEngineSimCallbacks` and rerun the script. The trait methods that return references (`object`, `rules` and so on) cannot be connected this way; see `OPEN_DECISIONS.md` item 10.
+Behavior modules are written against the `SimView`/`SimApi` traits. `zh_ffi::engine_sim::EngineSim` implements both over C++ callbacks, bound to one object for one call. `scripts/gen_engine_sim.py` writes the impl; a method it does not connect aborts the game with its name. To connect one, add it to `WIRED` in the script, write `engine_<name>` in `engine_sim.rs`, extend `ZhEngineSimCallbacks`, answer it once in `include/zh_ffi_engine_sim.inc` (shared by every swapped module) and in `src/test_engine.rs`, and rerun the script. The trait methods that return references (`object`, `rules` and so on) cannot be connected this way; see `OPEN_DECISIONS.md` item 10.
 
 ## The fault test
 
@@ -48,11 +53,16 @@ A check that passes proves nothing until a wrong build fails it. Each swap has a
 python3 scripts/build_rust_engine.py --mutate random       # one extra logic draw
 python3 scripts/build_rust_engine.py --mutate experience   # one experience point too many
 python3 scripts/build_rust_engine.py --mutate lifetime     # every lifetime one frame too long
+python3 scripts/build_rust_engine.py --mutate warehouse    # no player learns of a supply warehouse
+python3 scripts/build_rust_engine.py --mutate armor        # armor upgrade never applied (passes: not reached)
+python3 scripts/build_rust_engine.py --mutate modelcondition  # condition never set (passes: not reached)
+python3 scripts/build_rust_engine.py --mutate radar        # RadarUpdate never runs again
+python3 scripts/build_rust_engine.py --mutate powerplant   # new power plants wake next frame, not never
 python3 scripts/build_rust_engine.py --mutate money        # all income halved
 python3 scripts/build_rust_engine.py --mutate energy       # power plants give half
 python3 scripts/build_rust_engine.py --mutate sleepy       # update phase no longer orders a frame
 python3 scripts/check_replays.py --check --expect-rust \
-  --binary vendor/GeneralsX/build/macos-vulkan/GeneralsMD/GeneralsXZH-rust-mutant-<swap>   # must FAIL
+  --binary vendor/GeneralsX/build/macos-vulkan/GeneralsMD/GeneralsXZH-rust-mutant-<swap>   # must FAIL, except armor and modelcondition
 ```
 
 | Fault | Replays that fail |
@@ -60,11 +70,36 @@ python3 scripts/check_replays.py --check --expect-rust \
 | `random` | all six, at frame 100 |
 | `experience` | `macos_2p_custom_map` (frame 14700) and `macos_6p_custom_map` (frame 17600) only |
 | `lifetime` | `linux_2p_custom_map` (frame 2000) only |
+| `warehouse` | all six (frames 1100 to 1800) |
+| `armor` | **none**: never called |
+| `modelcondition` | **none**: never called |
+| `radar` | all six (frames 900 to 2700) |
+| `powerplant` | all six (frames 900 to 2800) |
 | `money` | **none** (see the witness check) |
 | `energy` | `linux_6p` (2800), `macos_6p` (5300), `linux_2p_vanilla` and `macos_2p_custom` (6700) |
 | `sleepy` | all six, at frame 100 |
 
-So the experience swap is exercised by two replays, and the other four say nothing about it. The lifetime swap is exercised by one. One-off faults showed that replay also reaches the other two entry points: removing the kill in `update` diverges at frame 1800, and an extra random draw after `setLifetimeRange` diverges at frame 2000. A first generator fault that only changed one returned value passed, because the CRC covers the generator state and whatever the value goes on to change. Add a fault for every new swap and record which replays catch it.
+So the experience swap is exercised by two replays, and the other four say nothing about it. The lifetime swap is exercised by one. A one-off fault showed that replay also reaches `update`: removing the kill diverges at frame 1800. `setLifetimeRange` is **not** reached by any of the six: a call count reads zero and a build that aborts there passes. A first generator fault that only changed one returned value passed, because the CRC covers the generator state and whatever the value goes on to change. Add a fault for every new swap and record which replays catch it.
+
+### The behavior modules
+
+Calls from the engine over the six replays, counted with temporary logging:
+
+| Entry point | Calls (replays) | Verified by the check |
+|---|---|---|
+| `SupplyWarehouseCreate::onCreate` | 224 (6), 1,472 player registrations | yes |
+| `ArmorUpgrade::upgradeImplementation` | 0 | nothing |
+| `ModelConditionUpgrade::upgradeImplementation` | 0 | nothing |
+| `RadarUpdate::extendRadar` | 36 (4) | the call count only; see below |
+| `RadarUpdate::update` | 1,506,002 (6), 30 extensions finished | the returned sleep only |
+| `PowerPlantUpdate` constructor | 35 (6) | the wake frame |
+| `PowerPlantUpdate::extendRods`, `update` | 0 | nothing |
+
+The `radar` and `powerplant` faults appear to be caught through update order, since a module that sleeps differently moves other modules in the heap (inferred, not traced). The CRC does not cover these modules' model conditions or members. One-off faults that dropped every `RadarUpdate` model condition passed all six with the done frame also 3,000 frames late, although the drawable was present on all 96 condition calls. So no replay run says anything about its members or conditions.
+
+An upgrade module's instance count says how many objects carry it, not how often it fires. `upgradeImplementation` was also never called for `WeaponBonusUpgrade`, `WeaponSetUpgrade`, `StealthUpgrade`, `LocomotorSetUpgrade`, `ExperienceScalarUpgrade`, `MaxHealthUpgrade` or `PowerPlantUpgrade`. It was called 39 times for `RadarUpgrade` and 5 for `CommandSetUpgrade`.
+
+### The heap
 
 The heap check is sensitive to order itself. One-off faults in the Rust: swapping equal priorities while sifting up, or taking the right child on a tie, fails all six replays (frames 100 to 2900); letting an already awake module be pushed back a frame fails all six at frame 100; sifting only downwards after an erase fails three (frames 2200 to 14500).
 
