@@ -149,6 +149,7 @@ fn registered_as_data_only() {
             "BoneFXUpdate",
             "BridgeBehavior",
             "DozerAIUpdate",
+            "StructureCollapseUpdate",
             "WorkerAIUpdate",
         ]
         .contains(&module.name);

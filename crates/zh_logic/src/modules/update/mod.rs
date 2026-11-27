@@ -248,6 +248,16 @@ pub fn register_update_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGenerat
     );
     reg.register_module(
         nk,
+        "StructureCollapseUpdate",
+        ModuleType::Behavior,
+        FacetMask(0x003),
+        SleepyUpdatePhase::Normal,
+        false,
+        structure_collapse_update::parse_structure_collapse_update_data,
+        structure_collapse_update::create_structure_collapse_update,
+    );
+    reg.register_module(
+        nk,
         "AutoDepositUpdate",
         ModuleType::Behavior,
         FacetMask(0x001),
