@@ -573,3 +573,17 @@ It returns 0 and zeroes the normal, whatever `getGroundHeight` says. The shipped
 - **Relation maps are `std::unordered_map`**: their save order follows libc++ bucketing,
   which survives `clear()`.
 - **Map waypoints need `W3DTerrainLogic::loadMap`**: the base loader alone sees no map objects.
+
+## Game start, recorded from the running engine (`gen_game_start.py`)
+
+- **No headless harness is needed for a game start.** The stock binary plays a replay under
+  `lldb`; `process load` of a dylib built with the engine's flags runs a constructor inside
+  the stopped process, with engine symbols resolving against the executable.
+- **`tryStartNewGame` runs twice** for one game: the first call only asks to be run again.
+- **`AIPlayer::newMap` is part of the start** (`ThePlayerList->newMap`): it destroys the
+  computer player's command center and what stands under it (they stay in the object list
+  with the destroyed bit until the first frame ends) and builds a new one.
+- **Skirmish scripts are loose files** (`Data/Scripts/*.scb` in the game directory), not
+  archive members; without them the skirmish players get no teams.
+- **A script with an evaluation delay draws from the logic stream** in
+  `ScriptEngine::newMap`, before any map object is made.
