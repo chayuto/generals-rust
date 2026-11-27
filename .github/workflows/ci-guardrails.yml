@@ -18,7 +18,7 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # TIER 1: Fast Linux Gate (about 4 min with `cargo test` on ubuntu-latest, 20-job free concurrency)
+  # TIER 1: Fast Linux Gate (about 5 min on ubuntu-latest, 20-job free concurrency)
   # Runs on EVERY push (including packet/** and wp/** worker branches) & PR.
   # Uses pre-installed runner Python 3 (zero setup-python download overhead).
   # ---------------------------------------------------------------------------
@@ -33,9 +33,9 @@ jobs:
       - name: Run Full Repository Bootstrap, Manifest, Slicer, Gate V1 Linter & Hook V&V
         run: ./scripts/bootstrap_repo.sh
 
-      - name: Verify Zero-Dependency Cargo Workspace & Gate V2 Golden Vectors (ubuntu-latest)
+      # The bootstrap step above already runs `cargo test --workspace`; do not run it twice.
+      - name: Verify Gate V2 Golden Vectors Present (ubuntu-latest)
         run: |
-          cargo test --workspace
           for gvec in docs/golden_vectors/PKT-001.json docs/golden_vectors/PKT-002.json docs/golden_vectors/PKT-003.json; do
             test -s "$gvec"
           done
