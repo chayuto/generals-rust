@@ -44,6 +44,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 | up to `2e28a9b` | Script engine, unit AI shell (S8), targeting (S12), pathfind map (S2), path queries (S3), players and teams, AI groups and squads, retail rule data loading |
 | `1801249`, `f2c51a8` | Weapon, locomotor, AI, creation list and road data in full; data parsers for the unported logic modules in the retail rules |
 | `4fe15f5` to `10fc0fc` | Map script lists, game start from a map, comparison with the reference (`golden_game_start`) |
+| after `963f5bb` | Goal reservations and destination adjustment (S4), weapon range queries and firing (S13) |
 
 ## Not verified
 
@@ -61,7 +62,7 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 ## Next
 
 - **Goal (owner, 2026-11-27): the whole game in Rust** (`OPEN_DECISIONS.md` item 10, `FULL_PORT_PLAN.md`). Simulation first.
-- Toward a moving unit (`AI_PORT_PLAN.md`): S4 goal reservations, then S5 and S6 searches, S9 path following, S10 movement states. These build on each other. S13 weapon firing is separate.
+- Toward a moving unit (`AI_PORT_PLAN.md`): S4 goal reservations is done; then S5 and S6 searches, S9 path following, S10 movement states. These build on each other. S13 weapon firing is done and waits for S14 to call it.
 - Wiring still missing: targeting has no caller; the script engine has no `ScriptWorld` adapter or `FrameSeams` hookup; players, teams and AI groups are only partly connected.
 - From the game start comparison: bridge objects, Dozer and Worker AI, `adjustDestination`, `AIPlayer::newMap`.
 - Client crates: ask the owner before adding the first one (item 12).
