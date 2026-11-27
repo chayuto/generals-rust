@@ -1,6 +1,6 @@
 //! `GameLogic::startNewGame` compared with the running reference engine: for each of
 //! the baseline replays, and for games on other retail maps described by an options
-//! string alone, the players, teams and objects at two stages of the start.
+//! string alone, the players, teams, objects and bridges at three stages of the start.
 //! `tests/cpp_harness/gen_game_start.py` recorded `docs/golden_vectors/GameStart.json`
 //! (counts and digests only: the rows name map content).
 //!
@@ -95,7 +95,8 @@ fn summarize(rows: &[String]) -> Vec<(String, String)> {
             .collect()
     };
     let mut out = Vec::new();
-    for kind in ["seed", "game", "player", "team"] {
+    // `deck` rows are the pathfind cells under a bridge.
+    for kind in ["seed", "game", "player", "team", "bridge", "deck"] {
         let rows = of(kind);
         out.push((format!("{kind}_count"), rows.len().to_string()));
         out.push((format!("{kind}_digest"), digest(rows.into_iter())));
@@ -131,8 +132,7 @@ fn summarize(rows: &[String]) -> Vec<(String, String)> {
             ));
         }
     }
-    // What can still be compared on a map with bridges, whose objects shift every id:
-    // the map's other objects, by content.
+    // The map's objects other than bridges, by content alone.
     let mut loose: Vec<String> = objects
         .iter()
         .filter(|c| {
@@ -195,14 +195,20 @@ fn golden_cases() -> Vec<Case> {
 
 /// Stages recorded per game.
 const STAGES: usize = 3;
-/// Starting units which `adjustDestination` moves in the reference, over the games
-/// without bridges (the ones a port without it placed differently). Each reserves
-/// its cell.
-const MOVED_UNITS: u32 = 38;
+/// Starting units which `adjustDestination` moves in the reference (the ones a port
+/// without it placed differently). Each reserves its cell.
+const MOVED_UNITS: u32 = 42;
 /// Replays of the baseline, and games made from options strings.
 const REPLAY_GAMES: usize = 6;
 const VARIANT_GAMES: usize = 18;
-const BRIDGED_GAMES: u32 = 4;
+/// `(game, bridges drawn into the map, towers of landmark bridges)` of the games
+/// whose map has bridges; every other game has none.
+const BRIDGED_GAMES: [(&str, u32, u32); 4] = [
+    ("alpine_assault.rep", 0, 4),
+    ("dark_night.rep", 3, 0),
+    ("silent_river.rep", 3, 0),
+    ("winding_river.rep", 4, 0),
+];
 
 #[test]
 fn golden_lists_every_game_at_every_stage() {
@@ -213,7 +219,7 @@ fn golden_lists_every_game_at_every_stage() {
         STAGES * VARIANT_GAMES
     );
     for case in cases {
-        assert_eq!(case.values.len(), 29, "{}", case.name);
+        assert_eq!(case.values.len(), 33, "{}", case.name);
     }
 }
 
@@ -320,15 +326,8 @@ fn count_reservations(game: &GameStart, failures: &mut Vec<String>, name: &str) 
     reserved
 }
 
-/// Whether the map has bridges, which the port does not make.
-fn is_bridged(game: &GameStart) -> bool {
-    ["map bridge", "TerrainLogic::addLandmarkBridgeToLogic"]
-        .iter()
-        .any(|call| game.report.unported.contains_key(call))
-}
-
-/// Every map object is made or counted as skipped, and the calls that were left
-/// out are counted once each.
+/// Every map object is made or counted as skipped, the bridges and towers are the
+/// ones expected, and the calls that were left out are counted once each.
 fn check_report(game: &GameStart, before: &[String], failures: &mut Vec<String>, name: &str) {
     let report = &game.report;
     let skipped: u32 = report.skipped_objects.values().sum();
@@ -342,12 +341,25 @@ fn check_report(game: &GameStart, before: &[String], failures: &mut Vec<String>,
                     .is_some_and(|t| t.starts_with("teamplayer") || t.starts_with("teamSkirmish"))
         })
         .count();
-    if report.created_from_map + skipped != report.map_objects
-        || report.created_from_map as usize != map_rows
+    // A bridge drawn into the map comes from two bridge points, which are counted as
+    // skipped, and a landmark bridge's towers from none.
+    let made = report.created_from_map + report.map_bridges + report.bridge_towers;
+    if report.created_from_map + skipped != report.map_objects || made as usize != map_rows {
+        failures.push(format!(
+            "{name}: {} map objects, {made} made ({map_rows} listed), {skipped} skipped",
+            report.map_objects
+        ));
+    }
+    let bridges = BRIDGED_GAMES
+        .iter()
+        .find(|(game, ..)| *game == name)
+        .map_or((0, 0), |&(_, drawn, towers)| (drawn, towers));
+    if (report.map_bridges, report.bridge_towers) != bridges
+        || report.unported.contains_key("bridge model not supplied")
     {
         failures.push(format!(
-            "{name}: {} map objects, {} made ({map_rows} listed), {skipped} skipped",
-            report.map_objects, report.created_from_map
+            "{name}: {} bridges and {} towers, expected {bridges:?}",
+            report.map_bridges, report.bridge_towers
         ));
     }
     let count = |call: &str| report.unported.get(call).copied().unwrap_or(0);
@@ -368,7 +380,6 @@ fn retail_game_starts_match_the_reference_and_run() {
     // `(stage, key)` of every digest that differed in some game.
     let mut differing: BTreeSet<(String, String)> = BTreeSet::new();
     let mut compared = 0;
-    let mut bridged_games = 0;
     let mut started: BTreeMap<&str, Started> = BTreeMap::new();
     let mut reserved = 0;
     for case in &cases {
@@ -386,9 +397,7 @@ fn retail_game_starts_match_the_reference_and_run() {
             compared += 1;
             check_report(&game.game, &game.before_ai, &mut failures, name);
             let count = count_reservations(&game.game, &mut failures, name);
-            if !is_bridged(&game.game) {
-                reserved += count;
-            }
+            reserved += count;
             if let Ok(dir) = std::env::var("GAME_START_DUMP") {
                 for stage in ["before_units", "before_ai", "end"] {
                     let rows = game.rows(stage);
@@ -406,14 +415,7 @@ fn retail_game_starts_match_the_reference_and_run() {
         let game = &run.game;
         let rows = run.rows(&case.stage);
         let ours = summarize(rows);
-        // The port makes no bridge objects, so on such a map only the players and the
-        // other map objects, by content, can be compared.
-        let bridged = is_bridged(game);
-        bridged_games += u32::from(bridged && case.stage == "end");
         for (key, value) in &case.values {
-            if bridged && !(key.starts_with("player_") || key.starts_with("unbridged_")) {
-                continue;
-            }
             if key == "start_positions" {
                 let found: Vec<String> = start_positions(rows).into_iter().map(|p| p.1).collect();
                 let expected: Vec<&str> = value.split(',').filter(|v| !v.is_empty()).collect();
@@ -442,7 +444,6 @@ fn retail_game_starts_match_the_reference_and_run() {
     run_all(&mut started);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     if compared == REPLAY_GAMES + VARIANT_GAMES {
-        assert_eq!(bridged_games, BRIDGED_GAMES, "maps with bridges");
         assert_eq!(reserved, MOVED_UNITS, "starting units with a goal cell");
         for key in KNOWN_AT_END {
             assert!(
@@ -451,7 +452,7 @@ fn retail_game_starts_match_the_reference_and_run() {
             );
         }
     }
-    eprintln!("compared {compared} game starts, {bridged_games} on maps with bridges");
+    eprintln!("compared {compared} game starts");
 }
 
 /// Runs logic frames on each started game, then drops it.

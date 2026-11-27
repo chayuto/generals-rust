@@ -169,6 +169,16 @@ pub fn register_behavior_modules(reg: &mut ModuleRegistry, nk: &mut NameKeyGener
     );
     reg.register_module(
         nk,
+        "BridgeBehavior",
+        ModuleType::Behavior,
+        FacetMask(0x007 | FacetMask::BRIDGE_BEHAVIOR.0),
+        SleepyUpdatePhase::Normal,
+        false,
+        crate::modules::module_data::parse_data::<bridge_behavior::BridgeBehaviorModuleData>,
+        bridge_behavior::create_bridge_behavior,
+    );
+    reg.register_module(
+        nk,
         "BridgeScaffoldBehavior",
         ModuleType::Behavior,
         FacetMask(0x001 | FacetMask::BRIDGE_SCAFFOLD.0),

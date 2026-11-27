@@ -12,4 +12,5 @@ retail-crc = ["zh_common/retail-crc"]
 retail-xfer-save = ["zh_common/retail-xfer-save"]
 
 [dependencies]
+zh_assets = { path = "../zh_assets" }
 zh_common = { path = "../zh_common" }

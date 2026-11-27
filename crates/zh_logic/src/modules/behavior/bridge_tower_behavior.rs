@@ -3,9 +3,9 @@
 //! Packet: `packets/phase5/PKT-262_BridgeTowerBehavior.md`.
 //! Golden test: `crates/zh_logic/tests/golden_wp53_c3.rs`.
 //!
-//! The bridge answers for its towers through [`BridgeFacet`](crate::modules::module::BridgeFacet).
-//! `BridgeBehavior`, which implements it and links each tower with `set_bridge` and
-//! `set_tower_type`, is not ported.
+//! The bridge answers for its towers through [`BridgeFacet`](crate::modules::module::BridgeFacet),
+//! which `BridgeBehavior` implements. `SimContext::add_landmark_bridge` makes the towers
+//! and links them with `set_bridge` and `set_tower_type`.
 
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::combat::damage::DamageInfo;

@@ -143,9 +143,10 @@ fn registered_as_data_only() {
             .find_descriptor(module.name, ModuleType::Behavior)
             .unwrap();
         assert!(desc.parse_data.is_some(), "{}", module.name);
-        // These two also have construction (`golden_s16_dozer_worker`).
-        let constructed = ["DozerAIUpdate", "WorkerAIUpdate"].contains(&module.name);
-        assert_eq!(desc.create_module.is_some(), constructed, "{}", module.name);
+        // These have been given behaviour since: the bridge in full, the other two
+        // construction (`golden_s16_dozer_worker`).
+        let created = ["BridgeBehavior", "DozerAIUpdate", "WorkerAIUpdate"].contains(&module.name);
+        assert_eq!(desc.create_module.is_some(), created, "{}", module.name);
     }
     // The declared data carries the factory entry's masks.
     let mut loader = synthetic_loader();

@@ -35,6 +35,7 @@ use zh_logic::modules::{
     JetAiState, ParkingPlaceInfo, StealthParams,
 };
 use zh_logic::modules::module::SupplyTruckAiFacet;
+use zh_logic::modules::module::{BridgeScaffoldFacet, ScaffoldTargetMotion};
 use zh_logic::ai::seams::{NoPathServices, PathServices, NoAiSeams, SharedAiSeams};
 use zh_logic::modules::module::AiUpdateFacet;
 use zh_logic::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType};
@@ -494,6 +495,12 @@ impl SimView for EngineSim<'_> {
     }
     fn bridge_tower_id(&self, owner: ObjectSlot, tower_type: BridgeTowerType) -> Option<ObjectId> {
         not_wired("bridge_tower_id")
+    }
+    fn find_bridge_at(&self, pos: &Coord3D) -> Option<zh_logic::terrain::Bridge> {
+        not_wired("find_bridge_at")
+    }
+    fn bridge_scaffold_motion(&self, owner: ObjectSlot) -> Option<ScaffoldTargetMotion> {
+        not_wired("bridge_scaffold_motion")
     }
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool {
         not_wired("contain_is_special_overlord_style")
@@ -1296,8 +1303,20 @@ impl SimApi for EngineSim<'_> {
     fn notify_bridge_tower_damage(&mut self, bridge_slot: ObjectSlot, dmg: &mut DamageInfo) {
         not_wired("notify_bridge_tower_damage")
     }
-    fn link_bridge_tower( &mut self, bridge_id: ObjectId, tower_type: BridgeTowerType, tower_id: ObjectId, ) {
-        not_wired("link_bridge_tower")
+    fn update_bridge_damage_states(&mut self) {
+        not_wired("update_bridge_damage_states")
+    }
+    fn change_bridge_state(&mut self, layer: PathfindLayerEnum, repaired: Bool) {
+        not_wired("change_bridge_state")
+    }
+    fn set_body_indestructible(&mut self, owner: ObjectSlot, indestructible: Bool) {
+        not_wired("set_body_indestructible")
+    }
+    fn with_bridge_scaffold( &mut self, owner: ObjectSlot, f: &mut dyn FnMut(&mut dyn BridgeScaffoldFacet), ) {
+        not_wired("with_bridge_scaffold")
+    }
+    fn restore_bridge_record(&mut self, pos: &Coord3D, id: ObjectId, towers: [ObjectId; 4]) {
+        not_wired("restore_bridge_record")
     }
     fn reserve_parking_space( &mut self, airfield: ObjectSlot, aircraft_id: ObjectId, offset: Real, ) -> Option<ParkingPlaceInfo> {
         not_wired("reserve_parking_space")

@@ -178,8 +178,11 @@ def summarize(path: pathlib.Path) -> str:
         for name, fields in COLUMNS:
             words.append(f"{group}_{name}_digest=" + digest(
                 b"\t".join([c[1]] + [c[f] for f in fields]) for c in cells))
-    # What can still be compared on a map with bridges, whose objects shift every id:
-    # the map's other objects, by content.
+    for kind in ("bridge", "deck"):
+        found = [r for r in rows if r.split(b"\t")[0] == kind.encode()]
+        words.append(f"{kind}_count={len(found)}")
+        words.append(f"{kind}_digest={digest(found)}")
+    # The map's objects other than bridges, by content alone.
     loose = sorted(
         b"\t".join([c[2], c[4], c[5]] + c[6:14] + c[15:17]) for c in objects
         if not c[4].startswith(playing) and b"Bridge" not in c[2])

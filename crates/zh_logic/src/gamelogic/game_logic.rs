@@ -19,13 +19,17 @@ use zh_common::io::data_chunk::{
 };
 use zh_common::io::map_object::{MapObject, FLAG_BRIDGE_FLAGS, FLAG_ROAD_FLAGS};
 use zh_common::io::recorder::{GameOptions, ReplayRules, ReplaySlot};
-use zh_common::math::{gm_sqrtf, normalize_angle, Coord3D, ICoord2D};
+use zh_common::math::{gm_sqrtf, normalize_angle, Coord2D, Coord3D, ICoord2D};
 use zh_common::types::{
     Bool, Int, ObjectId, Real, TeamId, UnsignedInt, UnsignedShort, VeterancyLevel, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
 use crate::arena::{FacetMask, ModuleSlot, ObjectSlot};
+use crate::terrain::bridge::Bridge;
+use crate::terrain::bridge_load::{
+    bridge_ends, bridge_geometry, bridge_point_pairs, BridgeModels, MAX_BRIDGES,
+};
 use crate::economy::academy_stats::AcademyStats;
 use crate::gamelogic::game_engine::{GameDataLoader, StartupStores};
 use crate::gamelogic::global_data::PlayerType;
@@ -84,6 +88,8 @@ pub struct StartParms {
     pub skirmish_scripts: Option<Vec<u8>>,
     /// `Data\INI\ChallengeMode.ini`, for the generals that start locked.
     pub challenge_mode_ini: Vec<u8>,
+    /// The models of the bridge definitions, for the bridges drawn into the map.
+    pub bridge_models: BridgeModels,
 }
 
 /// Everything the start left out, by reason.
@@ -93,6 +99,10 @@ pub struct StartReport {
     pub map_objects: u32,
     /// Objects made from map objects.
     pub created_from_map: u32,
+    /// Bridge objects made from pairs of bridge points.
+    pub map_bridges: u32,
+    /// Towers made for landmark bridges.
+    pub bridge_towers: u32,
     /// Map objects without an object, by reason.
     pub skipped_objects: BTreeMap<&'static str, u32>,
     /// Behavior modules an object was made without, by `(module, reason)`.
@@ -1288,6 +1298,60 @@ fn map_position(sim: &SimContext, object: &MapObject) -> Coord3D {
     pos
 }
 
+/// `W3DBridgeBuffer::loadBridges`, run by `TerrainLogic::newMap`: a bridge object for
+/// each pair of bridge points, linked into the terrain (`Bridge(BridgeInfo&)` and
+/// `addBridgeToLogic`). These bridges get no towers.
+fn load_map_bridges(loader: &mut Loader<'_>, map_objects: &[MapObject], models: &BridgeModels) {
+    let mut loaded = 0;
+    for (first, second) in bridge_point_pairs(map_objects) {
+        let (Some(first), Some(second)) = (map_objects.get(first), map_objects.get(second)) else {
+            continue;
+        };
+        if loaded >= MAX_BRIDGES {
+            break;
+        }
+        let name = first.name();
+        let Some(road) = loader.sim.rules.terrain_roads.find_bridge(name) else {
+            continue;
+        };
+        let scale = road.bridge_scale;
+        let Some(model) = models.get(&road.bridge_model_name) else {
+            loader.report.unported("bridge model not supplied");
+            continue;
+        };
+        // The engine leaves out a bridge whose model it cannot load.
+        let Some(shape) = model else {
+            continue;
+        };
+        loaded += 1;
+        let terrain = &loader.sim.terrain;
+        let (from, to) = bridge_ends(first.location(), second.location(), |x, y| {
+            terrain.get_ground_height(x, y, None)
+        });
+        let geometry = bridge_geometry(from, to, shape, scale);
+        let neutral = loader.sim.world.neutral_team_id;
+        let mut id = ObjectId::INVALID;
+        if let Some(slot) = loader.new_object("GenericBridge", neutral) {
+            loader.report.map_bridges += 1;
+            let (a, b) = (geometry.from_left, geometry.to_right);
+            let center =
+                Coord3D::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0, (a.z + b.z) / 2.0);
+            loader.sim.set_object_position(slot, &center);
+            id = loader.sim.world.objects.id_of(slot).unwrap_or(id);
+            loader.apply_map_properties(slot, first.properties());
+            let along = Coord2D {
+                x: geometry.to_left.x - geometry.from_left.x,
+                y: geometry.to_left.y - geometry.from_left.y,
+            };
+            loader.sim.set_object_orientation(slot, along.to_angle());
+        }
+        loader
+            .sim
+            .add_bridge_to_logic(Bridge::new(geometry, name, id));
+    }
+    loader.sim.update_all_bridge_damage_states();
+}
+
 fn load_bridge_like_objects(loader: &mut Loader<'_>, map_objects: &[MapObject], neutral: TeamId) {
     for object in map_objects {
         if object.flags() & (FLAG_BRIDGE_FLAGS | FLAG_ROAD_FLAGS) != 0 {
@@ -1312,9 +1376,7 @@ fn load_bridge_like_objects(loader: &mut Loader<'_>, map_objects: &[MapObject], 
             .set_object_orientation(slot, normalize_angle(object.angle()));
         loader.sim.set_object_position(slot, &pos);
         if is_bridge {
-            loader
-                .report
-                .unported("TerrainLogic::addLandmarkBridgeToLogic");
+            loader.report.bridge_towers += loader.sim.add_landmark_bridge(slot);
         }
         if wall {
             let id = loader.sim.world.objects.id_of(slot);
@@ -1684,17 +1746,20 @@ pub fn start_new_game_observed(
     let pathfind_extent = terrain.maximum_pathfind_extent();
     sim.terrain = Box::new(terrain);
     sim.init_partition(cell, extent);
-    for object in &map_objects {
-        if object.flags() & FLAG_BRIDGE_FLAGS != 0 {
-            report.unported("map bridge");
-        }
-    }
-
     let mut named = Vec::new();
     let neutral = sim.world.neutral_team_id;
     // `AIData::m_wallHeight`; `AIData` is not parsed here.
     let wall_height = 0.0;
     sim.world.pathfinder = Some(Box::new(crate::pathfinder::Pathfinder::new(wall_height)));
+    load_map_bridges(
+        &mut Loader {
+            sim: &mut sim,
+            report: &mut report,
+            named: &mut named,
+        },
+        &map_objects,
+        &parms.bridge_models,
+    );
     load_bridge_like_objects(
         &mut Loader {
             sim: &mut sim,

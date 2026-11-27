@@ -853,7 +853,9 @@ use crate::modules::update::{
     transport_ai_update::*, wander_ai_update::*, wave_guide_update::*, worker_ai_update::*,
 };
 
-/// Every logic module the retail data declares that has no ported behaviour.
+/// Every logic module the retail data declares that had no ported behaviour when its
+/// data parser was written. `BridgeBehavior` has been ported since and keeps its
+/// parser here.
 pub const DATA_ONLY_MODULES: [DataOnlyModule; 41] = [
     of::<AnimationSteeringUpdateModuleData>(),
     of::<AssaultTransportAIUpdateModuleData>(),

@@ -25,5 +25,6 @@ dependencies = [
 name = "zh_logic"
 version = "0.1.0"
 dependencies = [
+ "zh_assets",
  "zh_common",
 ]

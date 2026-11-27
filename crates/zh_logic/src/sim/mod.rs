@@ -6,6 +6,7 @@
 //! 2. [`SimWorld`] (all mutable state hashed by `GameLogic::getCRC`)
 //! 3. [`ClientSink`] (write-only visual/audio notifications, no-op in headless simulation)
 
+mod bridges;
 mod pathfind_map;
 mod production;
 
@@ -41,6 +42,7 @@ use crate::modules::{
     JetAiState, ParkingPlaceInfo, StealthParams,
 };
 use crate::modules::module::SupplyTruckAiFacet;
+use crate::modules::module::{BridgeScaffoldFacet, ScaffoldTargetMotion};
 use crate::ai::seams::{NoPathServices, PathServices, NoAiSeams, SharedAiSeams};
 use crate::modules::module::AiUpdateFacet;
 use crate::modules::update::ai_update::{AiCall, AiCommandParms, AiCommandType};
@@ -1338,6 +1340,10 @@ pub trait SimView {
     fn contain_is_enclosing_container_for(&self, owner: ObjectSlot, rider: ObjectSlot) -> Bool;
     /// `BridgeBehaviorInterface::getTowerID`; `None` if the object has no such interface.
     fn bridge_tower_id(&self, owner: ObjectSlot, tower_type: BridgeTowerType) -> Option<ObjectId>;
+    /// `TheTerrainLogic->findBridgeAt`.
+    fn find_bridge_at(&self, pos: &Coord3D) -> Option<crate::terrain::Bridge>;
+    /// `BridgeScaffoldBehaviorInterface::getCurrentMotion`; `None` without one.
+    fn bridge_scaffold_motion(&self, owner: ObjectSlot) -> Option<ScaffoldTargetMotion>;
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool;
     fn contain_items(&self, owner: ObjectSlot) -> Vec<ObjectId>;
     fn contain_is_passenger_allowed_to_fire(&self, owner: ObjectSlot, id: ObjectId) -> Bool;
@@ -1977,12 +1983,20 @@ pub trait SimApi: SimView {
     fn divert_projectile_to_target(&mut self, missile: ObjectSlot, frames: UnsignedInt);
     fn set_bridge_passable(&mut self, bridge_id: ObjectId, passable: Bool);
     fn notify_bridge_tower_damage(&mut self, bridge_slot: ObjectSlot, dmg: &mut DamageInfo);
-    fn link_bridge_tower(
+    /// `TheTerrainLogic->updateBridgeDamageStates`.
+    fn update_bridge_damage_states(&mut self);
+    /// `Pathfinder::changeBridgeState`.
+    fn change_bridge_state(&mut self, layer: PathfindLayerEnum, repaired: Bool);
+    /// `getBodyModule()->setIndestructible`.
+    fn set_body_indestructible(&mut self, owner: ObjectSlot, indestructible: Bool);
+    /// Runs `f` on the owner's `BridgeScaffoldBehaviorInterface`, if it has one.
+    fn with_bridge_scaffold(
         &mut self,
-        bridge_id: ObjectId,
-        tower_type: BridgeTowerType,
-        tower_id: ObjectId,
+        owner: ObjectSlot,
+        f: &mut dyn FnMut(&mut dyn BridgeScaffoldFacet),
     );
+    /// The terrain bridge at `pos` takes back its object and tower ids after a load.
+    fn restore_bridge_record(&mut self, pos: &Coord3D, id: ObjectId, towers: [ObjectId; 4]);
     fn reserve_parking_space(
         &mut self,
         airfield: ObjectSlot,
@@ -2397,7 +2411,6 @@ pub struct SimWorld {
     /// Keyed by player index.
     pub tunnel_trackers: BTreeMap<Int, TunnelTrackerState>,
     pub cave_system: CaveSystem<TunnelTrackerState>,
-    pub bridge_links: BTreeMap<ObjectId, [ObjectId; 4]>,
     pub bridge_passable: BTreeMap<ObjectId, Bool>,
     pub mine_detonations: Vec<(ObjectId, ObjectId)>,
     pub projectile_launches: Vec<(ObjectId, Option<ObjectId>, Coord3D)>,
@@ -2554,7 +2567,6 @@ impl SimWorld {
             neutral_team_id: TeamId(0),
             tunnel_trackers: BTreeMap::new(),
             cave_system: CaveSystem::new(),
-            bridge_links: BTreeMap::new(),
             bridge_passable: BTreeMap::new(),
             mine_detonations: Vec::new(),
             projectile_launches: Vec::new(),
@@ -6111,6 +6123,14 @@ impl SimView for SimContext {
             .payload(cs)
             .and_then(|p| p.as_contain())
             .map_or(FALSE, |c| c.is_enclosing_container_for(rider))
+    }
+
+    fn find_bridge_at(&self, pos: &Coord3D) -> Option<crate::terrain::Bridge> {
+        self.bridge_list()?.find_at(pos).cloned()
+    }
+
+    fn bridge_scaffold_motion(&self, owner: ObjectSlot) -> Option<ScaffoldTargetMotion> {
+        self.bridge_scaffold_motion_of(owner)
     }
 
     fn bridge_tower_id(&self, owner: ObjectSlot, tower_type: BridgeTowerType) -> Option<ObjectId> {
@@ -9786,21 +9806,34 @@ impl SimApi for SimContext {
         self.attempt_damage_on(bridge_slot, dmg);
     }
 
-    fn link_bridge_tower(
-        &mut self,
-        bridge_id: ObjectId,
-        tower_type: BridgeTowerType,
-        tower_id: ObjectId,
-    ) {
-        let entry = self
-            .world
-            .bridge_links
-            .entry(bridge_id)
-            .or_insert([ObjectId::INVALID; 4]);
-        let idx = tower_type.as_i32();
-        if (0..4).contains(&idx) {
-            entry[idx as usize] = tower_id;
+    fn update_bridge_damage_states(&mut self) {
+        self.update_all_bridge_damage_states();
+    }
+
+    fn change_bridge_state(&mut self, layer: PathfindLayerEnum, repaired: Bool) {
+        self.change_bridge_layer(layer, repaired != FALSE);
+    }
+
+    fn set_body_indestructible(&mut self, owner: ObjectSlot, indestructible: Bool) {
+        if let Some(body) = self.world.objects.get(owner).and_then(|o| o.body_slot) {
+            let _ = self.dispatch_module(body, |m, sim, ctx| {
+                if let Some(b) = m.as_body_mut() {
+                    b.set_indestructible(sim, ctx, indestructible);
+                }
+            });
         }
+    }
+
+    fn with_bridge_scaffold(
+        &mut self,
+        owner: ObjectSlot,
+        f: &mut dyn FnMut(&mut dyn BridgeScaffoldFacet),
+    ) {
+        self.with_scaffold_facet(owner, f);
+    }
+
+    fn restore_bridge_record(&mut self, pos: &Coord3D, id: ObjectId, towers: [ObjectId; 4]) {
+        self.restore_bridge_links(pos, id, towers);
     }
 
     fn reserve_parking_space(
@@ -11870,6 +11903,14 @@ impl SimView for MockSimApi {
         self.ctx.bridge_tower_id(owner, tower_type)
     }
 
+    fn find_bridge_at(&self, pos: &Coord3D) -> Option<crate::terrain::Bridge> {
+        self.ctx.find_bridge_at(pos)
+    }
+
+    fn bridge_scaffold_motion(&self, owner: ObjectSlot) -> Option<ScaffoldTargetMotion> {
+        self.ctx.bridge_scaffold_motion(owner)
+    }
+
     fn contain_is_special_overlord_style(&self, owner: ObjectSlot) -> Bool {
         self.ctx.contain_is_special_overlord_style(owner)
     }
@@ -13245,13 +13286,28 @@ impl SimApi for MockSimApi {
         self.ctx.notify_bridge_tower_damage(bridge_slot, dmg);
     }
 
-    fn link_bridge_tower(
+    fn update_bridge_damage_states(&mut self) {
+        self.ctx.update_bridge_damage_states();
+    }
+
+    fn change_bridge_state(&mut self, layer: PathfindLayerEnum, repaired: Bool) {
+        self.ctx.change_bridge_state(layer, repaired);
+    }
+
+    fn set_body_indestructible(&mut self, owner: ObjectSlot, indestructible: Bool) {
+        self.ctx.set_body_indestructible(owner, indestructible);
+    }
+
+    fn with_bridge_scaffold(
         &mut self,
-        bridge_id: ObjectId,
-        tower_type: BridgeTowerType,
-        tower_id: ObjectId,
+        owner: ObjectSlot,
+        f: &mut dyn FnMut(&mut dyn BridgeScaffoldFacet),
     ) {
-        self.ctx.link_bridge_tower(bridge_id, tower_type, tower_id);
+        self.ctx.with_bridge_scaffold(owner, f);
+    }
+
+    fn restore_bridge_record(&mut self, pos: &Coord3D, id: ObjectId, towers: [ObjectId; 4]) {
+        self.ctx.restore_bridge_record(pos, id, towers);
     }
 
     fn reserve_parking_space(

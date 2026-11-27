@@ -1,7 +1,8 @@
 //! `PKT-165`: `ActiveBody` (`ActiveBody.h` / `ActiveBody.cpp`).
 
 use crate::modules::behavior::behavior_module::lend_self;
-use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar};
+use crate::modules::module::BridgeTowerType;
+use crate::arena::{DeferredSelfOp, FacetMask, ModuleContext, ModuleSidecar, ObjectSlot};
 use crate::combat::armor::Armor;
 use crate::combat::damage::DamageInfo;
 use crate::gamelogic::global_data::BodyDamageType;
@@ -372,7 +373,28 @@ impl ActiveBody {
 
     /// Runs `onDamage` or `onHealing` of the owner's modules. A land mine damages its own
     /// owner and changes its health from there, so for one the body is lent back to the
-    /// arena meanwhile. Wrapper bodies cannot be lent from here and stay checked out.
+    /// arena meanwhile. Wrapper bodies other than a bridge's cannot be lent from here and stay checked out.
+    fn is_bridge_part(sim: &dyn SimApi, owner: ObjectSlot) -> bool {
+        sim.object_is_kind_of(owner, KindOfType::Bridge) != FALSE
+            || sim.object_is_kind_of(owner, KindOfType::BridgeTower) != FALSE
+    }
+
+    /// A bridge and its towers damage each other from every damage callback, the
+    /// state change and the death included, so their bodies are back in the arena
+    /// for those too.
+    fn run_bridge_callbacks(
+        &mut self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        mut f: impl FnMut(&mut dyn SimApi),
+    ) {
+        if Self::is_bridge_part(sim, ctx.owner_slot) {
+            self.run_damage_callbacks(sim, ctx, f);
+        } else {
+            f(sim);
+        }
+    }
+
     fn run_damage_callbacks(
         &mut self,
         sim: &mut dyn SimApi,
@@ -382,8 +404,13 @@ impl ActiveBody {
         let land_mine = sim
             .object(ctx.owner_slot)
             .is_some_and(|o| o.land_mine_slot.is_some());
-        let plain = sim.rules().name_keys.lookup_key("ActiveBody") == Some(self.base.module_name_key);
-        if land_mine && plain {
+        let is = |name| sim.rules().name_keys.lookup_key(name) == Some(self.base.module_name_key);
+        // Retail towers and landmark bridges mostly have an `ImmortalBody` or a
+        // `StructureBody`, which handle damage as `ActiveBody` does, so the lent
+        // copy of the inner body answers the callbacks as they would.
+        let bridge_part = Self::is_bridge_part(sim, ctx.owner_slot)
+            && (is("ActiveBody") || is("ImmortalBody") || is("StructureBody"));
+        if (land_mine && is("ActiveBody")) || bridge_part {
             lend_self(self, sim, ctx, f);
         } else {
             f(sim);
@@ -465,12 +492,10 @@ impl ActiveBody {
         }
 
         if self.cur_damage_state != old_state {
-            sim.dispatch_on_body_damage_state_change(
-                ctx.owner_slot,
-                dmg,
-                old_state,
-                self.cur_damage_state,
-            );
+            let (owner, new_state) = (ctx.owner_slot, self.cur_damage_state);
+            self.run_bridge_callbacks(sim, ctx, |s| {
+                s.dispatch_on_body_damage_state_change(owner, dmg, old_state, new_state);
+            });
         }
 
         if (self.prev_health / self.max_health) > YELLOW_DAMAGE_PERCENT
@@ -484,7 +509,8 @@ impl ActiveBody {
             if sim.find_object(dmg.input.source_id).is_some() {
                 sim.notify_object_killed(ctx.owner_slot, dmg.input.source_id, dmg);
             }
-            sim.dispatch_on_die(ctx.owner_slot, dmg);
+            let owner = ctx.owner_slot;
+            self.run_bridge_callbacks(sim, ctx, |s| s.dispatch_on_die(owner, dmg));
         }
     }
 }
@@ -873,12 +899,10 @@ impl BodyFacet for ActiveBody {
             }
 
             if self.cur_damage_state != old_state {
-                sim.dispatch_on_body_damage_state_change(
-                    ctx.owner_slot,
-                    healing,
-                    old_state,
-                    self.cur_damage_state,
-                );
+                let (owner, new_state) = (ctx.owner_slot, self.cur_damage_state);
+                self.run_bridge_callbacks(sim, ctx, |s| {
+                    s.dispatch_on_body_damage_state_change(owner, healing, old_state, new_state);
+                });
             }
         }
 
@@ -990,6 +1014,25 @@ impl BodyFacet for ActiveBody {
     fn set_indestructible(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, indestructible: Bool) {
         self.indestructible = indestructible;
         self.sync_sidecar_to_sim(sim, ctx);
+
+        // A bridge's towers mirror it.
+        let owner = ctx.owner_slot;
+        if sim.object_is_kind_of(owner, KindOfType::Bridge) == FALSE {
+            return;
+        }
+        for tower_type in [
+            BridgeTowerType::FromLeft,
+            BridgeTowerType::FromRight,
+            BridgeTowerType::ToLeft,
+            BridgeTowerType::ToRight,
+        ] {
+            if let Some(tower) = sim
+                .bridge_tower_id(owner, tower_type)
+                .and_then(|id| sim.find_object(id))
+            {
+                sim.set_body_indestructible(tower, indestructible);
+            }
+        }
     }
 
     fn internal_change_health(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext, mut delta: Real) {

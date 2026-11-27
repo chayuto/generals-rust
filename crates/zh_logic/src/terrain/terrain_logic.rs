@@ -1252,6 +1252,14 @@ fn point_in_triangle(p0: [Real; 2], p1: [Real; 2], p2: [Real; 2], test: [Real; 2
 
 impl ThingTerrainAccess for TerrainLogic {
     /// `getGroundHeight`.
+    fn terrain_logic(&self) -> Option<&TerrainLogic> {
+        Some(self)
+    }
+
+    fn terrain_logic_mut(&mut self) -> Option<&mut TerrainLogic> {
+        Some(self)
+    }
+
     fn get_ground_height(&self, x: Real, y: Real, normal: Option<&mut Coord3D>) -> Real {
         self.ground_height(x, y, normal)
     }

@@ -21,6 +21,13 @@ const VALID_ALTITUDE_SEALEVEL: Int = 0x04;
 
 /// Terrain height & slope alignment callbacks required by [`Thing`] (`TerrainLogic`).
 pub trait ThingTerrainAccess {
+    /// The map's `TerrainLogic`, where the bridges are; `None` for other terrain.
+    fn terrain_logic(&self) -> Option<&crate::terrain::TerrainLogic> {
+        None
+    }
+    fn terrain_logic_mut(&mut self) -> Option<&mut crate::terrain::TerrainLogic> {
+        None
+    }
     fn get_ground_height(&self, x: Real, y: Real, normal: Option<&mut Coord3D>) -> Real;
     fn align_on_terrain(
         &self,

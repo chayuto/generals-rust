@@ -10,7 +10,9 @@ use zh_common::io::recorder::{read_replay_header, GameOptions};
 use zh_common::types::Relationship;
 use zh_logic::gamelogic::game_engine::GameDataLoader;
 use zh_logic::gamelogic::game_logic::{MapSource, ReplayGameRules, StartParms};
+use zh_logic::terrain::BridgeModels;
 use zh_logic::player::player_list::PlayerList;
+use zh_logic::pathfinder::PathfindLayerEnum;
 use zh_logic::player::team::TeamFactory;
 use zh_logic::sim::{SimContext, SimView};
 
@@ -104,6 +106,7 @@ fn map_source(fs: &BigFileSystem, portable: &[u8], user_dir: &str) -> Option<Map
 
 fn parms_for(
     fs: &BigFileSystem,
+    loader: &GameDataLoader,
     options: GameOptions,
     game_dir: &str,
     user_dir: &str,
@@ -124,6 +127,7 @@ fn parms_for(
         game: Some(options),
         skirmish_scripts: read("Data\\Scripts\\SkirmishScripts.scb"),
         challenge_mode_ini: read("Data\\INI\\ChallengeMode.ini").unwrap_or_default(),
+        bridge_models: BridgeModels::load(loader.rules.terrain_roads.bridges.iter(), read),
     })
 }
 
@@ -138,7 +142,7 @@ pub fn replay_parms(
     let bytes = std::fs::read(replay).ok()?;
     let rules = ReplayGameRules::new(loader);
     let (_, options) = read_replay_header(&bytes, &rules).expect("replay header");
-    parms_for(fs, options, game_dir, user_dir)
+    parms_for(fs, loader, options, game_dir, user_dir)
 }
 
 /// The game of an options string, with the first slot local.
@@ -152,7 +156,7 @@ pub fn options_parms(
     let rules = ReplayGameRules::new(loader);
     let mut options = GameOptions::parse(options.as_bytes(), &rules).expect("options string");
     options.local_slot = 0;
-    parms_for(fs, options, game_dir, user_dir)
+    parms_for(fs, loader, options, game_dir, user_dir)
 }
 
 fn bits(value: f32) -> String {
@@ -263,5 +267,61 @@ pub fn dump(sim: &SimContext, players: &PlayerList, teams: &TeamFactory) -> Vec<
             bits(o.shroud_clearing_range),
         ));
     }
+    dump_bridges(sim, &mut out);
     out
+}
+
+/// The terrain's bridges and the pathfind cells under each, two cells beyond its
+/// bounds.
+fn dump_bridges(sim: &SimContext, out: &mut Vec<String>) {
+    let Some(bridges) = sim.bridge_list() else {
+        return;
+    };
+    for (index, bridge) in bridges.iter().enumerate() {
+        let g = &bridge.geometry;
+        let towers = bridge.tower_ids.map(|id| id.0.to_string()).join(",");
+        let points: Vec<String> = [
+            g.from,
+            g.to,
+            g.from_left,
+            g.from_right,
+            g.to_left,
+            g.to_right,
+        ]
+        .iter()
+        .map(|p| format!("{}\t{}\t{}", bits(p.x), bits(p.y), bits(p.z)))
+        .collect();
+        out.push(format!(
+            "bridge\t{index}\t{}\t{}\t{}\t{}\t{towers}\t{}",
+            bridge.template_name,
+            bridge.layer as i32,
+            bridge.damage_state as i32,
+            bridge.object_id.0,
+            points.join("\t"),
+        ));
+        let x0 = (g.bounds.lo.x / 10.0) as i32 - 2;
+        let y0 = (g.bounds.lo.y / 10.0) as i32 - 2;
+        let nx = (g.bounds.hi.x / 10.0) as i32 + 3 - x0;
+        let ny = (g.bounds.hi.y / 10.0) as i32 + 3 - y0;
+        let mut cells = String::new();
+        for y in y0..y0 + ny {
+            for x in x0..x0 + nx {
+                for layer in [bridge.layer, PathfindLayerEnum::Ground] {
+                    let found = sim.world.pathfinder.as_ref().and_then(|pathfinder| {
+                        let idx = pathfinder.get_cell(layer, x, y)?;
+                        Some(pathfinder.map().grid().cell(idx))
+                    });
+                    match found {
+                        Some(cell) => cells.push_str(&format!(
+                            "{:x}{:x}",
+                            cell.cell_type() as i32,
+                            cell.connect_layer() as i32
+                        )),
+                        None => cells.push_str("--"),
+                    }
+                }
+            }
+        }
+        out.push(format!("deck\t{index}\t{x0}\t{y0}\t{nx}\t{ny}\t{cells}"));
+    }
 }

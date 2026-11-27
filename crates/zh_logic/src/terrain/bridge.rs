@@ -464,6 +464,38 @@ impl Bridge {
     }
 }
 
+/// `IntersectLine2D` (`Line2D.cpp`) as a yes or no.
+fn segments_meet(a: &Coord2D, b: &Coord2D, c: &Coord2D, d: &Coord2D) -> bool {
+    let denom = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+    if denom == 0.0 {
+        return false;
+    }
+    let r = ((a.y - c.y) * (d.x - c.x) - (a.x - c.x) * (d.y - c.y)) / denom;
+    let s = ((a.y - c.y) * (b.x - a.x) - (a.x - c.x) * (b.y - a.y)) / denom;
+    (0.0..=1.0).contains(&r) && (0.0..=1.0).contains(&s)
+}
+
+/// `PointInsideArea2D`: even-odd crossings of a segment to a point far away.
+pub fn point_inside_area_2d(p: &Coord3D, area: &[Coord3D]) -> bool {
+    let far = Coord2D {
+        x: 1_000_000.0,
+        y: 1_000_000.0,
+    };
+    let from = Coord2D { x: p.x, y: p.y };
+    let mut crossings = 0usize;
+    for (i, a) in area.iter().enumerate() {
+        let Some(b) = area.get((i + 1) % area.len()) else {
+            continue;
+        };
+        let a = Coord2D { x: a.x, y: a.y };
+        let b = Coord2D { x: b.x, y: b.y };
+        if segments_meet(&from, &far, &a, &b) {
+            crossings += 1;
+        }
+    }
+    crossings % 2 == 1
+}
+
 /// `getLayerForDestination` over the surfaces at `pos`: the nearest in height.
 pub fn nearest_layer(
     pos: &Coord3D,
@@ -684,14 +716,30 @@ impl BridgeList {
         change: &mut dyn FnMut(PathfindLayerEnum, bool),
     ) {
         for i in 0..self.bridges.len() {
-            self.bridges[i].damage_state_changed = false;
-            let id = self.bridges[i].object_id;
+            self.update_damage_state(i, world, change);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.bridges.len()
+    }
+
+    /// `Bridge::updateDamageState` of the bridge at `i`.
+    pub fn update_damage_state(
+        &mut self,
+        i: usize,
+        world: &mut dyn BridgeWorld,
+        change: &mut dyn FnMut(PathfindLayerEnum, bool),
+    ) {
+        if let Some(bridge) = self.bridges.get_mut(i) {
+            bridge.damage_state_changed = false;
+            let id = bridge.object_id;
             if id == ObjectId::INVALID {
-                continue;
+                return;
             }
             let Some(state) = world.bridge_damage_state(id) else {
                 self.bridges[i].object_id = ObjectId::INVALID;
-                continue;
+                return;
             };
             let current = self.bridges[i].damage_state;
             if state != current {
