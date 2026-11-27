@@ -754,40 +754,13 @@ fn populate_random_start_position(
         }
     }
     let mut team_pos = [-1 as i32; MAX_SLOTS];
-    // The first loop of the reference gives every unplaced slot a spot.
-    for i in 0..MAX_SLOTS {
-        if !playing(&game.slots[i]) || in_range(game.slots[i].start_pos) {
-            continue;
-        }
-        if picked {
-            let pos = farthest_spot(&distance, &taken, count);
-            game.slots[i].start_pos = pos.map_or(-1, |p| p as i32);
-            if let Some(p) = pos {
-                taken[p] = true;
-            }
-        } else {
-            let mut pos = -1;
-            while pos == -1 {
-                pos = sim
-                    .world
-                    .rng
-                    .get_game_logic_random_value(0, count as Int - 1);
-                if start_taken(game, pos) {
-                    pos = -1;
-                }
-            }
-            game.slots[i].start_pos = pos;
-            taken[pos as usize] = true;
-            picked = true;
-        }
-    }
     for i in 0..MAX_SLOTS {
         if !playing(&game.slots[i]) || in_range(game.slots[i].start_pos) {
             continue;
         }
         let team = game.slots[i].team_number;
         let pos = if !picked {
-            let mut pos = -1;
+            let mut pos = game.slots[i].start_pos;
             while pos == -1 {
                 pos = sim
                     .world

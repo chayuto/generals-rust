@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use zh_common::io::archive_file_system::ArchiveFilter;
 use zh_common::io::big_file_system::BigFileSystem;
-use zh_common::io::recorder::read_replay_header;
+use zh_common::io::recorder::{read_replay_header, GameOptions};
 use zh_common::types::Relationship;
 use zh_logic::gamelogic::game_engine::GameDataLoader;
 use zh_logic::gamelogic::game_logic::{MapSource, ReplayGameRules, StartParms};
@@ -24,7 +24,7 @@ pub fn retail_dirs() -> Option<(String, String)> {
         .then_some((game, user))
 }
 
-fn percent_decode(text: &str) -> String {
+pub fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -102,17 +102,12 @@ fn map_source(fs: &BigFileSystem, portable: &[u8], user_dir: &str) -> Option<Map
     Some(source)
 }
 
-/// What a playback of `replay` starts.
-pub fn replay_parms(
+fn parms_for(
     fs: &BigFileSystem,
-    loader: &GameDataLoader,
-    replay: &Path,
+    options: GameOptions,
     game_dir: &str,
     user_dir: &str,
 ) -> Option<StartParms> {
-    let bytes = std::fs::read(replay).ok()?;
-    let rules = ReplayGameRules::new(loader);
-    let (_, options) = read_replay_header(&bytes, &rules).expect("replay header");
     // A loose file in the game directory is read before the archives.
     let read = |path: &str| {
         std::fs::read(Path::new(game_dir).join(path.replace('\\', "/")))
@@ -130,6 +125,34 @@ pub fn replay_parms(
         skirmish_scripts: read("Data\\Scripts\\SkirmishScripts.scb"),
         challenge_mode_ini: read("Data\\INI\\ChallengeMode.ini").unwrap_or_default(),
     })
+}
+
+/// What a playback of `replay` starts.
+pub fn replay_parms(
+    fs: &BigFileSystem,
+    loader: &GameDataLoader,
+    replay: &Path,
+    game_dir: &str,
+    user_dir: &str,
+) -> Option<StartParms> {
+    let bytes = std::fs::read(replay).ok()?;
+    let rules = ReplayGameRules::new(loader);
+    let (_, options) = read_replay_header(&bytes, &rules).expect("replay header");
+    parms_for(fs, options, game_dir, user_dir)
+}
+
+/// The game of an options string, with the first slot local.
+pub fn options_parms(
+    fs: &BigFileSystem,
+    loader: &GameDataLoader,
+    options: &str,
+    game_dir: &str,
+    user_dir: &str,
+) -> Option<StartParms> {
+    let rules = ReplayGameRules::new(loader);
+    let mut options = GameOptions::parse(options.as_bytes(), &rules).expect("options string");
+    options.local_slot = 0;
+    parms_for(fs, options, game_dir, user_dir)
 }
 
 fn bits(value: f32) -> String {

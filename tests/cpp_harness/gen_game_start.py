@@ -20,6 +20,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCE = pathlib.Path(__file__).with_suffix(".cpp")
@@ -61,8 +62,52 @@ STAGES = {
 }
 
 
-def dump(dylib: pathlib.Path, replay: str, stage: str, out: pathlib.Path) -> None:
+# `(case, map, seed, slots)`: games no replay on disk plays. Each runs the macOS
+# vanilla replay with its options string swapped, from a scratch `HOME`. A human slot
+# is `H<name>,ip,port,flags,color,template,start,team,nat`, a computer one
+# `C<E|M|H>,color,template,start,team`, `X` closed.
+HUMAN = "Hprobe,0,0,TT,"
+VARIANTS = [
+    ("teams_random", "defcon6", 12345,
+     HUMAN + "-1,-1,-1,0,1:CE,-1,-1,-1,0:CE,-1,-1,-1,1:CE,-1,-1,-1,1:X:X:X:X:"),
+    ("observer", "defcon6", 777,
+     HUMAN + "2,-2,-1,-1,1:CE,-1,-1,-1,-1:CM,-1,-1,-1,-1:X:X:X:X:X:"),
+    ("chosen_spots", "defcon6", 4242,
+     HUMAN + "0,2,1,1,1:CE,3,3,3,1:CH,-1,-1,-1,0:CE,-1,-1,-1,0:X:X:X:X:"),
+    ("defcon6", "defcon6", 99, HUMAN + "-1,-1,-1,2,1:CE,-1,-1,-1,2:CE,-1,-1,-1,3:CH,-1,-1,-1,3:X:X:X:X:"),
+    ("alpine_assault", "alpine assault", 1, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("bitter_winter", "bitter winter", 2, HUMAN + "-1,-1,-1,-1,1:CM,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("dark_night", "dark night", 3, HUMAN + "-1,-1,-1,-1,1:CH,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("eastern_everglades", "eastern everglades", 4, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("fallen_empire", "fallen empire", 5, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("flash_fire", "flash fire", 6, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("leipzig_lowlands", "leipzig lowlands", 7, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("seaside_mutiny", "seaside mutiny", 8, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("silent_river", "silent river", 9, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("tournament_city", "tournament city", 10, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("whiteout", "whiteout", 11, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+    ("winding_river", "winding river", 13, HUMAN + "-1,-1,-1,-1,1:CE,-1,-1,-1,-1:X:X:X:X:X:X:"),
+]
+
+
+def variant_options(map_name: str, seed: int, slots: str) -> str:
+    return f"US=1;M=07maps/{map_name};MC=0;MS=0;SD={seed};C=100;SR=0;SC=10000;O=N;S={slots};"
+
+
+def write_variant(home: pathlib.Path, name: str, options: str) -> None:
+    data = (REPLAYS / "macos_2p_vanilla_map.rep").read_bytes()
+    start = data.index(b"US=1;M=")
+    end = data.index(b"\0", start)
+    folder = home / REPLAYS.relative_to(pathlib.Path.home())
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}.rep").write_bytes(data[:start] + options.encode() + data[end:])
+
+
+def dump(dylib: pathlib.Path, replay: str, stage: str, out: pathlib.Path,
+         home: pathlib.Path | None = None) -> None:
     env = dict(os.environ)
+    if home:
+        env["HOME"] = str(home)
     env.update(SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
                CNC_GENERALS_ZH_PATH=str(ASSETS))
     out.unlink(missing_ok=True)
@@ -119,9 +164,19 @@ def summarize(path: pathlib.Path) -> str:
     for group, started in (("map", False), ("start", True)):
         cells = [c for c in objects if c[4].startswith(playing) == started]
         words.append(f"{group}_count={len(cells)}")
+        if started:
+            words.append("start_positions=" + ",".join(
+                digest([b"\t".join([c[1], c[6], c[7], c[8]])]) for c in cells))
         for name, fields in COLUMNS:
             words.append(f"{group}_{name}_digest=" + digest(
                 b"\t".join([c[1]] + [c[f] for f in fields]) for c in cells))
+    # What can still be compared on a map with bridges, whose objects shift every id:
+    # the map's other objects, by content.
+    loose = sorted(
+        b"\t".join([c[2], c[4], c[5]] + c[6:14] + c[15:17]) for c in objects
+        if not c[4].startswith(playing) and b"Bridge" not in c[2])
+    words.append(f"unbridged_count={len(loose)}")
+    words.append(f"unbridged_digest={digest(loose)}")
     return " ".join(words)
 
 
@@ -133,17 +188,26 @@ def main() -> int:
     scratch.mkdir(parents=True, exist_ok=True)
     dylib = scratch / "zh_game_start.dylib"
     build_dylib(dylib)
-    replays = sys.argv[2:] or sorted(p.name for p in REPLAYS.glob("*.rep"))
+    wanted = sys.argv[2:]
+    home = scratch / "home"
+    games = [(p.name, None) for p in sorted(REPLAYS.glob("*.rep"))]
+    for name, map_name, seed, slots in VARIANTS:
+        options = variant_options(map_name, seed, slots)
+        write_variant(home, name, options)
+        games.append((f"{name}.rep", options))
     cases = []
-    for replay in replays:
+    for replay, options in games:
+        if wanted and replay not in wanted:
+            continue
         for stage in STAGES:
             out = scratch / f"{replay.removesuffix('.rep')}.{stage}.ref.txt"
-            dump(dylib, replay, stage, out)
+            dump(dylib, replay, stage, out, home if options else None)
             lines = out.read_text(errors="replace").splitlines()
             print(replay, stage, {k: sum(l.startswith(k + "\t") for l in lines)
-                                  for k in ("player", "team", "obj")})
-            cases.append(f"{replay} stage={stage} {summarize(out)}")
-    if not sys.argv[2:]:
+                                  for k in ("player", "team", "obj")}, flush=True)
+            words = f" options={urllib.parse.quote(options)}" if options else ""
+            cases.append(f"{replay} stage={stage}{words} {summarize(out)}")
+    if not wanted:
         body = ",\n".join(f'    "{c}"' for c in cases)
         golden = ROOT / "docs/golden_vectors/GameStart.json"
         golden.write_text(f'{{\n  "cases": [\n{body}\n  ]\n}}\n')
