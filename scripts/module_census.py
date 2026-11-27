@@ -25,6 +25,7 @@ import check_replays  # noqa: E402
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 VENDOR = REPO_ROOT / "vendor/GeneralsX"
 OUTPUT = REPO_ROOT / "docs/MODULE_USAGE.md"
+COUNTS = REPO_ROOT / "docs/module_instances.json"
 LINE = re.compile(r"^ZH_CENSUS (\d+) (\S+)$", re.MULTILINE)
 KINDS = {0: "behavior", 1: "draw", 2: "client update"}
 PORT_ROW = re.compile(r"^\| `(PKT-\d+)` \| `[^`]*` \|[^|]*\|[^|]*\| `(\w+)` \|", re.MULTILINE)
@@ -108,6 +109,12 @@ def render(rows: list[tuple], total_replays: int) -> str:
     return "\n".join(out) + "\n"
 
 
+def counts_json(rows: list[tuple]) -> str:
+    """Every class the replays create, for scripts that need the ported ones too."""
+    classes = {r[0]: {"replays": r[1], "instances": r[2], "packet": r[3]} for r in rows}
+    return json.dumps(classes, indent=1, sort_keys=True) + "\n"
+
+
 def main() -> int:
     binary = build_rust_engine.build(None, rust=False, census=True)
     baseline = json.loads(check_replays.DEFAULT_BASELINE.read_text())["replays"]
@@ -142,6 +149,7 @@ def main() -> int:
         pkt = packet_of(files.get(name), name, manifest)
         rows.append((name, replays, instances, pkt, status.get(pkt, "unported"), sizes.get(pkt, 0)))
     OUTPUT.write_text(render(rows, len(names)))
+    COUNTS.write_text(counts_json(rows))
     print("\n".join(OUTPUT.read_text().splitlines()[9:12]))
     print(f"wrote {OUTPUT}")
     return 0

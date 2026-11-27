@@ -1,0 +1,522 @@
+{
+ "AIUpdateInterface": {
+  "instances": 178,
+  "packet": "PKT-301",
+  "replays": 6
+ },
+ "ActiveBody": {
+  "instances": 754,
+  "packet": "PKT-165",
+  "replays": 6
+ },
+ "ArmorUpgrade": {
+  "instances": 201,
+  "packet": "PKT-194",
+  "replays": 6
+ },
+ "AssistedTargetingUpdate": {
+  "instances": 6,
+  "packet": "PKT-304",
+  "replays": 4
+ },
+ "AutoDepositUpdate": {
+  "instances": 156,
+  "packet": "PKT-305",
+  "replays": 6
+ },
+ "AutoFindHealingUpdate": {
+  "instances": 20,
+  "packet": "PKT-306",
+  "replays": 4
+ },
+ "AutoHealBehavior": {
+  "instances": 449,
+  "packet": "PKT-257",
+  "replays": 6
+ },
+ "BaseRegenerateUpdate": {
+  "instances": 92,
+  "packet": "PKT-308",
+  "replays": 5
+ },
+ "BattlePlanUpdate": {
+  "instances": 1,
+  "packet": "PKT-309",
+  "replays": 1
+ },
+ "CashBountyPower": {
+  "instances": 87,
+  "packet": "PKT-196",
+  "replays": 4
+ },
+ "CashHackSpecialPower": {
+  "instances": 41,
+  "packet": "PKT-197",
+  "replays": 6
+ },
+ "ChinookAIUpdate": {
+  "instances": 18,
+  "packet": "PKT-312",
+  "replays": 4
+ },
+ "CommandButtonHuntUpdate": {
+  "instances": 108,
+  "packet": "PKT-314",
+  "replays": 6
+ },
+ "CommandSetUpgrade": {
+  "instances": 203,
+  "packet": "PKT-200",
+  "replays": 6
+ },
+ "CostModifierUpgrade": {
+  "instances": 4,
+  "packet": "PKT-203",
+  "replays": 2
+ },
+ "CreateCrateDie": {
+  "instances": 105,
+  "packet": "PKT-205",
+  "replays": 6
+ },
+ "CreateObjectDie": {
+  "instances": 404,
+  "packet": "PKT-206",
+  "replays": 6
+ },
+ "CrushDie": {
+  "instances": 2,
+  "packet": "PKT-207",
+  "replays": 2
+ },
+ "DefaultProductionExitUpdate": {
+  "instances": 138,
+  "packet": "PKT-315",
+  "replays": 6
+ },
+ "DestroyDie": {
+  "instances": 1016,
+  "packet": "PKT-211",
+  "replays": 6
+ },
+ "DozerAIUpdate": {
+  "instances": 45,
+  "packet": "PKT-321",
+  "replays": 6
+ },
+ "DumbProjectileBehavior": {
+  "instances": 14,
+  "packet": "PKT-267",
+  "replays": 1
+ },
+ "EjectPilotDie": {
+  "instances": 12,
+  "packet": "PKT-213",
+  "replays": 3
+ },
+ "ExperienceScalarUpgrade": {
+  "instances": 32,
+  "packet": "PKT-214",
+  "replays": 4
+ },
+ "FXListDie": {
+  "instances": 842,
+  "packet": "PKT-217",
+  "replays": 6
+ },
+ "FireSpreadUpdate": {
+  "instances": 54,
+  "packet": "PKT-327",
+  "replays": 2
+ },
+ "FireWeaponCollide": {
+  "instances": 54,
+  "packet": "PKT-215",
+  "replays": 2
+ },
+ "FireWeaponWhenDamagedBehavior": {
+  "instances": 12,
+  "packet": "PKT-268",
+  "replays": 2
+ },
+ "FireWeaponWhenDeadBehavior": {
+  "instances": 96,
+  "packet": "PKT-269",
+  "replays": 6
+ },
+ "FlammableUpdate": {
+  "instances": 705,
+  "packet": "PKT-330",
+  "replays": 6
+ },
+ "GarrisonContain": {
+  "instances": 78,
+  "packet": "PKT-271",
+  "replays": 6
+ },
+ "GenerateMinefieldBehavior": {
+  "instances": 137,
+  "packet": "PKT-272",
+  "replays": 6
+ },
+ "GrantScienceUpgrade": {
+  "instances": 36,
+  "packet": "PKT-218",
+  "replays": 4
+ },
+ "GrantUpgradeCreate": {
+  "instances": 79,
+  "packet": "PKT-171",
+  "replays": 6
+ },
+ "HackInternetAIUpdate": {
+  "instances": 8,
+  "packet": "PKT-332",
+  "replays": 1
+ },
+ "HealContain": {
+  "instances": 20,
+  "packet": "PKT-274",
+  "replays": 6
+ },
+ "HelicopterSlowDeathBehavior": {
+  "instances": 18,
+  "packet": "PKT-334",
+  "replays": 4
+ },
+ "HighlanderBody": {
+  "instances": 54,
+  "packet": "PKT-172",
+  "replays": 2
+ },
+ "HiveStructureBody": {
+  "instances": 4,
+  "packet": "PKT-173",
+  "replays": 3
+ },
+ "HordeUpdate": {
+  "instances": 50,
+  "packet": "PKT-336",
+  "replays": 3
+ },
+ "ImmortalBody": {
+  "instances": 224,
+  "packet": "PKT-174",
+  "replays": 6
+ },
+ "InactiveBody": {
+  "instances": 346,
+  "packet": "PKT-175",
+  "replays": 6
+ },
+ "InternetHackContain": {
+  "instances": 6,
+  "packet": "PKT-277",
+  "replays": 3
+ },
+ "KeepObjectDie": {
+  "instances": 188,
+  "packet": "PKT-220",
+  "replays": 6
+ },
+ "LifetimeUpdate": {
+  "instances": 1,
+  "packet": "PKT-339",
+  "replays": 1
+ },
+ "LockWeaponCreate": {
+  "instances": 18,
+  "packet": "PKT-176",
+  "replays": 4
+ },
+ "LocomotorSetUpgrade": {
+  "instances": 34,
+  "packet": "PKT-221",
+  "replays": 3
+ },
+ "MaxHealthUpgrade": {
+  "instances": 4,
+  "packet": "PKT-222",
+  "replays": 1
+ },
+ "MinefieldBehavior": {
+  "instances": 53,
+  "packet": "PKT-279",
+  "replays": 5
+ },
+ "MissileLauncherBuildingUpdate": {
+  "instances": 3,
+  "packet": "PKT-341",
+  "replays": 2
+ },
+ "ModelConditionUpgrade": {
+  "instances": 56,
+  "packet": "PKT-223",
+  "replays": 5
+ },
+ "MoneyCrateCollide": {
+  "instances": 12,
+  "packet": "PKT-224",
+  "replays": 2
+ },
+ "OCLSpecialPower": {
+  "instances": 774,
+  "packet": "PKT-226",
+  "replays": 6
+ },
+ "OCLUpdate": {
+  "instances": 1,
+  "packet": "PKT-346",
+  "replays": 1
+ },
+ "ObjectCreationUpgrade": {
+  "instances": 42,
+  "packet": "PKT-225",
+  "replays": 3
+ },
+ "OverchargeBehavior": {
+  "instances": 25,
+  "packet": "PKT-283",
+  "replays": 6
+ },
+ "ParkingPlaceBehavior": {
+  "instances": 4,
+  "packet": "PKT-286",
+  "replays": 3
+ },
+ "PhysicsBehavior": {
+  "instances": 379,
+  "packet": "PKT-348",
+  "replays": 6
+ },
+ "PointDefenseLaserUpdate": {
+  "instances": 3,
+  "packet": "PKT-350",
+  "replays": 1
+ },
+ "PoisonedBehavior": {
+  "instances": 142,
+  "packet": "PKT-287",
+  "replays": 6
+ },
+ "PowerPlantUpdate": {
+  "instances": 35,
+  "packet": "PKT-351",
+  "replays": 6
+ },
+ "PowerPlantUpgrade": {
+  "instances": 10,
+  "packet": "PKT-228",
+  "replays": 4
+ },
+ "PreorderCreate": {
+  "instances": 106,
+  "packet": "PKT-182",
+  "replays": 6
+ },
+ "ProductionUpdate": {
+  "instances": 347,
+  "packet": "PKT-354",
+  "replays": 6
+ },
+ "PropagandaTowerBehavior": {
+  "instances": 2,
+  "packet": "PKT-291",
+  "replays": 2
+ },
+ "QueueProductionExitUpdate": {
+  "instances": 11,
+  "packet": "PKT-357",
+  "replays": 6
+ },
+ "RadarUpdate": {
+  "instances": 77,
+  "packet": "PKT-358",
+  "replays": 6
+ },
+ "RadarUpgrade": {
+  "instances": 80,
+  "packet": "PKT-229",
+  "replays": 6
+ },
+ "RebuildHoleExposeDie": {
+  "instances": 49,
+  "packet": "PKT-230",
+  "replays": 4
+ },
+ "RepairDockUpdate": {
+  "instances": 23,
+  "packet": "PKT-363",
+  "replays": 6
+ },
+ "SlavedUpdate": {
+  "instances": 12,
+  "packet": "PKT-365",
+  "replays": 3
+ },
+ "SlowDeathBehavior": {
+  "instances": 1429,
+  "packet": "PKT-295",
+  "replays": 6
+ },
+ "SpawnBehavior": {
+  "instances": 23,
+  "packet": "PKT-296",
+  "replays": 6
+ },
+ "SpawnPointProductionExitUpdate": {
+  "instances": 4,
+  "packet": "PKT-367",
+  "replays": 3
+ },
+ "SpecialAbility": {
+  "instances": 160,
+  "packet": "PKT-242",
+  "replays": 6
+ },
+ "SpecialAbilityUpdate": {
+  "instances": 123,
+  "packet": "PKT-368",
+  "replays": 6
+ },
+ "SpecialPowerCreate": {
+  "instances": 3,
+  "packet": "PKT-183",
+  "replays": 2
+ },
+ "SpectreGunshipDeploymentUpdate": {
+  "instances": 64,
+  "packet": "PKT-370",
+  "replays": 4
+ },
+ "SpyVisionSpecialPower": {
+  "instances": 1,
+  "packet": "PKT-245",
+  "replays": 1
+ },
+ "SpyVisionUpdate": {
+  "instances": 13,
+  "packet": "PKT-372",
+  "replays": 3
+ },
+ "SquishCollide": {
+  "instances": 141,
+  "packet": "PKT-246",
+  "replays": 6
+ },
+ "StealthDetectorUpdate": {
+  "instances": 119,
+  "packet": "PKT-373",
+  "replays": 6
+ },
+ "StealthUpdate": {
+  "instances": 610,
+  "packet": "PKT-374",
+  "replays": 6
+ },
+ "StealthUpgrade": {
+  "instances": 41,
+  "packet": "PKT-248",
+  "replays": 4
+ },
+ "StructureBody": {
+  "instances": 327,
+  "packet": "PKT-185",
+  "replays": 6
+ },
+ "StructureToppleUpdate": {
+  "instances": 12,
+  "packet": "PKT-377",
+  "replays": 2
+ },
+ "SupplyCenterCreate": {
+  "instances": 18,
+  "packet": "PKT-187",
+  "replays": 6
+ },
+ "SupplyCenterDockUpdate": {
+  "instances": 18,
+  "packet": "PKT-378",
+  "replays": 6
+ },
+ "SupplyCenterProductionExitUpdate": {
+  "instances": 18,
+  "packet": "PKT-379",
+  "replays": 6
+ },
+ "SupplyTruckAIUpdate": {
+  "instances": 26,
+  "packet": "PKT-380",
+  "replays": 4
+ },
+ "SupplyWarehouseCreate": {
+  "instances": 224,
+  "packet": "PKT-188",
+  "replays": 6
+ },
+ "SupplyWarehouseDockUpdate": {
+  "instances": 224,
+  "packet": "PKT-381",
+  "replays": 6
+ },
+ "TechBuildingBehavior": {
+  "instances": 178,
+  "packet": "PKT-298",
+  "replays": 6
+ },
+ "TensileFormationUpdate": {
+  "instances": 12,
+  "packet": "PKT-382",
+  "replays": 2
+ },
+ "ToppleUpdate": {
+  "instances": 186,
+  "packet": "PKT-383",
+  "replays": 4
+ },
+ "TransitionDamageFX": {
+  "instances": 635,
+  "packet": "PKT-190",
+  "replays": 6
+ },
+ "TransportAIUpdate": {
+  "instances": 11,
+  "packet": "PKT-384",
+  "replays": 3
+ },
+ "TransportContain": {
+  "instances": 29,
+  "packet": "PKT-299",
+  "replays": 4
+ },
+ "TunnelContain": {
+  "instances": 1,
+  "packet": "PKT-300",
+  "replays": 1
+ },
+ "UnpauseSpecialPowerUpgrade": {
+  "instances": 113,
+  "packet": "PKT-251",
+  "replays": 6
+ },
+ "VeterancyGainCreate": {
+  "instances": 69,
+  "packet": "PKT-192",
+  "replays": 3
+ },
+ "WeaponBonusUpgrade": {
+  "instances": 51,
+  "packet": "PKT-255",
+  "replays": 5
+ },
+ "WeaponSetUpgrade": {
+  "instances": 42,
+  "packet": "PKT-256",
+  "replays": 5
+ },
+ "WorkerAIUpdate": {
+  "instances": 30,
+  "packet": "PKT-389",
+  "replays": 3
+ }
+}

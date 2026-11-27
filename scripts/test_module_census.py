@@ -15,6 +15,16 @@ class ModuleCensusTest(unittest.TestCase):
         b = mc.parse_census("ZH_CENSUS 0 B\n")
         self.assertEqual(mc.rank([a, b]), [("B", 2, 2), ("A", 1, 2)])
 
+    def test_counts_json_keeps_every_class(self) -> None:
+        text = mc.counts_json([("A", 1, 2, "PKT-001", "implemented", 9), ("B", 1, 1, None, "unported", 0)])
+        self.assertEqual(
+            mc.json.loads(text),
+            {
+                "A": {"replays": 1, "instances": 2, "packet": "PKT-001"},
+                "B": {"replays": 1, "instances": 1, "packet": None},
+            },
+        )
+
     def test_port_status_reads_the_real_port_map(self) -> None:
         status = mc.port_status((mc.REPO_ROOT / "docs/PORT_MAP.md").read_text())
         self.assertEqual(status["PKT-339"], "implemented")
