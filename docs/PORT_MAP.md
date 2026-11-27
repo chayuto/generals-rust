@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`290` implemented, `37` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `121` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `117` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `122` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `118` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -385,6 +385,7 @@
 | `zh_logic` | `crates/zh_logic/src/ai/ai_states/movement.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/mood.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/gamelogic/client_name_keys.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/gamelogic/command_target.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/gamelogic/frame.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/module_data.rs` | `implemented` |
@@ -437,6 +438,7 @@
 | `docs/golden_vectors/JOINS2_Modules.json` | - | no |
 | `docs/golden_vectors/JOINS_Modules.json` | - | no |
 | `docs/golden_vectors/LogicModuleData.json` | - | no |
+| `docs/golden_vectors/NameKeys.json` | - | no |
 | `docs/golden_vectors/PARTITION_COLLIDE.json` | 520 | no |
 | `docs/golden_vectors/PARTITION_GRID.json` | 1200 | no |
 | `docs/golden_vectors/PARTITION_OBJECT_SHROUD.json` | 500 | no |
@@ -581,6 +583,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_joins2_modules.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_joins_modules.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_logic_module_data.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_name_keys.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_collide.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_object_shroud.rs` | `active` |

@@ -9,7 +9,7 @@
 //!
 //! Golden tests: `crates/zh_logic/tests/golden_ai_new_map.rs` and
 //! `golden_game_start.rs`, recorded from the running reference engine;
-//! `golden_orders_construct.rs` for the dozer's order.
+//! `orders_construct.rs` for the dozer's order.
 
 use std::collections::BTreeMap;
 

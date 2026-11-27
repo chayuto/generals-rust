@@ -12,6 +12,7 @@
 #[path = "game_start_support/mod.rs"]
 mod support;
 
+use zh_common::ini::IniLoadType;
 use zh_common::io::big_file_system::BigFileSystem;
 use zh_common::io::file::OsDiskFileHost;
 use zh_common::types::NameKeyType;
@@ -128,4 +129,51 @@ fn every_key_of_the_engine_start() {
         loader.rules.name_keys.name_to_key("no such name").0,
         count + 1
     );
+}
+
+/// A module tag takes its number after the names its draw data takes
+/// (`parseBoneNameKey` takes none for `none`, a transition state takes both), and
+/// a reference to a missing list takes one ahead of the tag.
+#[test]
+fn module_data_takes_numbers_before_its_tag() {
+    let ini = [
+        "Object Thing",
+        "  Draw = W3DModelDraw DrawTag",
+        "    DefaultConditionState",
+        "      Turret = NONE",
+        "      TurretPitch = BoneA",
+        "      TransitionKey = None",
+        "    End",
+        "    TransitionState = One Two",
+        "    End",
+        "  End",
+        "  Behavior = SlowDeathBehavior DieTag",
+        "    FX = INITIAL MissingList None",
+        "  End",
+        "End",
+        "",
+    ]
+    .join("\n");
+    let mut loader = GameDataLoader::new();
+    loader.load_bytes("keys.ini", ini.as_bytes(), IniLoadType::Overwrite);
+    assert!(
+        loader.report.failures.is_empty(),
+        "{:?}",
+        loader.report.failures
+    );
+    let keys = &loader.rules.name_keys;
+    let first = keys.lookup_key("bonea").expect("bone").0;
+    let order = [
+        "bonea",
+        "none",
+        "one",
+        "two",
+        "DrawTag",
+        "MissingList",
+        "DieTag",
+    ];
+    for (offset, name) in (0..).zip(order) {
+        let key = keys.lookup_key(name).map(|k| k.0);
+        assert_eq!(key, Some(first + offset), "{name}");
+    }
 }

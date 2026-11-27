@@ -69,10 +69,10 @@ For the next session. Rules are in `AGENTS.md`; this note only records where wor
 What differs first, by games reached (of 24):
 
 1. Computer player update not ported (`AIPlayer::update`, S21): 24 games, frames 1 and 2. The skirmish scripts now give the computer its money (player rows agree at frame 1 in 19 games and first differ at 2, where the reference's AI spends it; in the other 5 it spends in frame 1), then base building, upgrade choice and unit training differ. The seed agrees at frame 1 in all games and first differs at 2.
-2. Dozer and Worker frame updates (S16) are ported (`golden_s16_dozer_worker_frames`): the human players' module wake frames agree to the end in 17 games and to frames 146 to 249 in the `*_2p_*` and `*_6p_*` games. The construct order and the Worker's supply half are missing.
+2. Dozer and Worker frame updates (S16) are ported (`golden_s16_dozer_worker_frames`): the human players' module wake frames agree to the end in 17 games and to frames 146 to 249 in the `*_2p_*` and `*_6p_*` games. The Worker's supply half is missing.
 3. Mood targets are wired (`getNextMoodTarget`); the ratchet cannot show it while items 1 and 2 shift the seed. At frame 4 the mood draws match the stock engine except for computer dozers that item 2 leaves idle (2 games checked).
 4. Turrets not wired (S14): 6 games, map objects wake at frame 4, draws from frame 9.
-5. Human orders: dozer construct is not carried out (6 games, objects from frame 146); queue unit create is not (6 games, money from frame 39); queue upgrade is silently dropped (5 games, money from frame 73), see below.
+5. Human orders: unit create, upgrade and dozer construct are carried out (human money matches the reference for all 300 frames on the 6 replay games). Science purchase is not (3 games: the points are in `PlayerList`, which dispatch does not see), nor retaliation mode (message 1097). Human object rows are keyed by object id, so they differ once the computer players have created objects the port has not.
 6. Missing modules `RailroadBehavior` and `BoneFXUpdate` (2 games each, frame 1), and `StructureCollapseUpdate` (2 games, asleep in these frames).
 
 The script engine runs in frames (`scripts/script_world.rs`, `golden_script_world`). Still unported among what these frames reach, counted by the engine and by `GameScripts::unported` (`GAME_FRAMES_DUMP` prints them):
@@ -85,7 +85,8 @@ Pitfalls:
 
 - A field can agree by coincidence while two parts are missing. `bitter_winter.rep player` agreed at frame 1 with no scripts run, because the reference gives the computer 200 and spends it on a worker in the same frame; it now first differs at 1, and the ratchet was rewritten with that one step back. To see the reference's money, search candidate values for the one whose player rows give the recorded digest.
 - A script chunk reader given an empty `ScriptTemplateRegistry` turns every condition into `CONDITION_FALSE` without an error. Game start did that until the engine ran; `golden_script_world` now requires the start to leave nothing unported, but check `unported_conditions` is not empty-because-nothing-ran after touching the loading.
-- Name keys differ from the reference. A replay carries the reference's key (an upgrade as 2295; the port's upgrades are 199 to 873), so an order naming something by key is dropped without a report. `NameKeyGenerator` has to hand out the reference's numbers. Game start now interns the script template names before the map, as `ScriptEngine::init` does, but not at the reference's point among the other `init` calls.
+- `NameKeyType` numbers match the reference only for the engine start (`golden_name_keys`): names are numbered in request order, so a new startup request must go where the reference makes it. Module class names and keys first asked for during a game do not match.
+- The dozer's order does not check placement (`isLocationLegalToBuild` is not ported).
 - `TeamFactory` member lists are filled at game start only; frames keep `world.team_members`. The comparison counts the latter. The script adapter copies them into the factory before `updateTeamStates`.
 
 ## Next

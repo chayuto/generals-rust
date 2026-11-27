@@ -57,6 +57,9 @@ pub(crate) fn before_init_path(rules: &mut RulesRegistry, path: &str) {
     match path {
         // `TheFunctionLexicon`, then `TheModuleFactory`.
         "Data\\INI\\Rank" => {
+            // `TheNameKeyGenerator->syncNameKeyID`, after `TheAudio`.
+            #[cfg(feature = "retail-crc")]
+            rules.name_keys.sync_name_key_id();
             intern(&mut rules.name_keys, &FUNCTION_LEXICON_NAMES);
             rules.register_module_factory();
             rules
