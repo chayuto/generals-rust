@@ -15,9 +15,9 @@
 //! `ai_update/path_follow.rs`, asking allies aside in `allies.rs`, blocking and
 //! collisions in `collision.rs` (S9; golden test `tests/golden_s9_path_follow.rs`).
 //!
-//! Not here: turrets (S14); mood targets (S12); the derived AI classes (S15 to
-//! S18; of the dozer and worker only construction and `xfer`, see
-//! [`DerivedAi`]); groups and command buttons.
+//! Not here: turrets (S14); mood targets (S12); the derived AI classes (S15, S17,
+//! S18; the dozer and worker are in `dozer_ai_update.rs` and
+//! `worker_ai_update.rs`, see [`DerivedAi`]); groups and command buttons.
 
 use crate::object::weapon_queries;
 use crate::ai::ai_state_machine::{self as machine, state_id, AiStateMachine};
@@ -28,8 +28,8 @@ use crate::arena::{FacetMask, ModuleContext, ObjectSlot};
 use crate::combat::locomotor::{Locomotor, LocomotorWorld};
 use crate::combat::locomotor_set::{LocomotorSet, LocomotorSetType};
 use crate::combat::turret_ai::{TurretAIData, TURRET_AI_DATA_FIELD_PARSE};
-use crate::modules::update::dozer_ai_update::DozerAi;
-use crate::modules::update::worker_ai_update::WorkerAi;
+use crate::modules::update::dozer_ai_update::{self, DozerAi};
+use crate::modules::update::worker_ai_update::{self, WorkerAi};
 use crate::modules::behavior::behavior_module::UpdateScheduleTracker;
 use crate::modules::module::{
     AiUpdateFacet, AttitudeType, BehaviorModule, CommandSourceType, ModuleData,
@@ -330,6 +330,10 @@ pub enum AiCall {
     JoinTeam,
     /// `doQuickExit`.
     QuickExit(Vec<Coord3D>),
+    /// `onDisabledEdge`, which only the dozer and the worker override.
+    DisabledEdge(Bool),
+    /// `onDelete`, which only the dozer and the worker override.
+    Delete,
 }
 
 /// The command entry of a resident AI module.
@@ -1544,7 +1548,7 @@ fn set_max_shot_count(sim: &mut dyn SimApi, owner: ObjectSlot, max_shots: Int) {
 }
 
 /// `isAllowedToRespondToAiCommands`.
-fn is_allowed_to_respond(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiCommandParms) -> bool {
+pub(super) fn is_allowed_to_respond(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiCommandParms) -> bool {
     if sim
         .object(ctx.owner_slot)
         .map_or(true, |o| o.is_effectively_dead() != FALSE)
@@ -1562,8 +1566,17 @@ fn is_allowed_to_respond(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiCom
         && ai(sim, ctx).data.forbid_player_commands != FALSE)
 }
 
-/// `aiDoCommand`.
+/// `aiDoCommand`, which the dozer and the worker override.
 pub fn execute_command(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiCommandParms) {
+    match ai(sim, ctx).derived {
+        DerivedAi::Base => base_command(sim, ctx, parms),
+        DerivedAi::Dozer(_) => dozer_ai_update::do_command(sim, ctx, parms),
+        DerivedAi::Worker(_) => worker_ai_update::do_command(sim, ctx, parms),
+    }
+}
+
+/// `AIUpdateInterface::aiDoCommand`.
+pub(super) fn base_command(sim: &mut dyn SimApi, ctx: ModuleContext, parms: &AiCommandParms) {
     if !is_allowed_to_respond(sim, ctx, parms) {
         return;
     }
@@ -2251,6 +2264,16 @@ pub fn execute(sim: &mut dyn SimApi, ctx: ModuleContext, call: &AiCall) {
             }
         }
         AiCall::JoinTeam => join_team(sim, ctx),
+        AiCall::DisabledEdge(now_disabled) => {
+            if !matches!(ai(sim, ctx).derived, DerivedAi::Base) {
+                dozer_ai_update::on_disabled_edge(sim, ctx, *now_disabled);
+            }
+        }
+        AiCall::Delete => {
+            if !matches!(ai(sim, ctx).derived, DerivedAi::Base) {
+                dozer_ai_update::on_delete(sim, ctx);
+            }
+        }
         AiCall::QuickExit(path) => {
             let locked = ai(sim, ctx).machine.locked;
             ai(sim, ctx).machine.unlock();
@@ -2282,7 +2305,11 @@ impl BehaviorModule for AiUpdate {
         held.set(DisabledType::Held.as_i32(), 1);
         Some(ResidentEntries {
             disabled_types_to_process: held,
-            update,
+            update: match self.derived {
+                DerivedAi::Base => update,
+                DerivedAi::Dozer(_) => dozer_ai_update::update,
+                DerivedAi::Worker(_) => worker_ai_update::update,
+            },
             do_pathfind,
         })
     }

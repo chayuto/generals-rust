@@ -1607,6 +1607,15 @@ impl SimApi for EngineSim<'_> {
     fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real) {
         not_wired("set_object_construction_percent")
     }
+    fn body_evaluate_visual_condition(&mut self, owner: ObjectSlot) {
+        not_wired("body_evaluate_visual_condition")
+    }
+    fn player_on_structure_construction_complete( &mut self, structure: ObjectSlot, is_rebuild: Bool, ) {
+        not_wired("player_on_structure_construction_complete")
+    }
+    fn object_template_id(&self, owner: ObjectSlot) -> Option<ThingTemplateId> {
+        not_wired("object_template_id")
+    }
     fn topple_object( &mut self, owner: ObjectSlot, direction: &Coord3D, speed: Real, options: UnsignedInt, ) {
         not_wired("topple_object")
     }

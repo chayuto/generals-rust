@@ -2239,6 +2239,17 @@ pub trait SimApi: SimView {
     /// `GameClientRandomValue`.
     fn rng_client_int(&mut self, lo: Int, hi: Int) -> Int;
     fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real);
+    /// `BodyModuleInterface::evaluateVisualCondition`.
+    fn body_evaluate_visual_condition(&mut self, owner: ObjectSlot);
+    /// `Player::onStructureConstructionComplete`, without the computer player's
+    /// `onStructureProduced`.
+    fn player_on_structure_construction_complete(
+        &mut self,
+        structure: ObjectSlot,
+        is_rebuild: Bool,
+    );
+    /// `Object::getTemplate`.
+    fn object_template_id(&self, owner: ObjectSlot) -> Option<ThingTemplateId>;
     /// `Object::topple`.
     fn topple_object(
         &mut self,
@@ -4086,6 +4097,10 @@ impl SimContext {
             if !self.world.modules.is_alive(ms) {
                 continue;
             }
+            let resident = self.world.objects.get(slot).and_then(|o| o.ai_slot) == Some(ms);
+            if resident && self.call_ai(slot, &AiCall::Delete) {
+                continue;
+            }
             if self.world.modules.is_executing(ms) {
                 self.world
                     .modules
@@ -4722,8 +4737,14 @@ impl SimContext {
             .objects
             .get(owner)
             .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
+        let ai = self.world.objects.get(owner).and_then(|o| o.ai_slot);
         for ms in behaviors {
             if self.world.modules.is_alive(ms) {
+                if Some(ms) == ai
+                    && self.call_ai(owner, &AiCall::DisabledEdge(becoming_disabled))
+                {
+                    continue;
+                }
                 let _ = self.dispatch_module(ms, |m, sim, ctx| {
                     m.on_disabled_edge(sim, ctx, becoming_disabled);
                 });
@@ -11346,6 +11367,39 @@ impl SimApi for SimContext {
         self.world.rng.get_game_client_random_value(lo, hi)
     }
 
+    fn body_evaluate_visual_condition(&mut self, owner: ObjectSlot) {
+        if let Some(body) = self.world.objects.get(owner).and_then(|o| o.body_slot) {
+            let _ = self.dispatch_module(body, |m, sim, ctx| {
+                if let Some(body) = m.as_body_mut() {
+                    body.evaluate_visual_condition(sim, ctx);
+                }
+            });
+        }
+    }
+
+    fn player_on_structure_construction_complete(
+        &mut self,
+        structure: ObjectSlot,
+        is_rebuild: Bool,
+    ) {
+        self.world.object_count_changed_frame = self.world.frame;
+        self.remove_object_from_pathfind_map(structure);
+        self.add_object_to_pathfind_map(structure);
+        if is_rebuild == FALSE {
+            self.record_structure_built(structure);
+        }
+        self.friend_adjust_power_for_player(structure, TRUE);
+    }
+
+    fn object_template_id(&self, owner: ObjectSlot) -> Option<ThingTemplateId> {
+        self.world
+            .objects
+            .get(owner)?
+            .thing
+            .template_override()
+            .get_non_overloaded_key()
+    }
+
     fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real) {
         if let Some(obj) = self.world.objects.get_mut(owner) {
             obj.construction_percent = percent;
@@ -13834,6 +13888,23 @@ impl SimApi for MockSimApi {
 
     fn set_object_construction_percent(&mut self, owner: ObjectSlot, percent: Real) {
         self.ctx.set_object_construction_percent(owner, percent);
+    }
+
+    fn body_evaluate_visual_condition(&mut self, owner: ObjectSlot) {
+        self.ctx.body_evaluate_visual_condition(owner);
+    }
+
+    fn player_on_structure_construction_complete(
+        &mut self,
+        structure: ObjectSlot,
+        is_rebuild: Bool,
+    ) {
+        self.ctx
+            .player_on_structure_construction_complete(structure, is_rebuild);
+    }
+
+    fn object_template_id(&self, owner: ObjectSlot) -> Option<ThingTemplateId> {
+        self.ctx.object_template_id(owner)
     }
 
     fn topple_object(

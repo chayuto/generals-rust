@@ -1,3 +1,4 @@
+pub mod action_manager;
 pub mod build_assistant;
 #[allow(clippy::module_inception)]
 pub mod player;
