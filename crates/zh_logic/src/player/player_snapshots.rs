@@ -10,12 +10,12 @@ use zh_common::types::{Int, UnsignedShort, XferVersion};
 use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 
 use crate::ai::ai_player::AiPlayer;
+use crate::object::thing_factory::ThingFactory;
 use crate::player::player::Player;
 use crate::player::seams::{PlayerIndex, PlayerPart};
 use crate::player::team::TeamFactory;
 use crate::rules::upgrade::UpgradeMaskType;
 use crate::sim::TunnelTrackerState;
-use crate::object::thing_factory::ThingFactory;
 
 /// `UpgradeStatusType`.
 pub const UPGRADE_STATUS_INVALID: Int = 0;

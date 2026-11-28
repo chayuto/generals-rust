@@ -87,10 +87,21 @@ side, colour and playability are `Player` members; the maps are gone, as is the 
 count the reference does not have. Income buckets now rotate in the frame, and `Money`
 names player 0 until a template sets it up (harness worlds without templates set it).
 
+Part 3 done: relations, human flag and skirmish AI are read from `Player`; the upgrade
+list and the resource gathering lists are `Player` members; `Player::xfer` writes and
+loads them, and `PlayerParts` writes the AI player and tunnel tracker
+(`golden_player_xfer`, 120 states).
+
 Open:
 
-- Still outside `Player`: relations, human (`player_is_human`) and skirmish AI
-  (`skirmish_ai_teams`). These must move before `Player::xfer`/`crc`.
+- No port host passes `xfer_player_part` on to `PlayerParts`, and none answers
+  `score_template`: both fail loudly. Loading a tunnel with contained objects is refused.
+- `Player::onUpgradeRemoved` and `findBestSupplyWarehouse` (which prunes the warehouse
+  list) are not ported. Sim relationship queries ignore team override relations.
+- The reference build writes the general name with four bytes a character; the port
+  writes two. The score keeper maps are ordered by template pointer in the reference and
+  by template id here: they agreed in the vectors.
+- `golden_player_xfer` has had no mutation run.
 - Unverified: academy init values and playability of a non-default team have no vectors;
   `AcademyStats::update` is not called.
 - `set_object_team_same_player` skips the power adjustment, module science grants do not
