@@ -156,7 +156,7 @@ Apply this **Ultra-Lean Seeding & Local-Compute-First Protocol** strictly before
 6. **Phase 5–6 Fan-Out Automation:**
    - Build `WP-5.0` (`SimContext`/`ModuleArena`/`ModuleTrait` + automated C++/Rust oracle & packet generator) once locally (`0`-token local script generation once written) to unlock all `221` `BehaviorModule` packets (`WP-5.1`–`WP-5.4`) and `29` Script packets (`WP-6.4`) on free remote quota with near-zero marginal local token cost.
 7. **Local-Compute-First & CI Budget Discipline:**
-   - Run `./scripts/bootstrap_repo.sh` and `cargo test` locally (`0` tokens, `0` CI minutes) before pushing; keep `macos-15` (10×) and `windows-latest` (2×) `workflow_dispatch`-only in `.github/workflows/ci-guardrails.yml`; fix minor near-passing remote PRs locally rather than consuming another cloud runner session.
+   - Run `./scripts/bootstrap_repo.sh` and `cargo test` locally (`0` tokens, `0` CI minutes) before pushing; `macos-15` and `windows-latest` run on `main`, PRs and manual dispatch (standard runners are free for a public repository); fix minor near-passing remote PRs locally rather than consuming another cloud runner session.
 
 ---
 
