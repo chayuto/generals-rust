@@ -76,6 +76,24 @@ Open from L3:
 - `golden_game_frames` and the other retail-data suites now run on `arm64` only: CI has
   no game data.
 
+## Slice L4 (in progress, 2026-11-28)
+
+Part 1 done: the player list is `SimWorld::players`; sciences, radar, handicap, bans, cost
+and time changes, bounty, attacked-by, preorder and shared power timers live in `Player`;
+the power brown-out change is wired (`golden_player_holdings`).
+
+Open:
+
+- Still outside `Player`: money, upgrades, energy, score keeper, academy, battle plans (the
+  copies in `Player` are stale), and human, AI, side, colour, playable, captured count and
+  relations. These must move before `Player::xfer`/`crc`.
+- `set_object_team_same_player` skips the power adjustment, module science grants do not
+  notify scripts, and the `PlayerWorld` brown-out hook is a stub.
+- Unverified: brown-out during an executing module, team handover, construction.
+- Mutation (40 of 81): four survivors not rechecked (`player.rs` `add_science` and the cost
+  change match, the radar default in `sim/mod.rs`).
+- After that: object lifecycle gaps.
+
 ## What to do next
 
 In order of what the comparison shows. Rerun it after each merge; the list moves.
