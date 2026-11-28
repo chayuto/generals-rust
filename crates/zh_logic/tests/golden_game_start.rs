@@ -234,7 +234,7 @@ fn start(case: &Case) -> Option<Started> {
         }
     })
     .expect("start");
-    let end = dump(&game.sim, &game.players, &game.teams);
+    let end = dump(&game.sim, &game.sim.world.players, &game.teams);
     Some(Started {
         game,
         before_units,

@@ -179,7 +179,6 @@ impl ScienceTextLookup for NoText {
 
 struct Game {
     sim: SimContext,
-    players: PlayerList,
     scripts: ScriptEngine,
     modules: Vec<Vec<ModuleSlot>>,
 }
@@ -223,6 +222,7 @@ fn new_game(lines: &[String]) -> Game {
         name_keys: &mut sim.rules.name_keys,
         world: &mut host,
     });
+    sim.world.players = players;
     for player in [1, 2] {
         sim.world
             .player_default_teams
@@ -262,7 +262,6 @@ fn new_game(lines: &[String]) -> Game {
         .collect();
     Game {
         sim,
-        players,
         scripts: ScriptEngine::new(),
         modules,
     }
@@ -287,7 +286,7 @@ impl Game {
                 .player_academy
                 .get(&p)
                 .map_or(0, |a| a.generals_points_spent);
-            let player = self.players.player(p).expect("player");
+            let player = self.sim.world.players.player(p).expect("player");
             let (points, held) = (player.science_purchase_points, player.sciences.clone());
             out.push_str(&format!(" {points}/{spent}/"));
             for science in held {
@@ -338,10 +337,10 @@ fn science_purchase_matches_reference() {
         match code {
             0 => {
                 for q in [1, 2] {
-                    game.players.player_mut(q).expect("player").sciences.clear();
+                    game.sim.world.players.player_mut(q).expect("player").sciences.clear();
                     for i in 0..NAMES.len() {
                         let science = game.science(i as Int);
-                        let player = game.players.player_mut(q).expect("player");
+                        let player = game.sim.world.players.player_mut(q).expect("player");
                         player.set_science_availability(science, 0);
                     }
                     // The harness leaves the objects alone, and the sim's copy
@@ -350,14 +349,14 @@ fn science_purchase_matches_reference() {
                 }
             }
             1 => {
-                game.players
+                game.sim.world.players
                     .player_mut(p)
                     .expect("player")
                     .science_purchase_points = a
             }
             2 => {
                 let science = game.science(a / 3);
-                let player = game.players.player_mut(p).expect("player");
+                let player = game.sim.world.players.player_mut(p).expect("player");
                 player.set_science_availability(science, a % 3);
             }
             // The frame column already holds the new frame.
@@ -366,7 +365,6 @@ fn science_purchase_matches_reference() {
                 let science = game.science(a);
                 got = attempt_to_purchase_science(
                     &mut game.sim,
-                    &mut game.players,
                     Some(&mut game.scripts),
                     p,
                     science,
@@ -398,18 +396,17 @@ fn the_recorded_order_buys_the_science() {
     let lines = lines();
     let mut game = new_game(&lines);
     let science = game.science(0);
-    game.players
+    game.sim.world.players
         .player_mut(1)
         .expect("player")
         .science_purchase_points = 2;
     let message = ReplayCommand::new(MSG_PURCHASE_SCIENCE, 1).with(ReplayArg::integer(science));
     let mut state = CommandState::default();
     let parts = CommandGame {
-        players: &mut game.players,
         scripts: &mut game.scripts,
     };
     dispatch_game_command(&mut game.sim, parts, &mut state, &message);
-    let player = game.players.player(1).expect("player");
+    let player = game.sim.world.players.player(1).expect("player");
     assert_eq!(player.science_purchase_points, 1);
     assert_eq!(player.sciences, [science]);
     assert!(state.not_carried_out.is_empty());
@@ -424,12 +421,12 @@ fn every_team_of_the_player_holds_the_science() {
     let mut game = new_game(&lines);
     let science = game.science(0);
     game.sim.add_player_team(TeamId(7), 1);
-    game.players
+    game.sim.world.players
         .player_mut(1)
         .expect("player")
         .science_purchase_points = 2;
     let buy = |game: &mut Game, index| {
-        attempt_to_purchase_science(&mut game.sim, &mut game.players, None, index, science)
+        attempt_to_purchase_science(&mut game.sim, None, index, science)
     };
     assert!(!buy(&mut game, 99));
     assert!(buy(&mut game, 1));

@@ -139,7 +139,6 @@ pub struct GameStart {
     pub sim: SimContext,
     pub stores: StartupStores,
     pub sides: SidesList,
-    pub players: PlayerList,
     pub teams: TeamFactory,
     /// The game options after the random choices.
     pub game: Option<GameOptions>,
@@ -954,7 +953,8 @@ fn add_game_sides(
 
 /// Gives the sim the player of every team and the players' prototype lists, and the
 /// per-team copies of player state that the sim still keys by team.
-pub fn sync_teams(sim: &mut SimContext, players: &PlayerList, teams: &TeamFactory) {
+pub fn sync_teams(sim: &mut SimContext, teams: &TeamFactory) {
+    let players = &sim.world.players;
     if let Some(team) = players.player(0).and_then(|p| p.default_team) {
         sim.world.neutral_team_id = team;
     }
@@ -1009,7 +1009,8 @@ pub fn sync_teams(sim: &mut SimContext, players: &PlayerList, teams: &TeamFactor
 }
 
 /// The player state the sim keeps itself, once after `PlayerList::newGame`.
-fn sync_players(sim: &mut SimContext, stores: &StartupStores, players: &PlayerList) {
+fn sync_players(sim: &mut SimContext, stores: &StartupStores) {
+    let players = &sim.world.players;
     sim.world.local_player_index = players.local_player();
     for index in 0..players.player_count() {
         let Some(player) = players.player(index) else {
@@ -1046,7 +1047,8 @@ fn sync_players(sim: &mut SimContext, stores: &StartupStores, players: &PlayerLi
 }
 
 /// Copies the sim's member lists into the team factory.
-fn sync_members(sim: &SimContext, players: &PlayerList, teams: &mut TeamFactory) {
+fn sync_members(sim: &SimContext, teams: &mut TeamFactory) {
+    let players = &sim.world.players;
     for index in 0..players.player_count() {
         let Some(player) = players.player(index) else {
             continue;
@@ -1409,7 +1411,6 @@ fn load_bridge_like_objects(loader: &mut Loader<'_>, map_objects: &[MapObject], 
 fn load_map_objects(
     loader: &mut Loader<'_>,
     stores: &StartupStores,
-    players: &mut PlayerList,
     teams: &mut TeamFactory,
     env: &Env<'_>,
     map_objects: &[MapObject],
@@ -1449,14 +1450,16 @@ fn load_map_objects(
         let pos = map_position(loader.sim, object);
         let angle = normalize_angle_cpp(object.angle());
         let owner = object.properties().get_ascii_string(owner_key, None);
+        let mut players = std::mem::take(&mut loader.sim.world.players);
         let (team, _) = env.run(loader.sim, stores, loader.report, |e| {
             players.validate_team(&owner, teams, e)
         });
+        loader.sim.world.players = players;
         let Some(team) = team else {
             loader.report.skip_object("no team");
             continue;
         };
-        sync_teams(loader.sim, players, teams);
+        sync_teams(loader.sim, teams);
         let Some(slot) = loader.new_object(name, team) else {
             loader.report.skip_object("no object");
             continue;
@@ -1530,7 +1533,6 @@ fn adjust_to_free_cell(loader: &mut Loader<'_>, slot: ObjectSlot, pos: &Coord3D)
 /// `placeNetworkBuildingsForPlayer`: the starting building and units of one slot.
 fn place_network_buildings(
     loader: &mut Loader<'_>,
-    players: &mut PlayerList,
     teams: &mut TeamFactory,
     stores: &StartupStores,
     pathfind_extent: &Region3D,
@@ -1567,7 +1569,6 @@ fn place_network_buildings(
     on_structure_construction_complete(
         &mut BuildContext {
             sim: &mut *loader.sim,
-            players,
             named: &mut *loader.named,
             unported: &mut loader.report.unported,
             pathfind_extent: *pathfind_extent,
@@ -1758,6 +1759,7 @@ pub fn start_new_game_observed(
     let (_, copies) = env.run(&mut sim, &stores, &mut report, |e| {
         players.new_game(&mut sides, &mut teams, e)
     });
+    sim.world.players = players;
     // The sides that stayed keep their map scripts; players take the copies.
     let mut scripts: Vec<Option<ScriptList>> = (0..sides.num_sides())
         .map(|i| map_scripts.get(&side_name(&sides, i, &keys)).cloned())
@@ -1779,13 +1781,12 @@ pub fn start_new_game_observed(
             skirmish_scripts.remove(&copy.source);
         }
     }
-    sync_players(&mut sim, &stores, &players);
-    sync_teams(&mut sim, &players, &teams);
+    sync_players(&mut sim, &stores);
+    sync_teams(&mut sim, &teams);
     let mut script_run = GameScripts::default();
     script_run.new_map(
         &mut sim,
         ScriptGame {
-            players: &mut players,
             teams: &mut teams,
             stores: &stores,
             waypoints: &waypoints,
@@ -1827,8 +1828,8 @@ pub fn start_new_game_observed(
     );
     sim.new_pathfind_map(&pathfind_extent, wall_height);
 
-    let observer = players.find_player_with_name("ReplayObserver");
-    if let Some(team) = observer.and_then(|p| players.player(p)?.default_team) {
+    let observer = sim.world.players.find_player_with_name("ReplayObserver");
+    if let Some(team) = observer.and_then(|p| sim.world.players.player(p)?.default_team) {
         sim.reveal_map_for_player_permanently(team);
     }
     if let Some(g) = game.as_ref() {
@@ -1840,8 +1841,8 @@ pub fn start_new_game_observed(
             if !is_occupied(slot) {
                 continue;
             }
-            let player = players.player_from_slot_index(i as Int);
-            let Some(team) = player.and_then(|p| players.player(p)?.default_team) else {
+            let player = sim.world.players.player_from_slot_index(i as Int);
+            let Some(team) = player.and_then(|p| sim.world.players.player(p)?.default_team) else {
                 continue;
             };
             if slot.player_template == PLAYERTEMPLATE_OBSERVER {
@@ -1862,26 +1863,25 @@ pub fn start_new_game_observed(
             named: &mut named,
         },
         &stores,
-        &mut players,
         &mut teams,
         &env,
         &map_objects,
         use_trees,
         multiplayer,
     );
-    sync_teams(&mut sim, &players, &teams);
-    sync_members(&sim, &players, &mut teams);
-    observe(StartStage::BeforeStartingUnits, &sim, &players, &teams);
+    sync_teams(&mut sim, &teams);
+    sync_members(&sim, &mut teams);
+    observe(StartStage::BeforeStartingUnits, &sim, &sim.world.players, &teams);
 
     if let Some(g) = game.as_ref() {
         for (i, slot) in g.slots.iter().enumerate() {
             if !is_occupied(slot) {
                 continue;
             }
-            let Some(player) = players.player_from_slot_index(i as Int) else {
+            let Some(player) = sim.world.players.player_from_slot_index(i as Int) else {
                 continue;
             };
-            let Some(team) = players.player(player).and_then(|p| p.default_team) else {
+            let Some(team) = sim.world.players.player(player).and_then(|p| p.default_team) else {
                 continue;
             };
             if slot.player_template == PLAYERTEMPLATE_OBSERVER {
@@ -1908,7 +1908,6 @@ pub fn start_new_game_observed(
                     report: &mut report,
                     named: &mut named,
                 },
-                &mut players,
                 &mut teams,
                 &stores,
                 &pathfind_extent,
@@ -1922,13 +1921,12 @@ pub fn start_new_game_observed(
     }
 
     sim.update_partition();
-    sync_teams(&mut sim, &players, &teams);
-    sync_members(&sim, &players, &mut teams);
-    observe(StartStage::BeforePlayerMaps, &sim, &players, &teams);
+    sync_teams(&mut sim, &teams);
+    sync_members(&sim, &mut teams);
+    observe(StartStage::BeforePlayerMaps, &sim, &sim.world.players, &teams);
     // `ThePlayerList->newMap`.
     players_new_map(&mut BuildContext {
         sim: &mut sim,
-        players: &mut players,
         named: &mut named,
         unported: &mut report.unported,
         pathfind_extent,
@@ -1937,13 +1935,12 @@ pub fn start_new_game_observed(
         stores: Some(&stores),
         waypoints: &waypoints,
     });
-    sync_teams(&mut sim, &players, &teams);
-    sync_members(&sim, &players, &mut teams);
+    sync_teams(&mut sim, &teams);
+    sync_members(&sim, &mut teams);
     Ok(GameStart {
         sim,
         stores,
         sides,
-        players,
         teams,
         scripts: script_run,
         game,

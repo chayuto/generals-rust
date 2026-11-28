@@ -429,7 +429,6 @@ impl PlayerWorld for TestPlayerWorld<'_> {
 struct Fixture {
     sim: SimContext,
     stores: StartupStores,
-    players: PlayerList,
     teams: TeamFactory,
     scripts: GameScripts,
     waypoints: Vec<(String, Coord3D)>,
@@ -437,7 +436,8 @@ struct Fixture {
     unported: BTreeMap<&'static str, u32>,
 }
 
-fn sync_all(sim: &mut SimContext, players: &PlayerList, teams: &TeamFactory) {
+fn sync_all(sim: &mut SimContext, teams: &TeamFactory) {
+    let players = &sim.world.players;
     if let Some(team) = players.player(0).and_then(|p| p.default_team) {
         sim.world.neutral_team_id = team;
     }
@@ -558,7 +558,7 @@ fn setup_world_with_extra(skirmish: bool, extra_ini: &str) -> Fixture {
 
     let mut teams = TeamFactory::new();
     let team_seconds = sim.rules.ai_data.team_seconds as Int;
-    let mut players = {
+    let players = {
         let mut world = TestPlayerWorld {
             world: &mut sim.world,
             team_seconds,
@@ -580,11 +580,12 @@ fn setup_world_with_extra(skirmish: bool, extra_ini: &str) -> Fixture {
         }
         players
     };
-    players
+    sim.world.players = players;
+    sim.world.players
         .player_mut(1)
         .unwrap()
         .set_player_relationship(2, Relationship::Enemies);
-    players
+    sim.world.players
         .player_mut(2)
         .unwrap()
         .set_player_relationship(1, Relationship::Enemies);
@@ -594,7 +595,7 @@ fn setup_world_with_extra(skirmish: bool, extra_ini: &str) -> Fixture {
     sim.world
         .player_relationships
         .insert((2, 1), Relationship::Enemies);
-    sync_all(&mut sim, &players, &teams);
+    sync_all(&mut sim, &teams);
 
     let mut scripts = GameScripts::default();
     let mut named = Vec::new();
@@ -602,7 +603,6 @@ fn setup_world_with_extra(skirmish: bool, extra_ini: &str) -> Fixture {
     scripts.new_map(
         &mut sim,
         ScriptGame {
-            players: &mut players,
             teams: &mut teams,
             stores: &stores,
             waypoints: &waypoints,
@@ -615,7 +615,6 @@ fn setup_world_with_extra(skirmish: bool, extra_ini: &str) -> Fixture {
     Fixture {
         sim,
         stores,
-        players,
         teams,
         scripts,
         waypoints,
@@ -649,7 +648,7 @@ fn spawn(f: &mut Fixture, template: &str, team: TeamId, pos: Coord3D) -> ObjectS
 
 fn set_money(f: &mut Fixture, player: PlayerIndex, amount: UnsignedInt) {
     let mut cb = NoopMoneyCallbacks;
-    if let Some(p) = f.players.player_mut(player) {
+    if let Some(p) = f.sim.world.players.player_mut(player) {
         let cur = p.money.count_money();
         if cur > 0 {
             p.money.withdraw(cur, FALSE, &mut cb);
@@ -667,7 +666,7 @@ fn matches_cpp_oracle_rows() {
     assert_eq!(all_rows.len(), 143);
 
     let mut f = setup_world(true);
-    let mut t2 = f.players.player(2).unwrap().default_team.unwrap();
+    let mut t2 = f.sim.world.players.player(2).unwrap().default_team.unwrap();
     let mut idx = 0;
 
     let init_skirmish_p1 = |f: &mut Fixture| {
@@ -802,11 +801,10 @@ fn matches_cpp_oracle_rows() {
                 .unwrap()
                 .clone();
             let ai = f.sim.world.ai_players.get(&1).unwrap().clone();
-            let p1 = f.players.player(1).unwrap().clone();
+            let p1 = f.sim.world.players.player(1).unwrap().clone();
             let ret = compute_superweapon_target_skirmish(
                 &mut f.sim,
                 &ai,
-                &f.players,
                 &p1,
                 &sp,
                 2,
@@ -845,7 +843,7 @@ fn matches_cpp_oracle_rows() {
         tl.push_waypoint_for_test(2, "F", Coord3D::new(500.0, 700.0, 0.0), ["Flank1".into(), String::new(), String::new()]);
         tl.push_waypoint_for_test(3, "B", Coord3D::new(300.0, 500.0, 0.0), ["Backdoor1".into(), String::new(), String::new()]);
     }
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
     spawn(&mut f, "BaseDef", t1, Coord3D::new(600.0, 500.0, 0.0));
     let extent = f.sim.terrain.terrain_logic().unwrap().maximum_pathfind_extent();
     for step in 0..10 {
@@ -854,9 +852,9 @@ fn matches_cpp_oracle_rows() {
         idx += 1;
         let flank = step >= 4;
         let mut ai = f.sim.world.ai_players.remove(&1).unwrap();
-        build_ai_base_defense_structure(&f.sim, &mut ai, &mut f.players, 1, "BaseDef", flank, &extent);
+        build_ai_base_defense_structure(&mut f.sim, &mut ai, 1, "BaseDef", flank, &extent);
         let sk = ai.skirmish.as_ref().unwrap();
-        let head = f.players.player(1).unwrap().build_list.first().map(|h| {
+        let head = f.sim.world.players.player(1).unwrap().build_list.first().map(|h| {
             format!("{},{},{},{}", h.template_name, fx(h.location.x), fx(h.location.y), fx(h.angle))
         }).unwrap_or_else(|| "-".into());
         assert_eq!(
@@ -869,7 +867,7 @@ fn matches_cpp_oracle_rows() {
                 fx(sk.cur_left_flank_right_defense_angle),
                 fx(sk.cur_right_flank_left_defense_angle),
                 fx(sk.cur_right_flank_right_defense_angle),
-                f.players.player(1).unwrap().build_list.len(),
+                f.sim.world.players.player(1).unwrap().build_list.len(),
                 head
             ),
             (
@@ -910,7 +908,7 @@ fn matches_cpp_oracle_rows() {
         assert_eq!((ok0 as Int, fx(loc.x), fx(loc.y), fx(loc.z)),
             (p0[3].parse().unwrap(), p0[4].into(), p0[5].into(), p0[6].into()));
 
-        let t1 = f.players.player(1).unwrap().default_team.unwrap();
+        let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
         spawn(&mut f, "FactPlain", t1, Coord3D::new(400.0, 400.0, 0.0));
         let p1: Vec<&str> = all_rows[idx].split_whitespace().collect();
         assert_eq!(p1[0], "CCZONE");
@@ -936,15 +934,10 @@ fn matches_cpp_oracle_rows() {
         let gt = f.teams.instance_ids(gt_proto)[0];
         spawn(&mut f, "UnitA", gt, Coord3D::new(400.0, 400.0, 0.0));
         let ai = f.sim.world.ai_players.get(&1).unwrap().clone();
-        build_specific_building_nearest_team(
-            &f.sim,
-            &ai,
-            f.players.player_mut(1).unwrap(),
-            "BaseDef",
-            gt,
-            &extent,
-        );
-        let head = f.players.player(1).unwrap().build_list.first();
+        let mut p1 = f.sim.world.players.player(1).unwrap().clone();
+        build_specific_building_nearest_team(&f.sim, &ai, &mut p1, "BaseDef", gt, &extent);
+        f.sim.world.players.player_mut(1).unwrap().build_list = p1.build_list;
+        let head = f.sim.world.players.player(1).unwrap().build_list.first();
         assert_eq!(head.map_or("-", |h| h.template_name.as_str()), p2[2]);
     }
 
@@ -952,9 +945,9 @@ fn matches_cpp_oracle_rows() {
     f = setup_world(true);
     init_skirmish_p1(&mut f);
     let extent = f.sim.terrain.terrain_logic().unwrap().maximum_pathfind_extent();
-    let t0 = f.players.player(0).unwrap().default_team.unwrap();
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
-    t2 = f.players.player(2).unwrap().default_team.unwrap();
+    let t0 = f.sim.world.players.player(0).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+    t2 = f.sim.world.players.player(2).unwrap().default_team.unwrap();
 
     for step in 0..3 {
         let parts: Vec<&str> = all_rows[idx].split_whitespace().collect();
@@ -967,12 +960,12 @@ fn matches_cpp_oracle_rows() {
             enemy_slot = Some(spawn(&mut f, "UnitA", t2, Coord3D::new(310.0, 300.0, 0.0)));
         }
         let mut ai = f.sim.world.ai_players.remove(&1).unwrap();
-        let p1 = f.players.player_mut(1).unwrap();
+        let mut p1 = f.sim.world.players.player(1).unwrap().clone();
         let safe = is_supply_source_safe(
             &zh_logic::ai::ai_player::SupplyOrder {
                 sim: &f.sim,
                 ai: &mut ai,
-                player: p1,
+                player: &mut p1,
                 enemy_center: None,
                 pathfind_extent: extent,
             },
@@ -1037,15 +1030,17 @@ fn matches_cpp_oracle_rows() {
     let gt = f.teams.instance_ids(gt_proto)[0];
     let g1 = spawn(&mut f, "UnitA", gt, Coord3D::new(100.0, 100.0, 0.0));
     let mut ai = f.sim.world.ai_players.remove(&1).unwrap();
+    let mut p1 = f.sim.world.players.player(1).unwrap().clone();
     guard_supply_center(
         &mut f.sim,
         &mut ai,
-        f.players.player_mut(1).unwrap(),
+        &mut p1,
         Some(Coord2D::new(700.0, 300.0)),
         extent,
         gt,
         100,
     );
+    f.sim.world.players.player_mut(1).unwrap().build_list = p1.build_list;
     assert_eq!(ai.supply_source_attack_check_frame, g_parts[1].parse::<UnsignedInt>().unwrap());
     assert_eq!(f.sim.world.ai_groups.next_group_id, g_parts[2].parse::<UnsignedInt>().unwrap());
     let g1_ai_slot = f.sim.world.objects.get(g1).unwrap().ai_slot.unwrap();
@@ -1058,7 +1053,7 @@ fn matches_cpp_oracle_rows() {
 
     // 5) Upgrade, Skillset, Repair, Bridge repair
     f = setup_world(false);
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
     let sk_parts: Vec<&str> = all_rows[idx].split_whitespace().collect();
     assert_eq!(sk_parts[0], "SKILLSET");
     idx += 1;
@@ -1077,8 +1072,8 @@ fn matches_cpp_oracle_rows() {
     let mut bl1 = BuildListInfo::new();
     bl1.template_name = "FactUp".into();
     bl1.object_id = f.sim.world.objects.id_of(f_up).unwrap();
-    f.players.player_mut(1).unwrap().build_list = vec![bl0, bl1];
-    let list = f.players.player(1).unwrap().build_list.clone();
+    f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl0, bl1];
+    let list = f.sim.world.players.player(1).unwrap().build_list.clone();
     build_upgrade(&mut f.sim, 1, &list, "NoSuchUpg");
     build_upgrade(&mut f.sim, 1, &list, "UpgObjBeta");
     let m_before = f.sim.player_money(t1);
@@ -1119,7 +1114,6 @@ fn matches_cpp_oracle_rows() {
     {
         let mut cx = BuildContext {
             sim: &mut f.sim,
-            players: &mut f.players,
             named: &mut f.named,
             unported: &mut f.unported,
             pathfind_extent: extent,
@@ -1148,7 +1142,6 @@ fn matches_cpp_oracle_rows() {
     {
         let mut cx = BuildContext {
             sim: &mut f.sim,
-            players: &mut f.players,
             named: &mut f.named,
             unported: &mut f.unported,
             pathfind_extent: extent,
@@ -1184,7 +1177,6 @@ fn matches_cpp_oracle_rows() {
     {
         let mut cx = BuildContext {
             sim: &mut f.sim,
-            players: &mut f.players,
             named: &mut f.named,
             unported: &mut f.unported,
             pathfind_extent: extent,
@@ -1210,7 +1202,7 @@ fn matches_cpp_oracle_rows() {
 
     f = setup_world(false);
     set_money(&mut f, 1, 5000);
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
     let hole = spawn(&mut f, "RebuildHole", t1, Coord3D::new(300.0, 300.0, 0.0));
     let hole_id = f.sim.world.objects.id_of(hole).unwrap();
     let base_def_tmpl = f.sim.rules.thing_factory.find_template_id("BaseDef").unwrap();
@@ -1226,7 +1218,7 @@ fn matches_cpp_oracle_rows() {
     bl_new.template_name = "FactPlain".into();
     bl_new.location = Coord3D::new(500.0, 500.0, 0.0);
     bl_new.num_rebuilds = 2;
-    f.players.player_mut(1).unwrap().build_list = vec![bl_hole, bl_new];
+    f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_hole, bl_new];
 
     spawn(&mut f, "DozerA", t1, Coord3D::new(480.0, 500.0, 0.0));
     f.sim.world.ai_players.get_mut(&1).unwrap().ready_to_build_structure = TRUE;
@@ -1234,7 +1226,6 @@ fn matches_cpp_oracle_rows() {
     {
         let mut cx = BuildContext {
             sim: &mut f.sim,
-            players: &mut f.players,
             named: &mut f.named,
             unported: &mut f.unported,
             pathfind_extent: extent,
@@ -1245,7 +1236,7 @@ fn matches_cpp_oracle_rows() {
         };
         ai_player_update(&mut cx, 1);
     }
-    let bl = &f.players.player(1).unwrap().build_list;
+    let bl = &f.sim.world.players.player(1).unwrap().build_list;
     let hole_ported = f
         .sim
         .world
@@ -1271,8 +1262,8 @@ fn matches_cpp_oracle_rows() {
 fn non_skirmish_rebuild_delay_captured_and_replacement_dozer() {
     let mut f = setup_world(false);
     set_money(&mut f, 1, 5000);
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
-    let t2 = f.players.player(2).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+    let t2 = f.sim.world.players.player(2).unwrap().default_team.unwrap();
     let extent = f.sim.terrain.terrain_logic().unwrap().maximum_pathfind_extent();
 
     // Building 0: under construction by dead builder -> replacement dozer gets ResumeConstruction
@@ -1304,14 +1295,13 @@ fn non_skirmish_rebuild_delay_captured_and_replacement_dozer() {
     bl2.location = Coord3D::new(500.0, 500.0, 0.0);
     bl2.num_rebuilds = 2;
 
-    f.players.player_mut(1).unwrap().build_list = vec![bl0, bl1, bl2];
+    f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl0, bl1, bl2];
     f.sim.rules.ai_data.rebuild_delay_seconds = 1;
     f.sim.world.frame = 110;
     f.sim.world.ai_players.get_mut(&1).unwrap().ready_to_build_structure = TRUE;
     {
         let mut cx = BuildContext {
             sim: &mut f.sim,
-            players: &mut f.players,
             named: &mut f.named,
             unported: &mut f.unported,
             pathfind_extent: extent,
@@ -1322,7 +1312,7 @@ fn non_skirmish_rebuild_delay_captured_and_replacement_dozer() {
         };
         ai_player_update(&mut cx, 1);
     }
-    let bl = &f.players.player(1).unwrap().build_list;
+    let bl = &f.sim.world.players.player(1).unwrap().build_list;
     assert_eq!(bl[1].object_id, ObjectId::INVALID);
     assert_eq!(bl[1].object_timestamp, 111);
     assert_eq!(bl[2].object_id, ObjectId::INVALID); // delay (100 + 30 > 110) kept it pending
@@ -1344,8 +1334,8 @@ fn non_skirmish_rebuild_delay_captured_and_replacement_dozer() {
 #[test]
 fn broken_bridge_check_and_repair_completion_to_home() {
     let mut f = setup_world(true);
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
-    let t0 = f.players.player(0).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+    let t0 = f.sim.world.players.player(0).unwrap().default_team.unwrap();
     let extent = Region3D {
         lo: Coord3D::default(),
         hi: Coord3D::new(200.0, 120.0, 100.0),
@@ -1496,12 +1486,12 @@ fn script_engine_dispatches_all_ai_ops() {
         ai.base_center = Coord3D::new(500.0, 500.0, 0.0);
         ai.base_center_set = TRUE;
         ai.base_radius = 100.0;
-        build_ai_base_defense(&f.sim, &mut ai, &mut f.players, 1, false, &extent);
-        assert_eq!(f.players.player(1).unwrap().build_list.len(), 1);
+        build_ai_base_defense(&mut f.sim, &mut ai, 1, false, &extent);
+        assert_eq!(f.sim.world.players.player(1).unwrap().build_list.len(), 1);
         f.sim.world.ai_players.insert(1, ai);
     }
 
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
     let dmg = spawn(&mut f, "BaseDef", t1, Coord3D::new(350.0, 350.0, 0.0));
     let dmg_id = f.sim.world.objects.id_of(dmg).unwrap();
     f.named.push(("Bldg1".into(), dmg_id));
@@ -1517,7 +1507,7 @@ fn script_engine_dispatches_all_ai_ops() {
     let mut bl = BuildListInfo::new();
     bl.template_name = "FactUp".into();
     bl.object_id = f.sim.world.objects.id_of(fac).unwrap();
-    f.players.player_mut(1).unwrap().build_list.push(bl);
+    f.sim.world.players.player_mut(1).unwrap().build_list.push(bl);
 
     let reg = script_template_registry(&mut f.sim.rules.name_keys);
     f.sim.world.frame = 10;
@@ -1548,7 +1538,6 @@ fn script_engine_dispatches_all_ai_ops() {
     f.scripts.with_world(
         &mut f.sim,
         ScriptGame {
-            players: &mut f.players,
             teams: &mut f.teams,
             stores: &f.stores,
             waypoints: &f.waypoints,
@@ -1599,7 +1588,7 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     }
 
     // 2) is_supply_source_attacked boundary checks (unwrap_or(0), check_frame <, wrap+scan <)
-    let t1 = f.players.player(1).unwrap().default_team.unwrap();
+    let t1 = f.sim.world.players.player(1).unwrap().default_team.unwrap();
     let harv = spawn(&mut f, "HarvA", t1, Coord3D::new(250.0, 250.0, 0.0));
     let set_harv = |f: &mut Fixture, ts: UnsignedInt| {
         let bs = f.sim.world.objects.get(harv).unwrap().body_slot.unwrap();
@@ -1659,7 +1648,6 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     let step_ai = |f: &mut Fixture| {
         let mut cx = BuildContext {
             sim: &mut f.sim,
-            players: &mut f.players,
             named: &mut f.named,
             unported: &mut f.unported,
             pathfind_extent: extent,
@@ -1718,15 +1706,14 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     bl.object_timestamp = 100;
     bl.location = Coord3D::new(500.0, 500.0, 0.0);
     bl.num_rebuilds = 2;
-    f2.players.player_mut(1).unwrap().build_list = vec![bl];
-    let t1_2 = f2.players.player(1).unwrap().default_team.unwrap();
+    f2.sim.world.players.player_mut(1).unwrap().build_list = vec![bl];
+    let t1_2 = f2.sim.world.players.player(1).unwrap().default_team.unwrap();
     let d2 = spawn(&mut f2, "DozerBuild", t1_2, Coord3D::new(480.0, 500.0, 0.0));
     f2.sim.world.frame = 110;
     f2.sim.world.ai_players.get_mut(&1).unwrap().ready_to_build_structure = TRUE;
     {
         let mut cx = BuildContext {
             sim: &mut f2.sim,
-            players: &mut f2.players,
             named: &mut f2.named,
             unported: &mut f2.unported,
             pathfind_extent: extent,
@@ -1737,8 +1724,8 @@ fn mutation_edge_cases_and_remaining_script_ops() {
         };
         ai_player_update(&mut cx, 1);
     }
-    assert_eq!(f2.players.player(1).unwrap().build_list[0].object_id, ObjectId::INVALID);
-    assert_eq!(f2.players.player(1).unwrap().build_list[0].object_timestamp, 100);
+    assert_eq!(f2.sim.world.players.player(1).unwrap().build_list[0].object_id, ObjectId::INVALID);
+    assert_eq!(f2.sim.world.players.player(1).unwrap().build_list[0].object_timestamp, 100);
 
     // Without dozer, delay expiration clears object_timestamp to 0
     f2.sim.destroy_object_now(d2);
@@ -1752,7 +1739,6 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     {
         let mut cx = BuildContext {
             sim: &mut f2.sim,
-            players: &mut f2.players,
             named: &mut f2.named,
             unported: &mut f2.unported,
             pathfind_extent: extent,
@@ -1763,7 +1749,7 @@ fn mutation_edge_cases_and_remaining_script_ops() {
         };
         ai_player_update(&mut cx, 1);
     }
-    assert_eq!(f2.players.player(1).unwrap().build_list[0].object_timestamp, 0);
+    assert_eq!(f2.sim.world.players.player(1).unwrap().build_list[0].object_timestamp, 0);
 
     // With dozer and money == wealthy (not > wealthy), starts build, resets ready_to_build_structure, full timer
     spawn(&mut f2, "DozerBuild", t1_2, Coord3D::new(480.0, 500.0, 0.0));
@@ -1775,7 +1761,6 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     {
         let mut cx = BuildContext {
             sim: &mut f2.sim,
-            players: &mut f2.players,
             named: &mut f2.named,
             unported: &mut f2.unported,
             pathfind_extent: extent,
@@ -1786,7 +1771,7 @@ fn mutation_edge_cases_and_remaining_script_ops() {
         };
         ai_player_update(&mut cx, 1);
     }
-    assert_ne!(f2.players.player(1).unwrap().build_list[0].object_id, ObjectId::INVALID);
+    assert_ne!(f2.sim.world.players.player(1).unwrap().build_list[0].object_id, ObjectId::INVALID);
     let ai2 = f2.sim.world.ai_players.get(&1).unwrap();
     assert_eq!(ai2.ready_to_build_structure, FALSE);
     assert_eq!(ai2.structure_timer, 300);
@@ -1796,8 +1781,8 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     let mut ubl = BuildListInfo::new();
     ubl.template_name = "FactUp".into();
     ubl.object_id = f2.sim.world.objects.id_of(fac).unwrap();
-    f2.players.player_mut(1).unwrap().build_list.push(ubl);
-    let list = f2.players.player(1).unwrap().build_list.clone();
+    f2.sim.world.players.player_mut(1).unwrap().build_list.push(ubl);
+    let list = f2.sim.world.players.player(1).unwrap().build_list.clone();
     set_money(&mut f2, 1, 499);
     build_upgrade(&mut f2.sim, 1, &list, "UpgPlayerAlpha");
     assert_eq!(f2.sim.with_production(fac, |pu, _, _| pu.production_count()), Some(0));
@@ -1805,7 +1790,7 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     build_upgrade(&mut f2.sim, 1, &list, "UpgPlayerAlpha");
     assert_eq!(f2.sim.with_production(fac, |pu, _, _| pu.production_count()), Some(1));
 
-    let t2_2 = f2.players.player(2).unwrap().default_team.unwrap();
+    let t2_2 = f2.sim.world.players.player(2).unwrap().default_team.unwrap();
     spawn(&mut f2, "CmdCenter", t2_2, Coord3D::new(500.0, 500.0, 0.0));
     assert_eq!(get_player_superweapon_value(&f2.sim, &Coord3D::new(500.0, 500.0, 0.0), 2, 100.0, true), 200);
     let mut ai2_owned = f2.sim.world.ai_players.remove(&1).unwrap();
@@ -1821,13 +1806,13 @@ fn mutation_edge_cases_and_remaining_script_ops() {
         IniLoadType::Overwrite,
     );
     f3.sim.rules.ai_data.side_info = ai_loader.rules.ai_data.side_info;
-    f3.players.player_mut(0).unwrap().player_type = PlayerType::Human;
-    let t0_3 = f3.players.player(0).unwrap().default_team.unwrap();
+    f3.sim.world.players.player_mut(0).unwrap().player_type = PlayerType::Human;
+    let t0_3 = f3.sim.world.players.player(0).unwrap().default_team.unwrap();
     spawn(&mut f3, "CmdCenter", t0_3, Coord3D::new(700.0, 800.0, 0.0));
-    let t2_3 = f3.players.player(2).unwrap().default_team.unwrap();
+    let t2_3 = f3.sim.world.players.player(2).unwrap().default_team.unwrap();
     spawn(&mut f3, "CmdCenter", t2_3, Coord3D::new(700.0, 300.0, 0.0));
     spawn(&mut f3, "CmdCenter", t2_3, Coord3D::new(700.0, 700.0, 0.0));
-    let t1_3 = f3.players.player(1).unwrap().default_team.unwrap();
+    let t1_3 = f3.sim.world.players.player(1).unwrap().default_team.unwrap();
     spawn(&mut f3, "Warehouse", t1_3, Coord3D::new(300.0, 300.0, 0.0));
 
     let gt_proto = f3.teams.find_team_prototype("GuardTeam", &mut f3.sim.rules.name_keys).unwrap();
@@ -1847,8 +1832,8 @@ fn mutation_edge_cases_and_remaining_script_ops() {
             sk.current_enemy = None;
             sk.frame_to_check_enemy = 999_999;
         }
-        build_ai_base_defense(&f3.sim, &mut ai, &mut f3.players, 1, false, &extent);
-        let bl_pos = f3.players.player(1).unwrap().build_list[0].location;
+        build_ai_base_defense(&mut f3.sim, &mut ai, 1, false, &extent);
+        let bl_pos = f3.sim.world.players.player(1).unwrap().build_list[0].location;
         assert!(bl_pos.y > 500.0); // came from player 0 at y=800, not player 2
 
         {
@@ -1856,9 +1841,9 @@ fn mutation_edge_cases_and_remaining_script_ops() {
             sk.cur_front_base_defense = 2;
             sk.cur_front_left_defense_angle = 1.02; // PI/3.1 < 1.02 < PI/3.0
         }
-        let before = f3.players.player(1).unwrap().build_list.len();
-        build_ai_base_defense_structure(&f3.sim, &mut ai, &mut f3.players, 1, "BaseDef", false, &extent);
-        assert_eq!(f3.players.player(1).unwrap().build_list.len(), before + 1);
+        let before = f3.sim.world.players.player(1).unwrap().build_list.len();
+        build_ai_base_defense_structure(&mut f3.sim, &mut ai, 1, "BaseDef", false, &extent);
+        assert_eq!(f3.sim.world.players.player(1).unwrap().build_list.len(), before + 1);
         ai.skirmish.as_mut().unwrap().current_enemy = Some(2);
         f3.sim.world.ai_players.insert(1, ai);
     }
@@ -1887,7 +1872,6 @@ fn mutation_edge_cases_and_remaining_script_ops() {
     f3.scripts.with_world(
         &mut f3.sim,
         ScriptGame {
-            players: &mut f3.players,
             teams: &mut f3.teams,
             stores: &f3.stores,
             waypoints: &f3.waypoints,
@@ -1903,8 +1887,8 @@ fn mutation_edge_cases_and_remaining_script_ops() {
             assert!(engine.unported_actions.is_empty());
         },
     );
-    assert_eq!(f3.players.player(1).unwrap().build_list[0].template_name, "BaseDef");
-    assert!((f3.players.player(1).unwrap().build_list[0].location.x - 15.0).abs() < 0.01);
+    assert_eq!(f3.sim.world.players.player(1).unwrap().build_list[0].template_name, "BaseDef");
+    assert!((f3.sim.world.players.player(1).unwrap().build_list[0].location.x - 15.0).abs() < 0.01);
     let g1_ai_slot = f3.sim.world.objects.get(g1).unwrap().ai_slot.unwrap();
     let g1_ai = f3.sim.world.modules.payload(g1_ai_slot).unwrap().as_any().unwrap().downcast_ref::<AiUpdate>().unwrap();
     assert!(g1_ai.location_to_guard.y > 300.0); // enemy center y = 500 > 300 -> guard shifts +y

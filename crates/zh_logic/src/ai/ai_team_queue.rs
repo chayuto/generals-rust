@@ -26,7 +26,6 @@ use crate::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpd
 use crate::modules::update::worker_ai_update::AS_SUPPLY_TRUCK;
 use crate::object::thing_factory::ThingFactory;
 use crate::player::build_assistant::BuildContext;
-use crate::player::player_list::PlayerList;
 use crate::player::seams::{PlayerEnv, PlayerIndex};
 use crate::player::team::{
     flag as xfer_bool, flush_pending_team_member_moves, remove_team_from_sim_world, team_is_idle,
@@ -255,7 +254,6 @@ impl TeamInQueue {
         &mut self,
         sim: &mut SimContext,
         ai_players: &mut BTreeMap<Int, AiPlayer>,
-        players: &mut PlayerList,
         teams: &mut TeamFactory,
         stores: &StartupStores,
         waypoints: &[(String, Coord3D)],
@@ -267,7 +265,7 @@ impl TeamInQueue {
         };
         let owner = proto.owner;
         let singleton = proto.singleton;
-        let Some(default_team) = players.player(owner).and_then(|p| p.default_team) else {
+        let Some(default_team) = sim.world.players.player(owner).and_then(|p| p.default_team) else {
             return;
         };
         if self.team_id != default_team {
@@ -276,6 +274,7 @@ impl TeamInQueue {
             if !singleton {
                 let mut unported = BTreeMap::new();
                 let SimContext { rules, world, .. } = sim;
+                let mut list = std::mem::take(&mut world.players);
                 let mut host = FramePlayers {
                     world,
                     ai_players,
@@ -290,7 +289,8 @@ impl TeamInQueue {
                     name_keys: &mut rules.name_keys,
                     world: &mut host,
                 };
-                teams.delete_team_instance(dead, players, &mut env);
+                teams.delete_team_instance(dead, &mut list, &mut env);
+                world.players = list;
                 remove_team_from_sim_world(world, dead);
             }
             self.team_id = TeamId::INVALID;
@@ -359,9 +359,9 @@ struct TempUnitBuildGuard {
 }
 
 impl TempUnitBuildGuard {
-    fn enable(sim: &mut SimContext, players: &mut PlayerList, player: PlayerIndex) -> Self {
-        let was_enabled = players.player(player).is_some_and(|p| p.can_build_units);
-        if let Some(p) = players.player_mut(player) {
+    fn enable(sim: &mut SimContext, player: PlayerIndex) -> Self {
+        let was_enabled = sim.world.players.player(player).is_some_and(|p| p.can_build_units);
+        if let Some(p) = sim.world.players.player_mut(player) {
             p.can_build_units = true;
         }
         let removed_teams: Vec<TeamId> = sim
@@ -381,8 +381,8 @@ impl TempUnitBuildGuard {
         }
     }
 
-    fn restore(self, sim: &mut SimContext, players: &mut PlayerList) {
-        if let Some(p) = players.player_mut(self.player) {
+    fn restore(self, sim: &mut SimContext) {
+        if let Some(p) = sim.world.players.player_mut(self.player) {
             p.can_build_units = self.was_enabled;
         }
         for team in self.removed_teams {
@@ -523,16 +523,15 @@ pub fn on_unit_produced_in_sim(
 
 /// `AIPlayer::findFactory` (`AIPlayer.cpp:1446-1480`).
 pub fn find_factory(
-    sim: &SimContext,
-    players: &mut PlayerList,
+    sim: &mut SimContext,
     player: PlayerIndex,
     thing: ThingTemplateId,
     busy_ok: bool,
 ) -> Option<ObjectSlot> {
     let mut busy_factory: Option<ObjectSlot> = None;
-    let len = players.player(player)?.build_list.len();
+    let len = sim.world.players.player(player)?.build_list.len();
     for at in 0..len {
-        let obj_id = players.player(player)?.build_list[at].object_id;
+        let obj_id = sim.world.players.player(player)?.build_list[at].object_id;
         let Some(factory) = sim.world.objects.slot_by_id(obj_id) else {
             continue;
         };
@@ -542,7 +541,7 @@ pub fn find_factory(
             .get(factory)
             .and_then(|o| sim.controlling_player(o.team_id));
         if owner != Some(player) {
-            if let Some(p) = players.player_mut(player) {
+            if let Some(p) = sim.world.players.player_mut(player) {
                 p.build_list[at].object_id = ObjectId::INVALID;
             }
             continue;
@@ -579,7 +578,6 @@ pub fn find_factory(
 /// `AIPlayer::startTraining` (`AIPlayer.cpp:1418-1439`).
 pub fn start_training(
     sim: &mut SimContext,
-    players: &mut PlayerList,
     player: PlayerIndex,
     order: &mut WorkOrder,
     busy_ok: bool,
@@ -587,7 +585,7 @@ pub fn start_training(
     let Some(thing) = order.thing else {
         return false;
     };
-    let Some(factory) = find_factory(sim, players, player, thing, busy_ok) else {
+    let Some(factory) = find_factory(sim, player, thing, busy_ok) else {
         return false;
     };
     let Some(factory_id) = sim.world.objects.id_of(factory) else {
@@ -602,8 +600,7 @@ pub fn start_training(
 
 /// `AIPlayer::isPossibleToBuildTeam` (`AIPlayer.cpp:1485-1523`).
 pub fn is_possible_to_build_team(
-    sim: &SimContext,
-    players: &mut PlayerList,
+    sim: &mut SimContext,
     teams: &TeamFactory,
     player: PlayerIndex,
     proto_id: TeamPrototypeId,
@@ -615,7 +612,7 @@ pub fn is_possible_to_build_team(
     else {
         return (false, false);
     };
-    let Some(default_team) = players.player(player).and_then(|p| p.default_team) else {
+    let Some(default_team) = sim.world.players.player(player).and_then(|p| p.default_team) else {
         return (false, false);
     };
     let mut any_idle = false;
@@ -625,10 +622,10 @@ pub fn is_possible_to_build_team(
             continue;
         };
         let thing_cost = sim.unit_cost_to_build(default_team, thing_id);
-        if find_factory(sim, players, player, thing_id, true).is_none() {
+        if find_factory(sim, player, thing_id, true).is_none() {
             return (false, false);
         }
-        if find_factory(sim, players, player, thing_id, false).is_some() {
+        if find_factory(sim, player, thing_id, false).is_some() {
             any_idle = true;
         }
         let avg = (unit.max_units.wrapping_add(unit.min_units) as Real) / 2.0;
@@ -720,7 +717,6 @@ pub fn evaluate_production_condition(
     let result = scripts.with_world(
         cx.sim,
         ScriptGame {
-            players: cx.players,
             teams: teams_mut,
             stores,
             waypoints: cx.waypoints,
@@ -762,7 +758,7 @@ pub fn is_a_good_idea_to_build_team(
         }
     }
     let (possible, _) =
-        is_possible_to_build_team(cx.sim, cx.players, teams, player, proto_id, true);
+        is_possible_to_build_team(cx.sim, teams, player, proto_id, true);
     possible
 }
 
@@ -771,7 +767,7 @@ pub fn select_team_to_reinforce(cx: &mut BuildContext<'_>, player: PlayerIndex, 
     let Some(teams) = cx.teams.as_deref() else {
         return false;
     };
-    let Some(protos) = cx.players.player(player).map(|p| p.team_prototypes.clone()) else {
+    let Some(protos) = cx.sim.world.players.player(player).map(|p| p.team_prototypes.clone()) else {
         return false;
     };
     let mut cur_team: Option<TeamId> = None;
@@ -822,7 +818,7 @@ pub fn select_team_to_reinforce(cx: &mut BuildContext<'_>, player: PlayerIndex, 
                     false,
                 )[0];
                 if count < unit.max_units
-                    && find_factory(cx.sim, cx.players, player, thing_id, false).is_some()
+                    && find_factory(cx.sim, player, thing_id, false).is_some()
                 {
                     cur_team = Some(team_id);
                     cur_priority = proto_prio;
@@ -869,7 +865,6 @@ pub fn select_team_to_reinforce(cx: &mut BuildContext<'_>, player: PlayerIndex, 
     if let Some(unit_slot) = try_to_recruit(
         cx.sim,
         teams,
-        cx.players,
         cur_team,
         cur_thing,
         &origin,
@@ -889,7 +884,7 @@ pub fn select_team_to_reinforce(cx: &mut BuildContext<'_>, player: PlayerIndex, 
         team_q.reinforcement_id = unit_id;
         cx.sim.ai_idle(unit_slot, CommandSourceType::FromAi);
     } else {
-        start_training(cx.sim, cx.players, player, &mut order, team_q.priority_build);
+        start_training(cx.sim, player, &mut order, team_q.priority_build);
     }
     team_q.work_orders.push(order);
 
@@ -902,7 +897,7 @@ pub fn select_team_to_reinforce(cx: &mut BuildContext<'_>, player: PlayerIndex, 
 
 /// `AIPlayer::selectTeamToBuild` (`AIPlayer.cpp:1688-1769`).
 pub fn select_team_to_build(cx: &mut BuildContext<'_>, player: PlayerIndex) -> bool {
-    let Some(protos) = cx.players.player(player).map(|p| p.team_prototypes.clone()) else {
+    let Some(protos) = cx.sim.world.players.player(player).map(|p| p.team_prototypes.clone()) else {
         return false;
     };
     const INVALID_PRI: Int = -99999;
@@ -944,7 +939,7 @@ pub fn select_team_to_build(cx: &mut BuildContext<'_>, player: PlayerIndex) -> b
         return false;
     };
     build_specific_ai_team(cx, player, proto_id, false);
-    let default_team = cx.players.player(player).and_then(|p| p.default_team);
+    let default_team = cx.sim.world.players.player(player).and_then(|p| p.default_team);
     let money = default_team.map_or(0, |t| cx.sim.player_money(t));
     let poor = cx.sim.rules.ai_data.resources_poor as UnsignedInt;
     let wealthy = cx.sim.rules.ai_data.resources_wealthy as UnsignedInt;
@@ -968,7 +963,6 @@ pub fn select_team_to_build(cx: &mut BuildContext<'_>, player: PlayerIndex) -> b
 pub fn build_specific_ai_team_with_env(
     sim: &mut SimContext,
     ai_players: &mut BTreeMap<Int, AiPlayer>,
-    players: &mut PlayerList,
     teams: &mut TeamFactory,
     stores: &StartupStores,
     waypoints: &[(String, Coord3D)],
@@ -977,7 +971,7 @@ pub fn build_specific_ai_team_with_env(
     proto_id: TeamPrototypeId,
     priority_build: bool,
 ) {
-    if !players.player(player).is_some_and(|p| p.can_build_units) {
+    if !sim.world.players.player(player).is_some_and(|p| p.can_build_units) {
         return;
     }
     let Some(proto) = teams.prototype(proto_id) else {
@@ -996,7 +990,7 @@ pub fn build_specific_ai_team_with_env(
         }
     }
     let (possible, need_money) =
-        is_possible_to_build_team(sim, players, teams, player, proto_id, false);
+        is_possible_to_build_team(sim, teams, player, proto_id, false);
     if !possible && !need_money {
         return;
     }
@@ -1033,6 +1027,7 @@ pub fn build_specific_ai_team_with_env(
     let mut unported = BTreeMap::new();
     let created_team = {
         let SimContext { rules, world, .. } = sim;
+        let mut list = std::mem::take(&mut world.players);
         let mut host = FramePlayers {
             world,
             ai_players,
@@ -1047,7 +1042,9 @@ pub fn build_specific_ai_team_with_env(
             name_keys: &mut rules.name_keys,
             world: &mut host,
         };
-        teams.create_inactive_team(&proto_name, players, &mut env)
+        let created = teams.create_inactive_team(&proto_name, &mut list, &mut env);
+        world.players = list;
+        created
     };
     let Some(team_id) = created_team else {
         return;
@@ -1096,7 +1093,6 @@ pub fn build_specific_ai_team(
             build_specific_ai_team_with_env(
                 sim,
                 ai_players,
-                cx.players,
                 teams,
                 stores,
                 cx.waypoints,
@@ -1117,7 +1113,6 @@ pub fn build_specific_ai_team(
 pub fn recruit_specific_ai_team_with_env(
     sim: &mut SimContext,
     ai_players: &mut BTreeMap<Int, AiPlayer>,
-    players: &mut PlayerList,
     teams: &mut TeamFactory,
     stores: &StartupStores,
     waypoints: &[(String, Coord3D)],
@@ -1147,6 +1142,7 @@ pub fn recruit_specific_ai_team_with_env(
     let mut unported = BTreeMap::new();
     let created = {
         let SimContext { rules, world, .. } = sim;
+        let mut list = std::mem::take(&mut world.players);
         let mut host = FramePlayers {
             world,
             ai_players,
@@ -1161,7 +1157,9 @@ pub fn recruit_specific_ai_team_with_env(
             name_keys: &mut rules.name_keys,
             world: &mut host,
         };
-        teams.create_inactive_team(&proto_name, players, &mut env)
+        let created = teams.create_inactive_team(&proto_name, &mut list, &mut env);
+        world.players = list;
+        created
     };
     let Some(the_team) = created else {
         return;
@@ -1178,7 +1176,6 @@ pub fn recruit_specific_ai_team_with_env(
             let Some(unit_slot) = try_to_recruit(
                 sim,
                 teams,
-                players,
                 the_team,
                 thing,
                 &home_location,
@@ -1211,6 +1208,7 @@ pub fn recruit_specific_ai_team_with_env(
         }
     } else if !is_singleton {
         let SimContext { rules, world, .. } = sim;
+        let mut list = std::mem::take(&mut world.players);
         let mut host = FramePlayers {
             world,
             ai_players,
@@ -1225,7 +1223,8 @@ pub fn recruit_specific_ai_team_with_env(
             name_keys: &mut rules.name_keys,
             world: &mut host,
         };
-        teams.delete_team_instance(the_team, players, &mut env);
+        teams.delete_team_instance(the_team, &mut list, &mut env);
+        world.players = list;
         remove_team_from_sim_world(world, the_team);
     }
 }
@@ -1254,9 +1253,11 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         }
     }
 
-    let build_len = cx.players.player(player).map_or(0, |p| p.build_list.len());
+    let build_len = cx.sim.world.players.player(player).map_or(0, |p| p.build_list.len());
     for at in 0..build_len {
         let Some((is_supply, desired_gatherers, cur_gatherers, center_id)) = cx
+            .sim
+            .world
             .players
             .player(player)
             .and_then(|p| p.build_list.get(at))
@@ -1296,7 +1297,7 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                     }
                 }
             }
-            if let Some(p) = cx.players.player_mut(player) {
+            if let Some(p) = cx.sim.world.players.player_mut(player) {
                 if let Some(info) = p.build_list.get_mut(at) {
                     info.current_gatherers = counted;
                 }
@@ -1313,6 +1314,8 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                 if ferrying || forced {
                     if cx.sim.world.objects.slot_by_id(center_id).is_some() {
                         if let Some(info) = cx
+                            .sim
+                            .world
                             .players
                             .player_mut(player)
                             .and_then(|p| p.build_list.get_mut(at))
@@ -1328,7 +1331,7 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
             if total_harvesters >= desired_gatherers.wrapping_mul(3) {
                 continue;
             }
-            let guard = TempUnitBuildGuard::enable(cx.sim, cx.players, player);
+            let guard = TempUnitBuildGuard::enable(cx.sim, player);
             let harvester_ids: Vec<ThingTemplateId> = cx
                 .sim
                 .rules
@@ -1338,13 +1341,15 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                 .map(|t| ThingTemplateId(t.get_template_id() as u32))
                 .collect();
             for tmpl_id in harvester_ids {
-                let Some(factory) = find_factory(cx.sim, cx.players, player, tmpl_id, false) else {
+                let Some(factory) = find_factory(cx.sim, player, tmpl_id, false) else {
                     continue;
                 };
                 let Some(factory_id) = cx.sim.world.objects.id_of(factory) else {
                     continue;
                 };
                 let default_team = cx
+                    .sim
+                    .world
                     .players
                     .player(player)
                     .and_then(|p| p.default_team)
@@ -1365,6 +1370,8 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                 team_q.frame_started = cx.sim.world.frame as Int;
 
                 let initial = cx
+                    .sim
+                    .world
                     .players
                     .player(player)
                     .and_then(|p| p.build_list.get(at))
@@ -1372,6 +1379,8 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                 if initial {
                     order.factory_id = factory_id;
                     if let Some(info) = cx
+                        .sim
+                        .world
                         .players
                         .player_mut(player)
                         .and_then(|p| p.build_list.get_mut(at))
@@ -1379,7 +1388,7 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                         info.current_gatherers = 0;
                     }
                 } else {
-                    start_training(cx.sim, cx.players, player, &mut order, team_q.priority_build);
+                    start_training(cx.sim, player, &mut order, team_q.priority_build);
                 }
                 team_q.work_orders.push(order);
                 if let Some(ai) = ai_mut(cx, player) {
@@ -1388,7 +1397,7 @@ pub fn queue_supply_truck(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                 }
                 break;
             }
-            guard.restore(cx.sim, cx.players);
+            guard.restore(cx.sim);
         }
     }
 }
@@ -1457,7 +1466,6 @@ pub fn queue_units(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                 let Some(unit_slot) = try_to_recruit(
                     cx.sim,
                     teams,
-                    cx.players,
                     team_id,
                     thing_id,
                     &home,
@@ -1505,7 +1513,7 @@ pub fn queue_units(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                     .and_then(|t| t.work_orders.get(oi))
                     .cloned()
                 {
-                    start_training(cx.sim, cx.players, player, &mut order, priority_build);
+                    start_training(cx.sim, player, &mut order, priority_build);
                     if let Some(dst) = cx
                         .sim
                         .world
@@ -1556,7 +1564,7 @@ pub fn queue_dozer(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     if dozer_in_queue(cx.sim, player) {
         return;
     }
-    let guard = TempUnitBuildGuard::enable(cx.sim, cx.players, player);
+    let guard = TempUnitBuildGuard::enable(cx.sim, player);
     let dozer_ids: Vec<ThingTemplateId> = cx
         .sim
         .rules
@@ -1566,10 +1574,12 @@ pub fn queue_dozer(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         .map(|t| ThingTemplateId(t.get_template_id() as u32))
         .collect();
     for tmpl_id in dozer_ids {
-        if find_factory(cx.sim, cx.players, player, tmpl_id, true).is_none() {
+        if find_factory(cx.sim, player, tmpl_id, true).is_none() {
             continue;
         }
         let default_team = cx
+            .sim
+            .world
             .players
             .player(player)
             .and_then(|p| p.default_team)
@@ -1589,7 +1599,7 @@ pub fn queue_dozer(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         team_q.priority_build = true;
         team_q.frame_started = cx.sim.world.frame as Int;
 
-        start_training(cx.sim, cx.players, player, &mut order, team_q.priority_build);
+        start_training(cx.sim, player, &mut order, team_q.priority_build);
         team_q.work_orders.push(order);
         if let Some(ai) = ai_mut(cx, player) {
             ai.team_build_queue.insert(0, team_q);
@@ -1597,7 +1607,7 @@ pub fn queue_dozer(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         }
         break;
     }
-    guard.restore(cx.sim, cx.players);
+    guard.restore(cx.sim);
 }
 
 /// `AIPlayer::checkReadyTeams` (`AIPlayer.cpp:2794-2870`).
@@ -1810,7 +1820,6 @@ pub fn check_queued_teams(cx: &mut BuildContext<'_>, player: PlayerIndex) {
                     item.disband(
                         sim,
                         ai_players,
-                        cx.players,
                         teams,
                         stores,
                         cx.waypoints,
@@ -1903,7 +1912,7 @@ pub fn check_queued_teams(cx: &mut BuildContext<'_>, player: PlayerIndex) {
 /// `AIPlayer::doTeamBuilding` (`AIPlayer.cpp:2945-2970`) and
 /// `AISkirmishPlayer::doTeamBuilding` (`AISkirmishPlayer.cpp:921-949`).
 pub fn do_team_building(cx: &mut BuildContext<'_>, player: PlayerIndex) {
-    if !cx.players.player(player).is_some_and(|p| p.can_build_units) {
+    if !cx.sim.world.players.player(player).is_some_and(|p| p.can_build_units) {
         return;
     }
     let Some(ai) = ai_mut(cx, player) else {
@@ -1969,7 +1978,6 @@ pub fn drain_pending_team_actions(cx: &mut BuildContext<'_>) {
         scripts.with_world(
             cx.sim,
             ScriptGame {
-                players: cx.players,
                 teams,
                 stores,
                 waypoints: cx.waypoints,
@@ -2027,10 +2035,12 @@ pub fn drain_pending_sim_events_for_player(cx: &mut BuildContext<'_>, player: Pl
         let Some(unit_slot) = cx.sim.world.objects.slot_by_id(unit_id) else {
             continue;
         };
-        let len = cx.players.player(player).map_or(0, |p| p.build_list.len());
+        let len = cx.sim.world.players.player(player).map_or(0, |p| p.build_list.len());
         for at in 0..len {
             let center_id = {
                 let Some(info) = cx
+                    .sim
+                    .world
                     .players
                     .player(player)
                     .and_then(|p| p.build_list.get(at))
@@ -2048,6 +2058,8 @@ pub fn drain_pending_sim_events_for_player(cx: &mut BuildContext<'_>, player: Pl
             };
             if cx.sim.world.objects.slot_by_id(center_id).is_some() {
                 if let Some(info) = cx
+                    .sim
+                    .world
                     .players
                     .player_mut(player)
                     .and_then(|p| p.build_list.get_mut(at))
@@ -2128,7 +2140,7 @@ fn collect_player_harvesters(cx: &BuildContext<'_>, player: PlayerIndex) -> Vec<
     let Some(teams) = cx.teams.as_deref() else {
         return Vec::new();
     };
-    let Some(protos) = cx.players.player(player).map(|p| &p.team_prototypes) else {
+    let Some(protos) = cx.sim.world.players.player(player).map(|p| &p.team_prototypes) else {
         return Vec::new();
     };
     let mut out = Vec::new();

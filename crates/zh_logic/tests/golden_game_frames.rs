@@ -30,7 +30,6 @@ use zh_logic::gamelogic::game_engine::{mount_game_archives, GameDataLoader, Star
 use zh_logic::gamelogic::game_logic::{start_new_game_observed, GameStart, ReplayGameRules};
 use zh_logic::modules::update::ai_update::AiUpdate;
 use zh_logic::player::build_assistant::BuildContext;
-use zh_logic::player::player_list::PlayerList;
 use zh_logic::player::team::TeamFactory;
 use zh_logic::scripts::{GameScripts, ScriptGame};
 use zh_logic::sim::SimContext;
@@ -154,7 +153,7 @@ fn frame_fields(rows: &[String]) -> BTreeMap<String, String> {
 /// `tags` keeps the module tag names: looking a name key up searches every name.
 fn frame_rows(game: &GameStart, tags: &mut BTreeMap<i32, String>) -> Vec<String> {
     let sim = &game.sim;
-    let mut out = dump(sim, &game.players, &game.teams);
+    let mut out = dump(sim, &game.sim.world.players, &game.teams);
     // The frames keep a team's members in the world; the team factory's lists are
     // filled at game start only.
     for row in out.iter_mut().filter(|r| r.starts_with("team\t")) {
@@ -167,7 +166,7 @@ fn frame_rows(game: &GameStart, tags: &mut BTreeMap<i32, String>) -> Vec<String>
         });
         *row = format!("{head}\t{members}");
     }
-    for i in 0..game.players.player_count() {
+    for i in 0..game.sim.world.players.player_count() {
         let (production, consumption) = sim.world.player_energy.get(&i).map_or((0, 0), |energy| {
             (
                 energy.get_production(sim.world.frame),
@@ -229,7 +228,6 @@ struct Frame<'p, 'a, 'g> {
     /// What the computer players' updates could not carry out.
     unported: &'p mut BTreeMap<&'static str, u32>,
     scripts: &'g mut GameScripts,
-    players: &'g mut PlayerList,
     teams: &'g mut TeamFactory,
     stores: &'g StartupStores,
     waypoints: &'g [(String, Coord3D)],
@@ -239,7 +237,6 @@ struct Frame<'p, 'a, 'g> {
 impl FrameSeams for Frame<'_, '_, '_> {
     fn script_engine(&mut self, sim: &mut SimContext) {
         let game = ScriptGame {
-            players: self.players,
             teams: self.teams,
             stores: self.stores,
             waypoints: self.waypoints,
@@ -255,7 +252,6 @@ impl FrameSeams for Frame<'_, '_, '_> {
             .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
         let mut cx = BuildContext {
             sim,
-            players: self.players,
             named: self.named_objects,
             unported: self.unported,
             pathfind_extent,
@@ -276,8 +272,7 @@ impl FrameSeams for Frame<'_, '_, '_> {
         for message in playback.commands.commands_for_frame(sim.world.frame) {
             if message.is_delivered() {
                 let game = CommandGame {
-                    players: self.players,
-                    scripts: &mut self.scripts.engine,
+                            scripts: &mut self.scripts.engine,
                 };
                 dispatch_game_command(sim, game, &mut playback.state, &message);
             }
@@ -446,7 +441,6 @@ fn compare(
             playback: &mut playback,
             unported: &mut unported,
             scripts: &mut started.scripts,
-            players: &mut started.players,
             teams: &mut started.teams,
             stores: &started.stores,
             waypoints: &started.waypoints,

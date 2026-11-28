@@ -10,7 +10,6 @@
 
 use crate::arena::{FacetMask, ModuleSlot};
 use crate::player::player::Player;
-use crate::player::player_list::PlayerList;
 use crate::rules::science::{SciencePlayerAccess, ScienceType, SCIENCE_INVALID};
 use crate::scripts::script_engine::ScriptEngine;
 use crate::sim::{SimApi, SimContext};
@@ -26,12 +25,11 @@ impl SciencePlayerAccess for Player {
 /// engine hears of the science when one is given.
 pub fn attempt_to_purchase_science(
     sim: &mut SimContext,
-    players: &mut PlayerList,
     scripts: Option<&mut ScriptEngine>,
     index: Int,
     science: ScienceType,
 ) -> bool {
-    let Some(player) = players.player_mut(index) else {
+    let Some(player) = sim.world.players.player_mut(index) else {
         return false;
     };
     // `isCapableOfPurchasingScience`.

@@ -1492,7 +1492,6 @@ pub fn is_in_build_variations(tt_with_variations: &ThingTemplate, candidate: &Th
 pub fn try_to_recruit(
     sim: &SimContext,
     teams: &TeamFactory,
-    players: &PlayerList,
     recruiting_team: TeamId,
     tmpl_id: ThingTemplateId,
     team_home: &Coord3D,
@@ -1503,7 +1502,7 @@ pub fn try_to_recruit(
         .prototype_of(recruiting_team)?
         .template
         .production_priority;
-    let default_team = players.player(my_player)?.default_team;
+    let default_team = sim.world.players.player(my_player)?.default_team;
     let t_template = sim
         .rules
         .thing_factory

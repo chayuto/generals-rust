@@ -291,7 +291,7 @@ fn adjust_build_list(cx: &mut BuildContext<'_>, list: &mut [BuildListInfo], play
 
 /// `AISkirmishPlayer::newMap`.
 pub fn new_map(cx: &mut BuildContext<'_>, player: PlayerIndex) {
-    let Some(side) = cx.players.player(player).map(|p| p.side.clone()) else {
+    let Some(side) = cx.sim.world.players.player(player).map(|p| p.side.clone()) else {
         return;
     };
     let faction = cx
@@ -304,7 +304,7 @@ pub fn new_map(cx: &mut BuildContext<'_>, player: PlayerIndex) {
         .map(|l| l.build_list.clone());
     if let Some(mut list) = faction {
         adjust_build_list(cx, &mut list, player);
-        if let Some(p) = cx.players.player_mut(player) {
+        if let Some(p) = cx.sim.world.players.player_mut(player) {
             p.build_list = list;
         }
         compute_center_and_radius_of_base(cx, player);
@@ -352,7 +352,7 @@ fn equivalent(sim: &SimContext, a: ThingTemplateId, b: Option<ThingTemplateId>) 
 }
 
 fn entry<'s>(cx: &'s mut BuildContext<'_>, player: PlayerIndex, at: usize) -> Option<&'s mut BuildListInfo> {
-    cx.players.player_mut(player)?.build_list.get_mut(at)
+    cx.sim.world.players.player_mut(player)?.build_list.get_mut(at)
 }
 
 /// Looks after the listed building of entry `at`, if it had one: a lost or

@@ -382,7 +382,6 @@ impl PlayerWorld for TestPlayerWorld<'_> {
 struct Fixture {
     sim: SimContext,
     stores: StartupStores,
-    players: PlayerList,
     teams: TeamFactory,
     scripts: GameScripts,
     waypoints: Vec<(String, Coord3D)>,
@@ -455,7 +454,8 @@ fn add_team_proto(
     sides.add_team(Some(&d));
 }
 
-fn sync_all(sim: &mut SimContext, players: &PlayerList, teams: &TeamFactory) {
+fn sync_all(sim: &mut SimContext, teams: &TeamFactory) {
+    let players = &sim.world.players;
     if let Some(team) = players.player(0).and_then(|p| p.default_team) {
         sim.world.neutral_team_id = team;
     }
@@ -728,7 +728,7 @@ fn setup_world_at(skirmish: bool, init_frame: UnsignedInt) -> Fixture {
     let team_seconds = sim.rules.ai_data.team_seconds as Int;
     let reg = script_template_registry(&mut sim.rules.name_keys);
 
-    let mut players = {
+    let players = {
         let mut world = TestPlayerWorld {
             world: &mut sim.world,
             team_seconds,
@@ -750,12 +750,13 @@ fn setup_world_at(skirmish: bool, init_frame: UnsignedInt) -> Fixture {
         }
         players
     };
+    sim.world.players = players;
     // Enemy relationship setup matching PlayerList::new_game default (enemy with P2)
-    players
+    sim.world.players
         .player_mut(1)
         .unwrap()
         .set_player_relationship(2, zh_common::types::Relationship::Enemies);
-    players
+    sim.world.players
         .player_mut(2)
         .unwrap()
         .set_player_relationship(1, zh_common::types::Relationship::Enemies);
@@ -765,7 +766,7 @@ fn setup_world_at(skirmish: bool, init_frame: UnsignedInt) -> Fixture {
     sim.world
         .player_relationships
         .insert((2, 1), zh_common::types::Relationship::Enemies);
-    sync_all(&mut sim, &players, &teams);
+    sync_all(&mut sim, &teams);
 
     let mut sl_ai = ScriptList::new();
     sl_ai.add_script(
@@ -807,7 +808,6 @@ fn setup_world_at(skirmish: bool, init_frame: UnsignedInt) -> Fixture {
     scripts.new_map(
         &mut sim,
         ScriptGame {
-            players: &mut players,
             teams: &mut teams,
             stores: &stores,
             waypoints: &waypoints,
@@ -820,7 +820,6 @@ fn setup_world_at(skirmish: bool, init_frame: UnsignedInt) -> Fixture {
     Fixture {
         sim,
         stores,
-        players,
         teams,
         scripts,
         waypoints,
@@ -846,7 +845,7 @@ fn spawn(f: &mut Fixture, template: &str, team: TeamId, pos: Coord3D) -> ObjectS
 
 fn set_money(f: &mut Fixture, player: PlayerIndex, amount: UnsignedInt) {
     let mut cb = NoopMoneyCallbacks;
-    if let Some(p) = f.players.player_mut(player) {
+    if let Some(p) = f.sim.world.players.player_mut(player) {
         let cur = p.money.count_money();
         if cur > 0 {
             p.money.withdraw(cur, FALSE, &mut cb);
@@ -874,6 +873,7 @@ fn make_tiq(teams: &TeamFactory, team_id: TeamId) -> TeamInQueue {
 fn create_team(f: &mut Fixture, name: &str, active: bool) -> TeamId {
     let ts = f.sim.rules.ai_data.team_seconds as Int;
     let id = {
+        let mut list = std::mem::take(&mut f.sim.world.players);
         let mut world = TestPlayerWorld {
             world: &mut f.sim.world,
             team_seconds: ts,
@@ -886,20 +886,23 @@ fn create_team(f: &mut Fixture, name: &str, active: bool) -> TeamId {
             name_keys: &mut f.sim.rules.name_keys,
             world: &mut world,
         };
-        if active {
-            f.teams.create_team(name, &mut f.players, &mut env)
+        let made = if active {
+            f.teams.create_team(name, &mut list, &mut env)
         } else {
-            f.teams.create_inactive_team(name, &mut f.players, &mut env)
-        }
+            f.teams.create_inactive_team(name, &mut list, &mut env)
+        };
+        f.sim.world.players = list;
+        made
     }
     .expect("create_team");
-    sync_all(&mut f.sim, &f.players, &f.teams);
+    sync_all(&mut f.sim, &f.teams);
     id
 }
 
 fn find_team(f: &mut Fixture, name: &str) -> TeamId {
     let ts = f.sim.rules.ai_data.team_seconds as Int;
     let id = {
+        let mut list = std::mem::take(&mut f.sim.world.players);
         let mut world = TestPlayerWorld {
             world: &mut f.sim.world,
             team_seconds: ts,
@@ -912,17 +915,18 @@ fn find_team(f: &mut Fixture, name: &str) -> TeamId {
             name_keys: &mut f.sim.rules.name_keys,
             world: &mut world,
         };
-        f.teams.find_team(name, &mut f.players, &mut env)
+        let found = f.teams.find_team(name, &mut list, &mut env);
+        f.sim.world.players = list;
+        found
     }
     .expect("find_team");
-    sync_all(&mut f.sim, &f.players, &f.teams);
+    sync_all(&mut f.sim, &f.teams);
     id
 }
 
 fn with_cx<R>(f: &mut Fixture, func: impl FnOnce(&mut BuildContext<'_>) -> R) -> R {
     let mut cx = BuildContext {
         sim: &mut f.sim,
-        players: &mut f.players,
         named: &mut f.named,
         unported: &mut f.unported,
         pathfind_extent: Region3D {
@@ -993,8 +997,8 @@ fn make_wo_by_name(
 #[test]
 fn golden_work_order_and_team_in_queue_and_ai_xfer() {
     let mut f = setup_world(false);
-    let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-    let p2_def = f.players.player(2).unwrap().default_team.unwrap();
+    let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+    let p2_def = f.sim.world.players.player(2).unwrap().default_team.unwrap();
     let my_fac = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
     let enemy_fac = spawn(&mut f, "FactA", p2_def, Coord3D::new(300.0, 300.0, 0.0));
     let _my_id = f.sim.world.objects.id_of(my_fac).unwrap();
@@ -1278,8 +1282,8 @@ fn golden_work_order_and_team_in_queue_and_ai_xfer() {
 #[test]
 fn golden_is_possible_to_build_team_1000() {
     let mut f = setup_world(true);
-    let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-    f.players.player_mut(1).unwrap().can_build_units = true;
+    let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+    f.sim.world.players.player_mut(1).unwrap().can_build_units = true;
     let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
     let fb = spawn(&mut f, "FactB", p1_def, Coord3D::new(200.0, 100.0, 0.0));
     let fa_id = f.sim.world.objects.id_of(fa).unwrap();
@@ -1291,7 +1295,7 @@ fn golden_is_possible_to_build_team_1000() {
     let mut bl_b = BuildListInfo::new();
     bl_b.template_name = "FactB".to_owned();
     bl_b.object_id = fb_id;
-    f.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_b];
+    f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_b];
 
     let proto_id = f
         .teams
@@ -1333,7 +1337,7 @@ fn golden_is_possible_to_build_team_1000() {
                 pu.queue_create_unit(sim, ctx, tmpl_b, uid);
             });
         }
-        f.players.player_mut(1).unwrap().build_list[0].object_id =
+        f.sim.world.players.player_mut(1).unwrap().build_list[0].object_id =
             if fa_present { fa_id } else { ObjectId::INVALID };
         let mut units = Vec::new();
         for entry in uspec.split(';') {
@@ -1348,7 +1352,7 @@ fn golden_is_possible_to_build_team_1000() {
         set_money(&mut f, 1, money);
 
         let (ok, need) =
-            is_possible_to_build_team(&f.sim, &mut f.players, &f.teams, 1, proto_id, require_idle);
+            is_possible_to_build_team(&mut f.sim, &f.teams, 1, proto_id, require_idle);
         assert_eq!(
             (ok, need),
             (exp_ok, exp_need),
@@ -1374,7 +1378,7 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
         let seq = p[7];
 
         let mut f = setup_world(sk);
-        f.players.player_mut(1).unwrap().can_build_units = can_units;
+        f.sim.world.players.player_mut(1).unwrap().can_build_units = can_units;
         {
             let ai = f.sim.world.ai_players.get_mut(&1).unwrap();
             ai.team_timer = timer;
@@ -1401,8 +1405,8 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
     let mut bt_count = 0;
     {
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-        f.players.player_mut(1).unwrap().can_build_units = true;
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+        f.sim.world.players.player_mut(1).unwrap().can_build_units = true;
         let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
         let fb = spawn(&mut f, "FactB", p1_def, Coord3D::new(200.0, 100.0, 0.0));
         let fa_id = f.sim.world.objects.id_of(fa).unwrap();
@@ -1413,7 +1417,7 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
         let mut bl_b = BuildListInfo::new();
         bl_b.template_name = "FactB".to_owned();
         bl_b.object_id = fb_id;
-        f.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_b];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_b];
 
         for line in rows().filter(|l| l.starts_with("BUILDTEAM ")) {
             let p: Vec<&str> = line.split_whitespace().collect();
@@ -1539,8 +1543,8 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
     let mut rec_count = 0;
     {
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-        let p2_def = f.players.player(2).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+        let p2_def = f.sim.world.players.player(2).unwrap().default_team.unwrap();
 
         for name in ["RecSrcOk", "RecSrcHighPrio"] {
             let pid = f
@@ -1589,19 +1593,19 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
             let exp_id: Int = p[2].parse().unwrap();
             let got_slot = match case {
                 "def_far" => {
-                    try_to_recruit(&f.sim, &f.teams, &f.players, t_target, tb, &home, 100.0)
+                    try_to_recruit(&f.sim, &f.teams, t_target, tb, &home, 100.0)
                 }
                 "nondef_out_of_range" => {
                     let _u_ok_far = spawn(&mut f, "UnitB", t_ok, Coord3D::new(250.0, 0.0, 0.0));
-                    try_to_recruit(&f.sim, &f.teams, &f.players, t_target, tb, &home, 100.0)
+                    try_to_recruit(&f.sim, &f.teams, t_target, tb, &home, 100.0)
                 }
                 "nondef_in_range" => {
-                    try_to_recruit(&f.sim, &f.teams, &f.players, t_target, tb, &home, 300.0)
+                    try_to_recruit(&f.sim, &f.teams, t_target, tb, &home, 300.0)
                 }
                 "override_on" => {
                     let _u_ov_on =
                         spawn(&mut f, "UnitB", t_override_on, Coord3D::new(80.0, 0.0, 0.0));
-                    try_to_recruit(&f.sim, &f.teams, &f.players, t_target, tb, &home, 300.0)
+                    try_to_recruit(&f.sim, &f.teams, t_target, tb, &home, 300.0)
                 }
                 "none_ta" => {
                     f.teams.team_mut(t_ok).unwrap().set_recruitable(false);
@@ -1609,7 +1613,7 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
                         .team_mut(t_override_on)
                         .unwrap()
                         .set_recruitable(false);
-                    try_to_recruit(&f.sim, &f.teams, &f.players, t_target, ta, &home, 300.0)
+                    try_to_recruit(&f.sim, &f.teams, t_target, ta, &home, 300.0)
                 }
                 other => panic!("unexpected RECRUIT case {other}"),
             };
@@ -1630,17 +1634,17 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
         let exp_first = p[3];
 
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-        f.players.player_mut(1).unwrap().can_build_units = false;
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+        f.sim.world.players.player_mut(1).unwrap().can_build_units = false;
         set_money(&mut f, 1, 5000);
         let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
         let mut bl_a = BuildListInfo::new();
         bl_a.template_name = "FactA".to_owned();
         bl_a.object_id = f.sim.world.objects.id_of(fa).unwrap();
-        f.players.player_mut(1).unwrap().build_list = vec![bl_a];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a];
 
         with_cx(&mut f, |cx| queue_dozer(cx, 1));
-        let can_after1 = f.players.player(1).unwrap().can_build_units;
+        let can_after1 = f.sim.world.players.player(1).unwrap().can_build_units;
         with_cx(&mut f, |cx| queue_dozer(cx, 1));
         let ai = f.sim.world.ai_players.get(&1).unwrap();
         let first_thing = ai
@@ -1668,9 +1672,9 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
         let exp_gath = p[4] == "1";
 
         let mut f = setup_world(true);
-        let p0_def = f.players.player(0).unwrap().default_team.unwrap();
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-        f.players.player_mut(1).unwrap().can_build_units = true;
+        let p0_def = f.sim.world.players.player(0).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+        f.sim.world.players.player_mut(1).unwrap().can_build_units = true;
         set_money(&mut f, 1, 5000);
         let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
         let sc = spawn(&mut f, "SupplyCtr", p1_def, Coord3D::new(200.0, 100.0, 0.0));
@@ -1685,7 +1689,7 @@ fn golden_do_team_building_and_build_specific_and_eval_and_recruit_and_queues() 
         bl_sc.is_supply_building = TRUE;
         bl_sc.current_gatherers = -1;
         bl_sc.desired_gatherers = 1;
-        f.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_sc];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_sc];
 
         with_cx(&mut f, |cx| queue_supply_truck(cx, 1));
         let q1 = f
@@ -1756,7 +1760,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
             .unwrap();
         f.sim.rules.thing_factory.post_process_load();
 
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
         let t_alpha = create_team(&mut f, "TeamAlpha", false);
         f.teams
             .prototype_mut(f.teams.team(t_alpha).unwrap().prototype)
@@ -1822,7 +1826,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
         bl_sc.is_supply_building = TRUE;
         bl_sc.current_gatherers = 0;
         bl_sc.desired_gatherers = 1;
-        f.players.player_mut(1).unwrap().build_list = vec![bl_sc];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_sc];
 
         f.sim.on_unit_created(fa, unit_a);
         f.sim.on_unit_created(fa, worker);
@@ -1830,6 +1834,8 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
 
         // Same-player transfer must NOT increment object capture score.
         assert!(f
+            .sim
+            .world
             .players
             .player(1)
             .unwrap()
@@ -1888,7 +1894,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
 
         with_cx(&mut f, |cx| drain_pending_sim_events_for_player(cx, 1));
         assert_eq!(
-            f.players.player(1).unwrap().build_list[0].current_gatherers,
+            f.sim.world.players.player(1).unwrap().build_list[0].current_gatherers,
             1
         );
         assert!(f
@@ -1902,7 +1908,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
     // 2. player_on_structure_construction_complete -> pending_structures_produced -> on_structure_produced
     {
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
         let sc = spawn(&mut f, "SupplyCtr", p1_def, Coord3D::new(200.0, 100.0, 0.0));
         let sc_id = f.sim.world.objects.id_of(sc).unwrap();
         f.sim.set_status(sc, ObjectStatusType::UnderConstruction);
@@ -1913,7 +1919,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
         bl_sc.under_construction = TRUE;
         bl_sc.unsellable = TRUE;
         bl_sc.is_supply_building = TRUE;
-        f.players.player_mut(1).unwrap().build_list = vec![bl_sc];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_sc];
 
         {
             let ai = f.sim.world.ai_players.get_mut(&1).unwrap();
@@ -1928,7 +1934,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
         }
         with_cx(&mut f, |cx| on_structure_produced(cx, 1, sc));
         assert_eq!(
-            f.players.player(1).unwrap().build_list[0].under_construction,
+            f.sim.world.players.player(1).unwrap().build_list[0].under_construction,
             FALSE
         );
         assert!(f.named.iter().any(|(n, id)| n == "MySC" && *id == sc_id));
@@ -1952,7 +1958,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
     // 3. check_queued_teams (promote all-built + disband expired incomplete) & check_ready_teams (activate vs joinTeam)
     {
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
         let t_built = create_team(&mut f, "TeamAlpha", false);
         let t_expired = create_team(&mut f, "TeamAlpha", false);
         let u_exp = spawn(&mut f, "UnitA", t_expired, Coord3D::new(50.0, 50.0, 0.0));
@@ -2030,12 +2036,12 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
     // 4. Script actions BUILD_TEAM (69) & RECRUIT_TEAM (177) + ai_pre_team_destroy
     {
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
         let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
         let mut bl_a = BuildListInfo::new();
         bl_a.template_name = "FactA".to_owned();
         bl_a.object_id = f.sim.world.objects.id_of(fa).unwrap();
-        f.players.player_mut(1).unwrap().build_list = vec![bl_a];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a];
         // One idle unit on default team so RECRUIT_TEAM recruits it immediately.
         let recruitable_unit = spawn(&mut f, "UnitA", p1_def, Coord3D::new(10.0, 10.0, 0.0));
 
@@ -2053,7 +2059,6 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
         act_recruit.parms = vec![p_rec, p_rad];
 
         let parts = ScriptGame {
-            players: &mut f.players,
             teams: &mut f.teams,
             stores: &f.stores,
             waypoints: &f.waypoints,
@@ -2076,6 +2081,7 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
         // Verify ai_pre_team_destroy clears queued entries on team deletion.
         let queued_team = ai.team_build_queue[0].team_id;
         let ts = f.sim.rules.ai_data.team_seconds as Int;
+        let mut list = std::mem::take(&mut f.sim.world.players);
         let mut world = TestPlayerWorld {
             world: &mut f.sim.world,
             team_seconds: ts,
@@ -2089,7 +2095,8 @@ fn integration_production_hooks_ready_queued_teams_and_scripts() {
             world: &mut world,
         };
         f.teams
-            .delete_team_instance(queued_team, &mut f.players, &mut env);
+            .delete_team_instance(queued_team, &mut list, &mut env);
+        f.sim.world.players = list;
         assert!(f
             .sim
             .world
@@ -2184,14 +2191,14 @@ fn integration_team_selection_queue_units_and_survivor_branches() {
     // 2. select_team_to_reinforce, select_team_to_build, queue_units, check_queued_teams, check_ready_teams.
     {
         let mut f = setup_world(true);
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-        f.players.player_mut(1).unwrap().can_build_units = true;
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+        f.sim.world.players.player_mut(1).unwrap().can_build_units = true;
         set_money(&mut f, 1, 5000);
         let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
         let mut bl_a = BuildListInfo::new();
         bl_a.template_name = "FactA".to_owned();
         bl_a.object_id = f.sim.world.objects.id_of(fa).unwrap();
-        f.players.player_mut(1).unwrap().build_list = vec![bl_a];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a];
 
         let p_no = f
             .teams
@@ -2289,7 +2296,6 @@ fn integration_team_selection_queue_units_and_survivor_branches() {
         assert!(try_to_recruit(
             &f.sim,
             &f.teams,
-            &f.players,
             t_tgt,
             tmpl_a,
             &Coord3D::new(0.0, 0.0, 0.0),
@@ -2496,9 +2502,9 @@ fn integration_team_selection_queue_units_and_survivor_branches() {
             .unwrap();
         f.sim.rules.thing_factory.post_process_load();
 
-        let p0_def = f.players.player(0).unwrap().default_team.unwrap();
-        let p1_def = f.players.player(1).unwrap().default_team.unwrap();
-        f.players.player_mut(1).unwrap().can_build_units = true;
+        let p0_def = f.sim.world.players.player(0).unwrap().default_team.unwrap();
+        let p1_def = f.sim.world.players.player(1).unwrap().default_team.unwrap();
+        f.sim.world.players.player_mut(1).unwrap().can_build_units = true;
         set_money(&mut f, 1, 5000);
 
         let fa = spawn(&mut f, "FactA", p1_def, Coord3D::new(100.0, 100.0, 0.0));
@@ -2530,7 +2536,7 @@ fn integration_team_selection_queue_units_and_survivor_branches() {
         bl_sc.current_gatherers = 1;
         bl_sc.desired_gatherers = 1;
         bl_sc.script = "ObjInitScript".to_owned();
-        f.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_sc];
+        f.sim.world.players.player_mut(1).unwrap().build_list = vec![bl_a, bl_sc];
 
         // desired == current -> does not queue; nor does empty/mine/dead warehouse trigger dock.
         with_cx(&mut f, |cx| queue_supply_truck(cx, 1));
@@ -2545,7 +2551,7 @@ fn integration_team_selection_queue_units_and_survivor_branches() {
 
         // Now add real Warehouse and set desired=2 -> queues GlaWorker with priority_build=true.
         let _real_wh = spawn(&mut f, "Warehouse", p0_def, Coord3D::new(230.0, 100.0, 0.0));
-        f.players.player_mut(1).unwrap().build_list[1].desired_gatherers = 2;
+        f.sim.world.players.player_mut(1).unwrap().build_list[1].desired_gatherers = 2;
         with_cx(&mut f, |cx| queue_supply_truck(cx, 1));
         assert!(f.sim.world.ai_players.get(&1).unwrap().team_build_queue[0].priority_build);
         f.sim
@@ -2655,9 +2661,10 @@ fn integration_team_selection_queue_units_and_survivor_branches() {
                 }
             }
         });
-        f.players.player_mut(1).unwrap().can_build_base = false;
+        f.sim.world.players.player_mut(1).unwrap().can_build_base = false;
         let t_test = create_team(&mut f, "TeamLow", true);
-        sync_team_to_sim_world(&mut f.sim.world, &f.players, &f.teams, t_test);
+        let list = f.sim.world.players.clone();
+        sync_team_to_sim_world(&mut f.sim.world, &list, &f.teams, t_test);
         assert!(!f
             .sim
             .world

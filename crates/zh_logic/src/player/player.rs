@@ -275,9 +275,16 @@ fn xfer_presence(xfer: &mut dyn Xfer, present: bool) -> Result<(), XferError> {
 impl Player {
     /// The constructor, which ends in `init(nullptr)`.
     pub fn new(index: PlayerIndex, env: &mut PlayerEnv<'_>) -> Self {
+        let mut player = Self::blank(index);
+        player.init(None, env);
+        player
+    }
+
+    /// The members before `init`.
+    pub fn blank(index: PlayerIndex) -> Self {
         let mut money = Money::new();
         money.set_player_index(index);
-        let mut player = Self {
+        Self {
             index,
             template_name_key: None,
             display_name: Vec::new(),
@@ -336,9 +343,7 @@ impl Player {
             search_and_destroy_battle_plans: 0,
             units_should_hunt: false,
             logical_retaliation_mode: false,
-        };
-        player.init(None, env);
-        player
+        }
     }
 
     /// `PlayerMaskType` of this player.

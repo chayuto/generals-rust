@@ -215,7 +215,6 @@ fn with<R>(
     f: impl FnOnce(&mut ScriptEngine, &mut dyn ScriptWorld) -> R,
 ) -> R {
     let parts = ScriptGame {
-        players: &mut game.players,
         teams: &mut game.teams,
         stores: &game.stores,
         waypoints: &game.waypoints,
@@ -226,7 +225,6 @@ fn with<R>(
 
 fn update(game: &mut GameStart) {
     let parts = ScriptGame {
-        players: &mut game.players,
         teams: &mut game.teams,
         stores: &game.stores,
         waypoints: &game.waypoints,
@@ -325,11 +323,11 @@ fn retail_script_world_answers_and_acts() {
     assert!(game.scripts.unported.is_empty());
     let named = |game: &GameStart, name: &str| {
         let key = game.sim.rules.name_keys.lookup_key(name).expect("key");
-        game.players.find_player_with_name_key(key).expect("player")
+        game.sim.world.players.find_player_with_name_key(key).expect("player")
     };
     let human = named(&game, "player0");
     let computer = named(&game, "player1");
-    let home = game.players.player(human).unwrap().default_team.unwrap();
+    let home = game.sim.world.players.player(human).unwrap().default_team.unwrap();
     let home_name = game.teams.prototype_of(home).unwrap().name.clone();
     queries(&mut game, human, computer, home, &home_name);
     more_queries(&mut game, human, computer);
@@ -365,7 +363,7 @@ fn queries(game: &mut GameStart, human: Int, computer: Int, home: TeamId, home_n
         .get_position();
     game.named_objects.push(("hq".to_owned(), building));
     let waypoint = game.waypoints[0].clone();
-    let human_name = game.players.player(human).unwrap().name.clone();
+    let human_name = game.sim.world.players.player(human).unwrap().name.clone();
 
     let list_order: Vec<ObjectId> = game
         .sim
@@ -445,7 +443,7 @@ fn queries(game: &mut GameStart, human: Int, computer: Int, home: TeamId, home_n
 }
 
 fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
-    let players = game.players.player_count();
+    let players = game.sim.world.players.player_count();
     let facility: Vec<bool> = (0..players)
         .map(|p| {
             objects_of(game, p).iter().any(|&(_, slot)| {
@@ -462,7 +460,7 @@ fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
             })
         })
         .collect();
-    let start_index = game.players.player(computer).unwrap().mp_start_index;
+    let start_index = game.sim.world.players.player(computer).unwrap().mp_start_index;
     let frame = game.sim.world.frame;
     let energy = game.sim.world.player_energy[&human].clone();
     let (id, slot) = objects_of(game, human)
@@ -477,7 +475,7 @@ fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
         .entry(team)
         .or_default()
         .insert(computer);
-    let neutral = game.players.player(0).unwrap().default_team.unwrap();
+    let neutral = game.sim.world.players.player(0).unwrap().default_team.unwrap();
     let neutral_members = game.sim.world.team_members[&neutral].len();
     assert!(neutral_members > 0);
     game.teams.team_mut(neutral).unwrap().members.clear();
@@ -538,7 +536,7 @@ fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
         assert!(!world.grant_science(human, science));
     });
     assert_eq!(
-        game.players.player(human).unwrap().has_science(science),
+        game.sim.world.players.player(human).unwrap().has_science(science),
         grantable
     );
     assert!(
@@ -570,7 +568,7 @@ fn actions(game: &mut GameStart, human: Int, computer: Int, home_name: &str) {
         game.sim.world.player_relationships[&(human, computer)],
         Relationship::Allies
     );
-    let player = game.players.player(human).unwrap();
+    let player = game.sim.world.players.player(human).unwrap();
     assert!(!player.can_build_base && !player.can_build_units);
 
     // The set is named on the team and given to its members' AI.
@@ -584,7 +582,7 @@ fn actions(game: &mut GameStart, human: Int, computer: Int, home_name: &str) {
         at::TEAM_APPLY_ATTACK_PRIORITY_SET,
         vec![word(home_name), word("rush")],
     );
-    let home = game.players.player(human).unwrap().default_team.unwrap();
+    let home = game.sim.world.players.player(human).unwrap().default_team.unwrap();
     assert_eq!(
         game.teams.prototype_of(home).unwrap().attack_priority_name,
         "rush"
@@ -647,7 +645,7 @@ fn actions(game: &mut GameStart, human: Int, computer: Int, home_name: &str) {
 
 fn updates(game: &mut GameStart, human: Int, computer: Int) {
     // Each side's list runs once a frame, for that side.
-    let sides = game.players.player_count() as usize;
+    let sides = game.sim.world.players.player_count() as usize;
     game.scripts.engine.sides = vec![None; sides];
     game.scripts.engine.sides[human as usize] = Some(always(vec![action(
         at::PLAYER_GIVE_MONEY,

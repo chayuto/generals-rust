@@ -30,7 +30,6 @@ use crate::modules::update::ai_update::{AiCommandParms, AiCommandType, AiUpdate,
 use crate::modules::update::dozer_ai_update::{new_task, DOZER_TASK_BUILD};
 use crate::pathfinder::pathfind_cell::CellType;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
-use crate::player::player_list::PlayerList;
 use crate::player::seams::PlayerIndex;
 use crate::player::team::TeamFactory;
 use crate::rules::kind_of::KindOfType;
@@ -53,7 +52,6 @@ pub const PI: Real = std::f32::consts::PI;
 /// What map-start building works on besides the sim.
 pub struct BuildContext<'a> {
     pub sim: &'a mut SimContext,
-    pub players: &'a mut PlayerList,
     /// Objects given a name (`Object::setName`).
     pub named: &'a mut Vec<(String, ObjectId)>,
     /// Calls into code that is not ported, by name.
@@ -217,15 +215,17 @@ pub fn build_object_now(
         )
     };
     let (team, human) = cx
+        .sim
+        .world
         .players
         .player(player)
         .and_then(|p| Some((p.default_team?, p.player_type == PlayerType::Human)))?;
 
     clear_removable_for_construction(cx.sim, &geometry, pos, angle);
     // The computer gets to build even if something would not move.
-    let players = &*cx.players;
-    let relationship = |_: &SimContext, team, owner| {
-        players
+    let relationship = |sim: &SimContext, team, owner| {
+        sim.world
+            .players
             .player(player)
             .map(|p| p.relationship(Some(team), owner))
     };
@@ -396,7 +396,7 @@ pub fn on_structure_construction_complete(
         cx.sim.record_structure_built(structure);
     }
     cx.sim.friend_adjust_power_for_player(structure, TRUE);
-    if cx.players.player(player).is_some_and(|p| p.ai.is_some()) {
+    if cx.sim.world.players.player(player).is_some_and(|p| p.ai.is_some()) {
         crate::ai::ai_player::on_structure_produced(cx, player, structure);
     }
 }

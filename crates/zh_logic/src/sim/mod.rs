@@ -58,6 +58,7 @@ use crate::object::thing_template::{
     DefaultModuleMaskLookup, GameTextLookup, ThingTemplate, ThingTemplateParseContext,
 };
 use crate::object::weapon::WeaponStore;
+use crate::player::player_list::PlayerList;
 use crate::object::weapon_effects::WeaponStoreState;
 use crate::object::weapon_set::{
     self,
@@ -2441,6 +2442,8 @@ pub struct SimWorld {
     pub objects_to_destroy: Vec<(ObjectSlot, u32)>,
     pub next_object_id: Int,
     pub ai_enable_repulsors: Bool,
+    /// `ThePlayerList`.
+    pub players: PlayerList,
     pub team_players: BTreeMap<TeamId, Int>,
     pub team_members: BTreeMap<TeamId, Vec<ObjectSlot>>,
     /// `Player::m_playerTeamPrototypes` by player index: each prototype is its team
@@ -2632,6 +2635,7 @@ impl SimWorld {
             next_object_id: 1,
             ai_enable_repulsors: TRUE,
             ai_groups: Default::default(),
+            players: PlayerList::default(),
             team_players: BTreeMap::new(),
             team_members: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),

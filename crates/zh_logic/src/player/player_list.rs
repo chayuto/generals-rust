@@ -36,6 +36,20 @@ pub struct PlayerList {
     slot_to_player: [Int; MAX_SLOTS],
 }
 
+/// Sixteen players before `init`: what a sim has until `PlayerList::newGame`
+/// replaces them.
+impl Default for PlayerList {
+    fn default() -> Self {
+        Self {
+            players: (0..MAX_PLAYER_COUNT as Int).map(Player::blank).collect(),
+            local: None,
+            player_count: 0,
+            slot_indices: [-1; MAX_PLAYER_COUNT],
+            slot_to_player: [-1; MAX_SLOTS],
+        }
+    }
+}
+
 impl PlayerList {
     /// The constructor: sixteen players, then `init`.
     pub fn new(env: &mut PlayerEnv<'_>) -> Self {

@@ -78,7 +78,6 @@ pub struct GameScripts {
 
 /// The parts of a game outside the sim that the scripts reach.
 pub struct ScriptGame<'a> {
-    pub players: &'a mut PlayerList,
     pub teams: &'a mut TeamFactory,
     pub stores: &'a StartupStores,
     /// `(name, location)`, newest first.
@@ -230,8 +229,15 @@ impl<'a> LiveWorld<'a> {
         *self.unported.borrow_mut().entry(call).or_insert(0) += 1;
     }
 
+    /// Stores the build list a computer player's order changed on `copy`.
+    fn keep_build_list(&mut self, player: ScriptPlayer, copy: crate::player::player::Player) {
+        if let Some(p) = self.sim.world.players.player_mut(player) {
+            p.build_list = copy.build_list;
+        }
+    }
+
     fn player(&self, player: ScriptPlayer) -> Option<&crate::player::player::Player> {
-        self.game.players.player(player)
+        self.sim.world.players.player(player)
     }
 
     fn default_team(&self, player: ScriptPlayer) -> Option<TeamId> {
@@ -318,6 +324,8 @@ impl<'a> LiveWorld<'a> {
         f: impl FnOnce(&mut PlayerList, &mut TeamFactory, &mut PlayerEnv<'_>),
     ) {
         let SimContext { rules, world, .. } = &mut *self.sim;
+        // `f` gets the list alongside a host over the rest of the world.
+        let mut players = std::mem::take(&mut world.players);
         let ai_players = self.ai_players.get_mut();
         let mut host = FramePlayers {
             world,
@@ -333,7 +341,8 @@ impl<'a> LiveWorld<'a> {
             name_keys: &mut rules.name_keys,
             world: &mut host,
         };
-        f(self.game.players, self.game.teams, &mut env);
+        f(&mut players, self.game.teams, &mut env);
+        self.sim.world.players = players;
     }
 }
 
@@ -347,17 +356,17 @@ impl ScriptWorld for LiveWorld<'_> {
     }
 
     fn player_count(&self) -> Int {
-        self.game.players.player_count()
+        self.sim.world.players.player_count()
     }
 
     fn find_player(&self, name: &str) -> Option<ScriptPlayer> {
         // `findPlayerWithNameKey`: a renamed skirmish player keeps its key.
         let key = self.sim.rules.name_keys.lookup_key(name)?;
-        self.game.players.find_player_with_name_key(key)
+        self.sim.world.players.find_player_with_name_key(key)
     }
 
     fn local_player(&self) -> ScriptPlayer {
-        self.game.players.local_player()
+        self.sim.world.players.local_player()
     }
 
     fn is_challenge_campaign(&self) -> bool {
@@ -533,13 +542,13 @@ impl ScriptWorld for LiveWorld<'_> {
     }
 
     fn set_can_build_units(&mut self, player: ScriptPlayer, can: bool) {
-        if let Some(p) = self.game.players.player_mut(player) {
+        if let Some(p) = self.sim.world.players.player_mut(player) {
             p.can_build_units = can;
         }
     }
 
     fn set_can_build_base(&mut self, player: ScriptPlayer, can: bool) {
-        if let Some(p) = self.game.players.player_mut(player) {
+        if let Some(p) = self.sim.world.players.player_mut(player) {
             p.can_build_base = can;
         }
     }
@@ -550,7 +559,7 @@ impl ScriptWorld for LiveWorld<'_> {
             2 => Relationship::Allies,
             _ => Relationship::Neutral,
         };
-        if let Some(p) = self.game.players.player_mut(from) {
+        if let Some(p) = self.sim.world.players.player_mut(from) {
             p.player_relations.set(to as u32, relationship);
             self.sim
                 .world
@@ -643,7 +652,7 @@ impl ScriptWorld for LiveWorld<'_> {
 
     fn update_team_states(&mut self) {
         // The frames keep the member lists in the world.
-        for index in 0..self.game.players.player_count() {
+        for index in 0..self.sim.world.players.player_count() {
             for team in self.player_teams(index) {
                 let members: Vec<ObjectId> = self.team_members(team.0 as ScriptTeamId);
                 if let Some(t) = self.game.teams.team_mut(team) {
@@ -945,7 +954,7 @@ impl ScriptWorld for LiveWorld<'_> {
         let ai_players = self.ai_players.get_mut();
         let (Some(ai), Some(p)) = (
             ai_players.get_mut(&player),
-            self.game.players.player_mut(player),
+            self.sim.world.players.player_mut(player),
         ) else {
             return;
         };
@@ -953,7 +962,11 @@ impl ScriptWorld for LiveWorld<'_> {
             self.missing("AIPlayer::buildSpecificAIBuilding of a non-skirmish player");
             return;
         }
-        build_specific_ai_building(self.sim, ai, &mut p.build_list, template);
+        let mut list = std::mem::take(&mut p.build_list);
+        build_specific_ai_building(self.sim, ai, &mut list, template);
+        if let Some(p) = self.sim.world.players.player_mut(player) {
+            p.build_list = list;
+        }
     }
 
     fn ai_build_by_supplies(&mut self, player: ScriptPlayer, minimum_cash: Int, template: &str) {
@@ -972,18 +985,20 @@ impl ScriptWorld for LiveWorld<'_> {
         let ai_players = self.ai_players.get_mut();
         let (Some(ai), Some(p)) = (
             ai_players.get_mut(&player),
-            self.game.players.player_mut(player),
+            self.sim.world.players.player(player),
         ) else {
             return;
         };
+        let mut copy = p.clone();
         let mut order = SupplyOrder {
             sim: self.sim,
             ai,
-            player: p,
+            player: &mut copy,
             enemy_center,
             pathfind_extent,
         };
         build_by_supplies(&mut order, minimum_cash, template);
+        self.keep_build_list(player, copy);
     }
 
     fn ai_build_building_nearest_team(
@@ -1000,28 +1015,31 @@ impl ScriptWorld for LiveWorld<'_> {
         let ai_players = self.ai_players.get_mut();
         let (Some(ai), Some(p)) = (
             ai_players.get_mut(&player),
-            self.game.players.player_mut(player),
+            self.sim.world.players.player(player),
         ) else {
             return;
         };
+        let mut copy = p.clone();
         build_specific_building_nearest_team(
             self.sim,
             ai,
-            p,
+            &mut copy,
             template,
             team_id(team),
             &pathfind_extent,
         );
+        self.keep_build_list(player, copy);
     }
 
     fn ai_build_upgrade(&mut self, player: ScriptPlayer, upgrade: &str) {
-        let Some(p) = self.game.players.player(player) else {
+        let Some(p) = self.sim.world.players.player(player) else {
             return;
         };
         if !self.ai_players.get_mut().contains_key(&player) {
             return;
         }
-        build_upgrade(self.sim, player, &p.build_list, upgrade);
+        let list = p.build_list.clone();
+        build_upgrade(self.sim, player, &list, upgrade);
     }
 
     fn ai_repair_structure(&mut self, player: ScriptPlayer, structure: ObjectId) {
@@ -1061,19 +1079,21 @@ impl ScriptWorld for LiveWorld<'_> {
         let ai_players = self.ai_players.get_mut();
         let (Some(ai), Some(p)) = (
             ai_players.get_mut(&player),
-            self.game.players.player_mut(player),
+            self.sim.world.players.player(player),
         ) else {
             return;
         };
+        let mut copy = p.clone();
         guard_supply_center(
             self.sim,
             ai,
-            p,
+            &mut copy,
             enemy_center,
             pathfind_extent,
             team_id(team),
             min_supplies,
         );
+        self.keep_build_list(player, copy);
     }
 
     fn ai_build_base_defense(&mut self, player: ScriptPlayer, flank: bool) {
@@ -1086,7 +1106,6 @@ impl ScriptWorld for LiveWorld<'_> {
             build_ai_base_defense(
                 self.sim,
                 ai,
-                self.game.players,
                 player,
                 flank,
                 &pathfind_extent,
@@ -1109,7 +1128,6 @@ impl ScriptWorld for LiveWorld<'_> {
             build_ai_base_defense_structure(
                 self.sim,
                 ai,
-                self.game.players,
                 player,
                 template,
                 flank,
@@ -1134,7 +1152,7 @@ impl ScriptWorld for LiveWorld<'_> {
         let Some(ai) = ai_players.get_mut(&player) else {
             return true;
         };
-        let Some(p) = self.game.players.player(player) else {
+        let Some(p) = self.sim.world.players.player(player) else {
             return true;
         };
         let mut player_copy = p.clone();
@@ -1173,7 +1191,6 @@ impl ScriptWorld for LiveWorld<'_> {
         build_specific_ai_team_with_env(
             self.sim,
             self.ai_players.get_mut(),
-            self.game.players,
             self.game.teams,
             self.game.stores,
             self.game.waypoints,
@@ -1202,7 +1219,6 @@ impl ScriptWorld for LiveWorld<'_> {
         recruit_specific_ai_team_with_env(
             self.sim,
             self.ai_players.get_mut(),
-            self.game.players,
             self.game.teams,
             self.game.stores,
             self.game.waypoints,
@@ -1247,7 +1263,7 @@ fn middle(positions: &[Coord3D]) -> Coord2D {
 
 impl EnemyView for LiveWorld<'_> {
     fn player_count(&self) -> Int {
-        self.game.players.player_count()
+        self.sim.world.players.player_count()
     }
 
     fn is_enemy(&self, player: PlayerIndex, other: PlayerIndex) -> bool {

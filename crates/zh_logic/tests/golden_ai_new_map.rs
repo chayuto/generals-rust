@@ -405,14 +405,14 @@ fn supply_center_of(game: &GameStart, side: &str) -> Option<String> {
 /// the first skirmish player's build list, most of it marked as built.
 fn build_whole_base(game: &mut GameStart) {
     let sim = &game.sim;
-    let player = (0..game.players.player_count()).find(|&p| {
+    let player = (0..game.sim.world.players.player_count()).find(|&p| {
         sim.world
             .ai_players
             .get(&p)
             .is_some_and(|ai| ai.skirmish.is_some())
             && sim.world.objects.world_iter().any(|slot| {
                 sim.world.objects.get(slot).is_some_and(|o| {
-                    game.players
+                    game.sim.world.players
                         .player(p)
                         .is_some_and(|player| player.default_team == Some(o.team_id))
                 }) && sim.object_is_kind_of(slot, KindOfType::CommandCenter) != FALSE
@@ -421,7 +421,7 @@ fn build_whole_base(game: &mut GameStart) {
     let Some(player) = player else {
         return;
     };
-    let list = &mut game.players.player_mut(player).expect("player").build_list;
+    let list = &mut game.sim.world.players.player_mut(player).expect("player").build_list;
     for (i, info) in list.iter_mut().enumerate() {
         info.is_initially_built = i32::from(i % 5 != 4) as _;
         info.unsellable = i32::from(i % 3 == 0) as _;
@@ -429,7 +429,7 @@ fn build_whole_base(game: &mut GameStart) {
             info.building_name = format!("n{i}");
         }
     }
-    let side = game.players.player(player).expect("player").side.clone();
+    let side = game.sim.world.players.player(player).expect("player").side.clone();
     let center = game
         .sim
         .world
@@ -437,7 +437,7 @@ fn build_whole_base(game: &mut GameStart) {
         .world_iter()
         .filter(|&slot| game.sim.object_is_kind_of(slot, KindOfType::CommandCenter) != FALSE)
         .filter_map(|slot| game.sim.world.objects.get(slot))
-        .find(|o| game.players.player(player).expect("player").default_team == Some(o.team_id))
+        .find(|o| game.sim.world.players.player(player).expect("player").default_team == Some(o.team_id))
         .map(|o| *o.thing.get_position());
     if let (Some(name), Some(mut at)) = (supply_center_of(game, &side), center) {
         at.x += 300.0;
@@ -446,14 +446,13 @@ fn build_whole_base(game: &mut GameStart) {
         info.template_name = name;
         info.location = at;
         info.is_initially_built = TRUE;
-        let player = game.players.player_mut(player).expect("player");
+        let player = game.sim.world.players.player_mut(player).expect("player");
         player.build_list.push(info);
     }
     let mut unported = BTreeMap::new();
     new_map(
         &mut BuildContext {
             sim: &mut game.sim,
-            players: &mut game.players,
             named: &mut game.named_objects,
             unported: &mut unported,
             // Only the skirmish setup reads the extent.
@@ -487,12 +486,12 @@ fn start(name: &str, options: Option<&str>) -> Option<Rows> {
         }
     })
     .expect("start");
-    let mut end = rows(&game.sim, &game.players);
+    let mut end = rows(&game.sim, &game.sim.world.players);
     // Only the start's map objects carry names, so both stages take the final list.
     name_rows(&mut before, &game.named_objects);
     name_rows(&mut end, &game.named_objects);
     build_whole_base(&mut game);
-    let mut built = rows(&game.sim, &game.players);
+    let mut built = rows(&game.sim, &game.sim.world.players);
     name_rows(&mut built, &game.named_objects);
     Some(Rows { before, end, built })
 }

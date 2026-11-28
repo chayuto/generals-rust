@@ -265,8 +265,8 @@ pub(super) fn xfer_flag(xfer: &mut dyn Xfer, value: &mut Bool) -> Result<(), Xfe
 
 /// `PlayerList::newMap`: every computer player's `newMap`, in player order.
 pub fn players_new_map(cx: &mut BuildContext<'_>) {
-    for player in 0..cx.players.player_count() {
-        let Some(kind) = cx.players.player(player).and_then(|p| p.ai) else {
+    for player in 0..cx.sim.world.players.player_count() {
+        let Some(kind) = cx.sim.world.players.player(player).and_then(|p| p.ai) else {
             continue;
         };
         match kind {
@@ -317,7 +317,7 @@ fn add_to_build_list(cx: &mut BuildContext<'_>, player: PlayerIndex, slot: Objec
         .template_override()
         .get_final(&cx.sim.rules.thing_factory)
         .map_or_else(String::new, |t| t.get_name().to_owned());
-    if let Some(p) = cx.players.player_mut(player) {
+    if let Some(p) = cx.sim.world.players.player_mut(player) {
         p.build_list.insert(0, info);
     }
 }
@@ -329,7 +329,7 @@ pub(super) fn build_initial_structures(
     first: usize,
 ) {
     let mut at = first;
-    while let Some(info) = cx.players.player(player).and_then(|p| p.build_list.get(at)) {
+    while let Some(info) = cx.sim.world.players.player(player).and_then(|p| p.build_list.get(at)) {
         let initially_built = info.is_initially_built != FALSE;
         let known = !info.template_name.is_empty()
             && cx
@@ -341,7 +341,7 @@ pub(super) fn build_initial_structures(
         if known {
             if initially_built {
                 build_structure_now(cx, player, at);
-            } else if let Some(p) = cx.players.player_mut(player) {
+            } else if let Some(p) = cx.sim.world.players.player_mut(player) {
                 p.build_list[at].increment_num_rebuilds();
             }
         }
@@ -388,6 +388,8 @@ pub fn base_center_and_radius(buildings: &[(Coord3D, Real)]) -> (Coord2D, Real, 
 /// `computeCenterAndRadiusOfBase( &m_baseCenter, &m_baseRadius )`.
 pub(super) fn compute_center_and_radius_of_base(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     let buildings: Vec<(Coord3D, Real)> = cx
+        .sim
+        .world
         .players
         .player(player)
         .map_or(&[][..], |p| p.build_list.as_slice())
@@ -420,6 +422,8 @@ pub(super) fn compute_center_and_radius_of_base(cx: &mut BuildContext<'_>, playe
 /// the reference and never applied (`gotOffset;` instead of an assignment).
 fn build_structure_now(cx: &mut BuildContext<'_>, player: PlayerIndex, at: usize) {
     let Some(info) = cx
+        .sim
+        .world
         .players
         .player(player)
         .and_then(|p| p.build_list.get(at))
@@ -456,7 +460,7 @@ fn build_structure_now(cx: &mut BuildContext<'_>, player: PlayerIndex, at: usize
         }
     }
     let frame = cx.sim.world.frame;
-    if let Some(p) = cx.players.player_mut(player) {
+    if let Some(p) = cx.sim.world.players.player_mut(player) {
         p.build_list[at].object_id = id;
         p.build_list[at].object_timestamp = frame.wrapping_add(1);
     }
@@ -500,7 +504,7 @@ pub(super) fn check_for_supply_center(
         .ai_players
         .get(&player)
         .map_or(DIFFICULTY_NORMAL, |ai| ai.difficulty);
-    let Some(p) = cx.players.player_mut(player) else {
+    let Some(p) = cx.sim.world.players.player_mut(player) else {
         return;
     };
     let mut desired = 0;
@@ -530,11 +534,15 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
         return;
     };
     let found_at = cx
+        .sim
+        .world
         .players
         .player(player)
         .and_then(|p| p.build_list.iter().position(|info| info.object_id == id));
     if let Some(at) = found_at {
         let Some((building_name, script, health, unsellable)) = cx
+            .sim
+            .world
             .players
             .player_mut(player)
             .and_then(|p| p.build_list.get_mut(at))
@@ -587,7 +595,6 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
                 scripts.with_world(
                     cx.sim,
                     ScriptGame {
-                        players: cx.players,
                         teams,
                         stores,
                         waypoints: cx.waypoints,
@@ -602,9 +609,11 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
     }
 
     // Check rebuild holes in the build list (`AIPlayer.cpp:151-178`).
-    let len = cx.players.player(player).map_or(0, |p| p.build_list.len());
+    let len = cx.sim.world.players.player(player).map_or(0, |p| p.build_list.len());
     for at in 0..len {
         let Some((tmpl_name, hole_id)) = cx
+            .sim
+            .world
             .players
             .player(player)
             .and_then(|p| p.build_list.get(at))
@@ -656,6 +665,8 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
             });
         if spawned_match {
             if let Some(info) = cx
+                .sim
+                .world
                 .players
                 .player_mut(player)
                 .and_then(|p| p.build_list.get_mut(at))
@@ -697,7 +708,7 @@ fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     if cx.sim.world.frame < 2 {
         return;
     }
-    let Some(p) = cx.players.player(player) else {
+    let Some(p) = cx.sim.world.players.player(player) else {
         return;
     };
     if p.science_purchase_points <= 0 {
@@ -736,7 +747,6 @@ fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     for science in skills {
         crate::player::science_purchase::attempt_to_purchase_science(
             cx.sim,
-            cx.players,
             cx.scripts.as_deref_mut().map(|s| &mut s.engine),
             player,
             science,
@@ -755,7 +765,7 @@ pub(super) fn ai_mut<'s>(
 /// `doBaseBuilding` of either class. The skirmish AI never waits longer than three
 /// seconds to be ready.
 fn do_base_building(cx: &mut BuildContext<'_>, player: PlayerIndex) {
-    if !cx.players.player(player).is_some_and(|p| p.can_build_base) {
+    if !cx.sim.world.players.player(player).is_some_and(|p| p.can_build_base) {
         return;
     }
     let Some(ai) = ai_mut(cx, player) else {
@@ -961,7 +971,7 @@ pub(super) fn build_structure_with_dozer(
     what: ThingTemplateId,
     at: usize,
 ) -> Option<ObjectId> {
-    let info = cx.players.player(player)?.build_list.get(at)?.clone();
+    let info = cx.sim.world.players.player(player)?.build_list.get(at)?.clone();
     let dozer = find_dozer(cx, player, &info.location)?;
     let team = cx.sim.world.objects.get(dozer)?.team_id;
     let default_team = *cx.sim.world.player_default_teams.get(&player)?;
@@ -982,7 +992,7 @@ pub(super) fn build_structure_with_dozer(
     // The natural rally point is asked for and never set.
     let id = cx.sim.world.objects.id_of(built)?;
     let frame = cx.sim.world.frame;
-    let info = cx.players.player_mut(player)?.build_list.get_mut(at)?;
+    let info = cx.sim.world.players.player_mut(player)?.build_list.get_mut(at)?;
     info.object_id = id;
     info.object_timestamp = frame.wrapping_add(1);
     info.under_construction = TRUE;
@@ -1003,6 +1013,8 @@ fn find_place(
 ) -> Option<Coord3D> {
     use legal_options::*;
     let skirmish_player = cx
+        .sim
+        .world
         .players
         .player(player)
         .is_some_and(|p| p.ai == Some(AiKind::Skirmish));

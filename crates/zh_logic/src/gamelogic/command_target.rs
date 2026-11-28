@@ -17,7 +17,6 @@ use crate::modules::module::CommandSourceType;
 use crate::modules::update::ai_update::{AiCommandParms, AiCommandType};
 use crate::object::weapon_set::{WeaponLockType, WeaponSlotType};
 use crate::player::build_assistant::build_object_with_dozer;
-use crate::player::player_list::PlayerList;
 use crate::player::science_purchase::attempt_to_purchase_science;
 use crate::player::squad::{self, PlayerSquads};
 use crate::rules::kind_of::KindOfType;
@@ -98,7 +97,6 @@ impl Default for CommandState {
 
 /// The parts of a game outside the sim that orders reach.
 pub struct CommandGame<'a> {
-    pub players: &'a mut PlayerList,
     pub scripts: &'a mut ScriptEngine,
 }
 
@@ -516,7 +514,6 @@ impl CommandTarget for SimCommands<'_> {
         };
         attempt_to_purchase_science(
             self.sim,
-            game.players,
             Some(&mut *game.scripts),
             player,
             science,

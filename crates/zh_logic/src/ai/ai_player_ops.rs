@@ -111,9 +111,11 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
         .ai_data
         .rebuild_delay_seconds
         .wrapping_mul(FRAMES_PER_SECOND) as UnsignedInt;
-    let len = cx.players.player(player).map_or(0, |p| p.build_list.len());
+    let len = cx.sim.world.players.player(player).map_or(0, |p| p.build_list.len());
     for at in 0..len {
         let Some((name, mut id)) = cx
+            .sim
+            .world
             .players
             .player(player)
             .and_then(|p| p.build_list.get(at))
@@ -169,6 +171,8 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
                     }
                 } else {
                     if let Some(info) = cx
+                        .sim
+                        .world
                         .players
                         .player_mut(player)
                         .and_then(|p| p.build_list.get_mut(at))
@@ -181,6 +185,8 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
                 let hole_id = find_rebuild_hole(cx.sim, id);
                 id = hole_id.unwrap_or(ObjectId::INVALID);
                 if let Some(info) = cx
+                    .sim
+                    .world
                     .players
                     .player_mut(player)
                     .and_then(|p| p.build_list.get_mut(at))
@@ -191,6 +197,8 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
             }
         }
         let Some((cur_id, cur_ts, buildable)) = cx
+            .sim
+            .world
             .players
             .player(player)
             .and_then(|p| p.build_list.get(at))
@@ -209,6 +217,8 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
                 continue;
             }
             if let Some(info) = cx
+                .sim
+                .world
                 .players
                 .player_mut(player)
                 .and_then(|p| p.build_list.get_mut(at))
@@ -219,6 +229,8 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
         if buildable && cx.sim.world.objects.slot_by_id(cur_id).is_none() {
             if build_structure_with_dozer(cx, player, bldg_plan, at).is_some() {
                 if let Some(info) = cx
+                    .sim
+                    .world
                     .players
                     .player_mut(player)
                     .and_then(|p| p.build_list.get_mut(at))
@@ -1085,7 +1097,6 @@ pub(super) fn skirmish_enemy_index(
 pub fn compute_superweapon_target_skirmish(
     sim: &mut SimContext,
     ai: &AiPlayer,
-    players: &PlayerList,
     player: &Player,
     power: &SpecialPowerTemplate,
     target_player: PlayerIndex,
@@ -1112,7 +1123,7 @@ pub fn compute_superweapon_target_skirmish(
         if let Some(loc) = waypoint_loc {
             goal_pos = loc;
         } else {
-            let bounds = get_player_structure_bounds(sim, skirmish_enemy_index(ai, players), false);
+            let bounds = get_player_structure_bounds(sim, skirmish_enemy_index(ai, &sim.world.players), false);
             goal_pos.x = bounds.lo.x + bounds.width() / 2.0;
             goal_pos.y = bounds.lo.y + bounds.height() / 2.0;
         }
@@ -1134,9 +1145,8 @@ pub fn compute_superweapon_target_skirmish(
 
 /// `AISkirmishPlayer::buildAIBaseDefense` (`AISkirmishPlayer.cpp:561-575`).
 pub fn build_ai_base_defense(
-    sim: &SimContext,
+    sim: &mut SimContext,
     ai: &mut AiPlayer,
-    players: &mut PlayerList,
     player_idx: PlayerIndex,
     flank: bool,
     pathfind_extent: &Region3D,
@@ -1144,7 +1154,7 @@ pub fn build_ai_base_defense(
     if ai.skirmish.is_none() {
         return;
     }
-    let Some(side) = players.player(player_idx).map(|p| p.side.as_str()) else {
+    let Some(side) = sim.world.players.player(player_idx).map(|p| p.side.as_str()) else {
         return;
     };
     let Some(defense) = sim
@@ -1157,14 +1167,13 @@ pub fn build_ai_base_defense(
     else {
         return;
     };
-    build_ai_base_defense_structure(sim, ai, players, player_idx, &defense, flank, pathfind_extent);
+    build_ai_base_defense_structure(sim, ai, player_idx, &defense, flank, pathfind_extent);
 }
 
 /// `AISkirmishPlayer::buildAIBaseDefenseStructure` (`AISkirmishPlayer.cpp:599-709`).
 pub fn build_ai_base_defense_structure(
-    sim: &SimContext,
+    sim: &mut SimContext,
     ai: &mut AiPlayer,
-    players: &mut PlayerList,
     player_idx: PlayerIndex,
     thing_name: &str,
     flank: bool,
@@ -1180,10 +1189,10 @@ pub fn build_ai_base_defense_structure(
     let Some(tmpl) = sim.rules.thing_factory.find_template_final(thing_name) else {
         return;
     };
-    let Some(mp_start_index) = players.player(player_idx).map(|p| p.mp_start_index) else {
+    let Some(mp_start_index) = sim.world.players.player(player_idx).map(|p| p.mp_start_index) else {
         return;
     };
-    let enemy_ndx = skirmish_enemy_index(ai, players);
+    let enemy_ndx = skirmish_enemy_index(ai, &sim.world.players);
     let structure_radius = tmpl
         .get_template_geometry_info()
         .get_bounding_circle_radius();
@@ -1295,7 +1304,7 @@ pub fn build_ai_base_defense_structure(
             }
         }
         if can_build {
-            if let Some(p) = players.player_mut(player_idx) {
+            if let Some(p) = sim.world.players.player_mut(player_idx) {
                 add_to_priority_build_list(p, thing_name, &build_pos, place_angle);
             }
             break;
