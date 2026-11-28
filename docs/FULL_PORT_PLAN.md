@@ -156,7 +156,7 @@ flowchart LR
 ### 5.1 Execution & Cost Discipline
 - **Worktree Swarm Model:** One thin `Tier 3` Coordinator + 2–5 parallel `Tier 1B/2` workers in disjoint git worktrees (`ln -s <main>/vendor vendor`), governed by [WORKER_BRIEF.md](WORKER_BRIEF.md) and [TOKENOMICS_AUDIT.md](TOKENOMICS_AUDIT.md).
 - **Slice Sizing:** Cap each worker slice at `~900–1,400` C++ lines (`~300k–500k` tokens). Pre-slice context; never assign whole multi-thousand-line shared files to parallel workers.
-- **Local-First V&V:** Run all C++ oracles (`-O0`/`-O2`/sanitizers), `mutate_check.py`, `lint_determinism.py`, `cargo test --workspace`, `--target x86_64-apple-darwin`, `retail-crc`, `retail-xfer-save`, and `check_vendor.py` locally (`\$0` CI minutes) before batched pushes.
+- **Local-First V&V:** Run all C++ oracles (`-O0`/`-O2`/sanitizers), `mutate_check.py`, `lint_determinism.py`, `cargo test --workspace`, `retail-crc`, `retail-xfer-save`, and `check_vendor.py` locally (`\$0` CI minutes) before batched pushes.
 
 ### 5.2 Top Cross-Stage Risks & Mitigations
 

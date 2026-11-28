@@ -13,7 +13,7 @@ quirks and bugs included.
 - First step: `git merge --ff-only main`, so you start from the current local main.
 - Before any cargo command, in the same shell call:
   `export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=3`.
-  Disk and memory are shared. Do not build the x86 target; the coordinator does.
+  Disk and memory are shared. Do not build the x86 target; CI does (`AGENTS.md` §4.4).
 
 ## Safety
 

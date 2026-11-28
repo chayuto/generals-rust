@@ -175,5 +175,5 @@ flowchart TD
 Every slice merged into `main` must pass all gates from [WORKER_BRIEF.md](WORKER_BRIEF.md) and [HANDOFF.md](HANDOFF.md):
 1. **Oracle consistency:** C++ harness built with `--opt O0`, `--opt O2`, and `--opt O2 --sanitize` producing byte-identical vectors; floats compared as raw `u32` bits.
 2. **Mutation kill rate:** `python3 scripts/mutate_check.py golden_<name> <new .rs> diff:<changed>` with survivors tracked/resolved.
-3. **Determinism & cross-arch parity:** `python3 scripts/lint_determinism.py`, `cargo test --workspace` (`arm64` + `x86_64-apple-darwin`), and `-p zh_logic --features retail-crc` + `retail-xfer-save`.
+3. **Determinism & cross-arch parity:** `python3 scripts/lint_determinism.py`, `cargo test --workspace` (`arm64` locally, `x86_64` in CI), and `-p zh_logic --features retail-crc` + `retail-xfer-save`.
 4. **Ratchet & Vendor integrity:** `golden_game_frames` never regresses without documented coincidence cause; `python3 scripts/check_vendor.py`, `port_map.py --check`, `gen_engine_sim.py --check`, `validate_manifest.py`, and `scripts/test_*.py` all exit `0`.

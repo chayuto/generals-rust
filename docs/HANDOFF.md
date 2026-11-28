@@ -125,13 +125,14 @@ Merging a worker's commits:
    `python3 scripts/port_map.py --write`. On a `game_frames_agreement.txt` conflict take
    theirs, rewrite with `GAME_FRAMES_RATCHET=write`, and compare field by field with the
    version from before the merge. Explain every loss.
-3. `cargo test --workspace`, then again with `--target x86_64-apple-darwin` (CI is x86).
-   Set `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`. The
-   x86 run can exceed 10 minutes: run it in the background.
+3. `cargo test --workspace`, native only. CI covers x86 (`AGENTS.md` §4.4): do not run it
+   locally unless CI failed or you are fixing an x86 bug.
+   Set `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
 4. `lint_determinism.py`, `port_map.py --check`, `gen_engine_sim.py --check`,
    `cargo check -p zh_logic --features retail-crc` and `retail-xfer-save`, every
    `scripts/test_*.py`, `validate_manifest.py`, `check_vendor.py`.
-5. Push once per batch and check CI (about 5 minutes of a 10 minute limit).
+5. Push once per batch and check CI (about 5 minutes of a 10 minute limit). It is the only
+   x86 run, so the batch is not done until it is green.
 6. Remove the worktree: delete its `vendor` symlink first, then `git worktree remove`.
 
 ## Pitfalls

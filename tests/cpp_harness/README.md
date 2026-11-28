@@ -75,7 +75,7 @@ Each `gen_*.cpp` here compiles unmodified `vendor/GeneralsX` sources, with minim
 - **Where:** `RepairDockUpdate` with `TimeForFullHeal = 0` saves `0/0`.
 - **What happens:** the ARM reference stores `0x7FC00000`; x86 (CI's Linux runner) produces `0xFFC00000`. The suite passed on the Mac and failed in CI.
 - **Port contract:** where `0/0`, `inf - inf` or `0 * inf` can reach saved state, give it the reference bits (`zh_common::math::reference_div_f32`).
-- **Guard:** CI runs on x86. Reproduce locally with `cargo test --workspace --target x86_64-apple-darwin` (Rosetta; `rustup target add x86_64-apple-darwin`).
+- **Guard:** CI runs on x86. When it fails there, or while fixing an x86 bug, reproduce locally with `cargo test --workspace --target x86_64-apple-darwin` (Rosetta; `rustup target add x86_64-apple-darwin`).
 
 ### Oversized integer INI tokens differ by platform
 

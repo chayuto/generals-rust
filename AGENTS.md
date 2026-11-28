@@ -115,6 +115,11 @@ To prevent two agents from duplicating work on the same module:
 
 > **Dated Decision (`2026-11-22` — Active):** All **`env:ephemeral-web` remote agent assignments are PAUSED** until further notice (GitHub Actions monthly runner quota nearly exhausted). Until explicitly re-enabled by the owner, execute all work **locally (`env:local-full`)**, prioritize `$0` local deterministic compute before committing, batch pushes to `origin/main` cleanly to minimize CI runs, and do **not** open `status:ready-for-agent` remote-offload Issues or commit `#[ignore]` remote stubs.
 
+> **Dated Decision (`2026-11-28` — Active): native checks run locally, `x86_64` runs in CI.** The repository is public, so the Linux `x86_64` runner is free; local compute time is not spent repeating it.
+> - **Locally (`arm64`), run every native check that can run:** C++ oracles (`-O0`/`-O2`/sanitizers), `mutate_check.py`, `lint_determinism.py`, `cargo check`, `cargo test --workspace` (including the suites that need retail data or `vendor/`, which CI cannot run), the `retail-crc` and `retail-xfer-save` feature checks, `port_map.py --check`, `gen_engine_sim.py --check`, `validate_manifest.py`, `check_vendor.py` and `scripts/test_*.py`.
+> - **`x86_64` is verified by GitHub Actions CI** on push. Do not build or test the `x86_64` target locally, except when CI has failed or when fixing an `x86_64`-specific bug.
+> - **A push is not done until its CI run is green.** Check the result after every push and report it.
+
 **Local Multi-Agent & Read-Only Chat Execution Rules (`2026-11-22` — [docs/TOKENOMICS_AUDIT.md](docs/TOKENOMICS_AUDIT.md) §6):**
 - Use a thin `Tier 3` Local Coordinator + 2–4 parallel `Tier 1A/1B/2` worktree workers (`share`) on separate higher-remaining-quota pools with fresh contexts and disjoint file ownership when quota headroom allows (avoid monolithic single-thread waves that suffer $O(T^2)$ context growth).
 - Enforce a hard `2–3` read-turn cap before first write in worker briefs (C++ oracle by Turn 4, Rust by Turn 6), never run full `./scripts/bootstrap_repo.sh` inside a worktree, pre-slice C++/Rust references via `scripts/prep_packet.py`, and run `1` worker serially (instead of parallel fan-out) whenever worker pool headroom is `< 30%`.
