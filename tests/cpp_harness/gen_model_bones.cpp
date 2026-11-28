@@ -442,6 +442,9 @@ static std::string draw_module(const std::vector<std::string>& tags, const std::
     if (chance(70)) d += "    ConditionState = DAMAGED\n" + object_state(tags, anim_tag, false) + "    End\n";
     if (chance(60)) d += "    ConditionState = REALLYDAMAGED\n" + object_state(tags, anim_tag, false) + "    End\n";
     if (chance(40)) d += "    ConditionState = MOVING DAMAGED\n" + object_state(tags, anim_tag, false) + "    End\n";
+    if (chance(30)) d += "    ConditionState = NIGHT\n" + object_state(tags, anim_tag, false) + "    End\n";
+    if (chance(30)) d += "    ConditionState = SNOW\n" + object_state(tags, anim_tag, false) + "    End\n";
+    if (chance(20)) d += "    ConditionState = NIGHT SNOW\n" + object_state(tags, anim_tag, false) + "    End\n";
     d += "  End\n";
     return d;
 }
@@ -510,13 +513,18 @@ static void object_cases(oracle_wp51::World& w) {
         }
         TheThingFactory->postProcessLoad();
 
+        // A drawable takes night and snow from the global data when it is bound.
+        const bool night = chance(30), snowy = chance(30);
+        TheWritableGlobalData->m_timeOfDay = night ? TIME_OF_DAY_NIGHT : TIME_OF_DAY_AFTERNOON;
+        TheWritableGlobalData->m_weather = snowy ? WEATHER_SNOWY : WEATHER_NORMAL;
         const Coord3D at = {(Real)(10 + pick(500)), (Real)(10 + pick(500)), (Real)pick(20)};
         const Real angle = frand();
         Object* obj = w.spawn_object(name.c_str(), w.team_a, at, angle);
         if (!obj || !obj->getDrawable()) exit(5);
         const Drawable* draw = obj->getDrawable();
         g_rows.push_back("{\"case\":\"object\",\"name\":\"" + name + "\",\"approach\":\""
-            + std::to_string(approach) + "\",\"at\":\"" + pos_text(at) + flt(angle) + "\",\"ini\":\""
+            + std::to_string(approach) + "\",\"sky\":\"" + std::to_string(night) + std::to_string(snowy)
+            + "\",\"at\":\"" + pos_text(at) + flt(angle) + "\",\"ini\":\""
             + hex_text(ini) + "\"}");
 
         DockUpdate* update = nullptr;

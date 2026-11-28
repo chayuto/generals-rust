@@ -8,16 +8,22 @@ use zh_common::golden_json::{decode_hex_bytes, get_str};
 use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::math::{Coord3D, Matrix3D, Region3D};
 use zh_common::types::NameKeyType;
+use zh_common::types::TeamId;
 use zh_logic::combat::turret_ai::WhichTurretType;
+use zh_logic::gamelogic::global_data::{TimeOfDay, Weather};
 use zh_logic::modules::update::ai_update::AiUpdate;
 use zh_logic::modules::update::dock_update::{DockUpdateModuleData, DockUpdateState};
-use zh_logic::object::model_bones::{AttachBoneOffsets, DrawableBones, ModelBoneCatalog};
+use zh_logic::object::model_bones::{
+    AttachBoneOffsets, DrawableBones, ModelBoneCatalog, ProjectileLaunch,
+};
 use zh_logic::object::model_draw::{ModelDrawModuleData, ModelDrawSpec};
-use zh_logic::rules::model_state::ModelConditionFlags;
 use zh_logic::object::weapon_fire::launch_transform;
 use zh_logic::object::weapon_set::WeaponSlotType;
-use zh_common::types::TeamId;
-use zh_logic::sim::{RulesRegistry, SimApi, SimContext, SimWorld};
+use zh_logic::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
+use zh_logic::sim::{RulesRegistry, SimApi, SimContext, SimView, SimWorld};
+
+const NIGHT: i32 = ModelConditionFlagType::Night.as_i32();
+const SNOW: i32 = ModelConditionFlagType::Snow.as_i32();
 
 const JSON: &str = include_str!("../../../docs/golden_vectors/ModelBones.json");
 
@@ -174,6 +180,8 @@ struct Objects {
     sim: SimContext,
     /// `(name, approach positions, position and angle)`.
     objects: Vec<(&'static str, i32, Vec<f32>)>,
+    /// Night and snow when each object's drawable was made.
+    skies: Vec<(bool, bool)>,
 }
 
 fn objects() -> Objects {
@@ -193,7 +201,10 @@ fn objects() -> Objects {
         .map(str::to_owned)
         .collect();
     let mut objects = Vec::new();
+    let mut skies = Vec::new();
     for line in rows("object") {
+        let sky = get_str(line, "sky").unwrap();
+        skies.push((&sky[..1] == "1", &sky[1..] == "1"));
         let ini = decode_hex_bytes(get_str(line, "ini").unwrap()).unwrap();
         load_objects(&mut rules, &ini);
         objects.push((
@@ -219,7 +230,29 @@ fn objects() -> Objects {
     sim.world.next_object_id = 1;
     sim.world.player_default_teams.insert(1, TeamId(1));
     sim.add_player_team(TeamId(1), 1);
-    Objects { sim, objects }
+    Objects {
+        sim,
+        objects,
+        skies,
+    }
+}
+
+fn turret_of(value: &str) -> WhichTurretType {
+    match number(value) {
+        0 => WhichTurretType::Main,
+        1 => WhichTurretType::Alt,
+        _ => WhichTurretType::Invalid,
+    }
+}
+
+fn launch_text(out: &ProjectileLaunch) -> String {
+    format!(
+        "{}:{}:{}{}",
+        u32::from(out.launch.is_some()),
+        out.launch.as_ref().map_or_else(String::new, matrix_text),
+        pos_text(&out.turret_rot_pos),
+        pos_text(&out.turret_pitch_pos)
+    )
 }
 
 #[test]
@@ -252,24 +285,13 @@ fn drawable_bone_queries_match_the_reference() {
                 }
                 "B" => bones.barrel_count(number(head[1]) as usize).to_string(),
                 "L" => {
-                    let turret = match number(head[3]) {
-                        0 => WhichTurretType::Main,
-                        1 => WhichTurretType::Alt,
-                        _ => WhichTurretType::Invalid,
-                    };
                     let out = bones.projectile_launch_offset(
                         number(head[1]) as usize,
                         number(head[2]),
-                        turret,
+                        turret_of(head[3]),
                         &mut attach_offsets,
                     );
-                    format!(
-                        "{}:{}:{}{}",
-                        u32::from(out.launch.is_some()),
-                        out.launch.as_ref().map_or_else(String::new, matrix_text),
-                        pos_text(&out.turret_rot_pos),
-                        pos_text(&out.turret_pitch_pos)
-                    )
+                    launch_text(&out)
                 }
                 _ => continue,
             };
@@ -281,7 +303,7 @@ fn drawable_bone_queries_match_the_reference() {
 }
 
 #[test]
-fn launch_and_dock_positions_match_the_reference() {
+fn sim_bone_queries_launch_and_dock_positions_match_the_reference() {
     let mut o = objects();
     let queries = rows("query");
     let sim = &mut o.sim;
@@ -302,8 +324,25 @@ fn launch_and_dock_positions_match_the_reference() {
             object = Some(slot);
         }
         let slot = object.unwrap();
+        // The drawable's flags hold night and snow; the object's do not need to.
+        let (night, snowy) = o.skies[n / 6];
+        sim.rules.global_data.time_of_day = if night {
+            TimeOfDay::Night
+        } else {
+            TimeOfDay::Afternoon
+        };
+        sim.rules.global_data.weather = if snowy {
+            Weather::Snowy
+        } else {
+            Weather::Normal
+        };
+        let mut flags = flags_of(get_str(line, "conditions").unwrap());
+        assert_eq!(flags.test(NIGHT) != 0, night, "{name}");
+        assert_eq!(flags.test(SNOW) != 0, snowy, "{name}");
+        flags.set(NIGHT, 0);
+        flags.set(SNOW, 0);
         let object = sim.world.objects.get_mut(slot).unwrap();
-        object.model_condition = flags_of(get_str(line, "conditions").unwrap());
+        object.model_condition = flags;
         let ai = object.ai_slot;
         let turned = words(get_str(line, "turrets").unwrap());
         assert_eq!(ai.is_some(), !turned.is_empty(), "{name}");
@@ -320,9 +359,36 @@ fn launch_and_dock_positions_match_the_reference() {
             let (head, expected) = query.split_once('=').unwrap();
             let head: Vec<&str> = head.split(':').collect();
             let actual = match head[0] {
+                "P" => {
+                    let found = sim.pristine_bone_transforms_indexed(
+                        slot,
+                        head[1],
+                        number(head[2]),
+                        number(head[3]) as usize,
+                    );
+                    if head[2] == "0" {
+                        let one = sim.pristine_bone_transforms(slot, head[1]);
+                        assert_eq!(one.first(), found.first(), "{name} {head:?}");
+                    }
+                    let matrices: String = found.iter().map(matrix_text).collect();
+                    format!("{}:{matrices}", found.len())
+                }
+                "B" => {
+                    let wslot = WeaponSlotType::from_i32(number(head[1])).unwrap();
+                    sim.weapon_barrel_count(slot, wslot).to_string()
+                }
                 "W" => {
                     let wslot = WeaponSlotType::from_i32(number(head[1])).unwrap();
                     matrix_text(&launch_transform(sim, slot, wslot, number(head[2])))
+                }
+                // These also fill the engine's cached attach bone offset, so they
+                // have to run here, in the order the reference made them.
+                "L" => {
+                    let wslot = WeaponSlotType::from_i32(number(head[1])).unwrap();
+                    let out = sim
+                        .projectile_launch_offset(slot, wslot, number(head[2]), turret_of(head[3]))
+                        .unwrap();
+                    launch_text(&out)
                 }
                 "D" => {
                     let mut data =
@@ -345,6 +411,6 @@ fn launch_and_dock_positions_match_the_reference() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 360 * 5);
+    assert_eq!(checked, 360 * 40);
     assert!(turreted > 100, "{turreted}");
 }
