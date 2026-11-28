@@ -76,7 +76,7 @@ Open from L3:
 - `golden_game_frames` and the other retail-data suites now run on `arm64` only: CI has
   no game data.
 
-## Slice L4 (in progress, 2026-11-28)
+## Slice L4 (done, 2026-11-28; L5 comes next)
 
 Part 1 done: the player list is `SimWorld::players`; sciences, radar, handicap, bans, cost
 and time changes, bounty, attacked-by, preorder and shared power timers live in `Player`;
