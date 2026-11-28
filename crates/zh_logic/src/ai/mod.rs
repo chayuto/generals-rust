@@ -34,6 +34,7 @@ pub mod ai_player;
 pub mod ai_skirmish_player;
 pub mod ai_state_machine;
 pub mod ai_states;
+pub mod ai_team_queue;
 pub mod mood;
 pub mod seams;
 

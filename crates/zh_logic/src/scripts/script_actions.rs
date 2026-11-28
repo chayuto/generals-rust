@@ -92,6 +92,8 @@ pub const PORTED_ACTIONS: &[Int] = &[
     at::LOCALDEFEAT,
     at::SKIRMISH_BUILD_BUILDING,
     at::AI_PLAYER_BUILD_SUPPLY_CENTER,
+    at::BUILD_TEAM,
+    at::RECRUIT_TEAM,
 ];
 
 impl ScriptEngine {
@@ -137,6 +139,22 @@ impl ScriptEngine {
             at::AI_PLAYER_BUILD_SUPPLY_CENTER => {
                 if let Some(p) = self.player_from_name(world, &first) {
                     world.ai_build_by_supplies(p, third.int_val, &second.string_val);
+                }
+            }
+            at::BUILD_TEAM => {
+                world.ai_build_team(&first);
+                for (name, team) in world.take_pending_team_actions() {
+                    if let Some(r) = self.find_script(&name) {
+                        self.execute_actions_for_team(world, r, team);
+                    }
+                }
+            }
+            at::RECRUIT_TEAM => {
+                world.ai_recruit_team(&first, second.real_val);
+                for (name, team) in world.take_pending_team_actions() {
+                    if let Some(r) = self.find_script(&name) {
+                        self.execute_actions_for_team(world, r, team);
+                    }
                 }
             }
             at::TEAM_STOP_SEQUENTIAL_SCRIPT => {

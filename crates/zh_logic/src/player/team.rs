@@ -17,8 +17,16 @@ use zh_common::types::{
 };
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
+use crate::arena::{ObjectSlot, ThingTemplateId};
+use crate::gamelogic::global_data::PlayerType;
+use crate::modules::update::ai_update::AiUpdate;
+use crate::object::thing_template::ThingTemplate;
 use crate::player::player_list::PlayerList;
-use crate::player::seams::{PlayerEnv, PlayerIndex, PlayerWorld};
+use crate::player::seams::{AiKind, PlayerEnv, PlayerIndex, PlayerWorld};
+use crate::rules::disabled_types::DisabledType;
+use crate::rules::object_status_types::ObjectStatusType;
+use crate::scripts::scripts::Script;
+use crate::sim::{SimContext, SimView, SimWorld};
 use crate::spatial::sides_list::SidesList;
 
 pub type TeamPrototypeId = UnsignedInt;
@@ -535,6 +543,7 @@ pub struct TeamPrototype {
     pub owner: PlayerIndex,
     pub singleton: bool,
     pub production_condition_always_false: bool,
+    pub production_condition_script: Option<Script>,
     retrieved_generic_scripts: bool,
     generic_scripts: [Option<UnsignedInt>; MAX_GENERIC_SCRIPTS],
     pub template: TeamTemplateInfo,
@@ -749,6 +758,7 @@ impl TeamFactory {
                 owner: player,
                 singleton,
                 production_condition_always_false: false,
+                production_condition_script: None,
                 retrieved_generic_scripts: false,
                 generic_scripts: [None; MAX_GENERIC_SCRIPTS],
                 template,
@@ -796,7 +806,11 @@ impl TeamFactory {
             .map(|t| t.id);
         let team = match existing {
             Some(team) => team,
-            None => self.new_instance(id)?,
+            None => {
+                let made = self.new_instance(id)?;
+                env.world.notify_team_created(players, self, made);
+                made
+            }
         };
         if let Some(condition) = actions {
             env.world
@@ -1260,4 +1274,311 @@ fn destroy_team(team: Team, players: &mut PlayerList, env: &mut PlayerEnv<'_>) {
     for member in team.members {
         env.world.detach_member(member);
     }
+}
+
+/// Immediately updates `SimWorld`'s per-team maps after `create_inactive_team` allocates
+/// or ensures a team instance.
+pub fn sync_team_to_sim_world(
+    world: &mut SimWorld,
+    players: &PlayerList,
+    teams: &TeamFactory,
+    team: TeamId,
+) {
+    let Some(t) = teams.team(team) else {
+        return;
+    };
+    let Some(proto) = teams.prototype(t.prototype) else {
+        return;
+    };
+    let owner = proto.owner;
+    let Some(player) = players.player(owner) else {
+        return;
+    };
+    if proto.template.attack_common_target {
+        world
+            .team_common_targets
+            .entry(team)
+            .or_insert(ObjectId::INVALID);
+    }
+    world.team_players.insert(team, owner);
+    world.team_is_neutral.insert(team, Bool::from(owner == 0));
+    world
+        .player_is_human
+        .insert(team, Bool::from(player.player_type == PlayerType::Human));
+    world.team_sides.insert(team, player.side.clone());
+    world.team_colors.insert(team, player.color);
+    world
+        .player_sciences
+        .insert(team, player.sciences.iter().copied().collect());
+    world
+        .player_preorder
+        .insert(team, Bool::from(player.is_preorder));
+    world
+        .player_handicaps
+        .insert(team, player.handicap.clone());
+    if !player.can_build_base {
+        world.teams_cannot_build_base.insert(team);
+    }
+    if !player.can_build_units {
+        world.teams_cannot_build_units.insert(team);
+    }
+    if player.ai == Some(AiKind::Skirmish) {
+        world.skirmish_ai_teams.insert(team);
+    }
+    let lists: Vec<Vec<TeamId>> = player
+        .team_prototypes
+        .iter()
+        .map(|&p| teams.instance_ids(p))
+        .filter(|inst| !inst.is_empty())
+        .collect();
+    world.player_team_prototypes.insert(owner, lists);
+}
+
+/// Removes a deleted team instance from `SimWorld`'s team maps.
+pub fn remove_team_from_sim_world(world: &mut SimWorld, team: TeamId) {
+    world.team_players.remove(&team);
+    world.team_members.remove(&team);
+    world.team_is_neutral.remove(&team);
+    world.player_is_human.remove(&team);
+    world.team_sides.remove(&team);
+    world.team_colors.remove(&team);
+    world.player_sciences.remove(&team);
+    world.player_preorder.remove(&team);
+    world.player_handicaps.remove(&team);
+    world.skirmish_ai_teams.remove(&team);
+    world.team_common_targets.remove(&team);
+    world.teams_cannot_build_base.remove(&team);
+    world.teams_cannot_build_units.remove(&team);
+    for lists in world.player_team_prototypes.values_mut() {
+        for list in lists.iter_mut() {
+            list.retain(|&t| t != team);
+        }
+        lists.retain(|list| !list.is_empty());
+    }
+}
+
+/// Applies queued same-player `SimContext::set_object_team_same_player` moves
+/// to `TeamFactory`'s cached member lists.
+pub fn flush_pending_team_member_moves(sim: &mut SimContext, teams: &mut TeamFactory) {
+    if sim.world.pending_team_member_moves.is_empty() {
+        return;
+    }
+    for (obj_id, old_team, new_team) in std::mem::take(&mut sim.world.pending_team_member_moves) {
+        if old_team != TeamId::INVALID {
+            if let Some(t) = teams.team_mut(old_team) {
+                t.remove_member(obj_id);
+            }
+        }
+        if new_team != TeamId::INVALID {
+            if let Some(t) = teams.team_mut(new_team) {
+                t.add_member(obj_id);
+            }
+        }
+    }
+}
+
+/// `Team::isIdle` (`Team.cpp:1761-1779`). Non-AI and effectively dead members count as idle.
+pub fn team_is_idle(sim: &SimContext, team: TeamId) -> bool {
+    let Some(members) = sim.world.team_members.get(&team) else {
+        return true;
+    };
+    for &slot in members {
+        let Some(obj) = sim.world.objects.get(slot) else {
+            continue;
+        };
+        if obj.ai_slot.is_none() || obj.is_effectively_dead() != FALSE {
+            continue;
+        }
+        if sim.ai_is_idle(slot) == FALSE {
+            return false;
+        }
+    }
+    true
+}
+
+/// `Team::getEstimateTeamPosition` (`Team.cpp:2237-2251`).
+pub fn estimate_team_position(sim: &SimContext, team: TeamId) -> Option<Coord3D> {
+    let &first = sim.world.team_members.get(&team)?.first()?;
+    sim.world
+        .objects
+        .get(first)
+        .map(|o| *o.thing.get_position())
+}
+
+/// `Team::countObjectsByThingTemplate` (`Team.cpp:1624-1648`).
+pub fn count_objects_by_thing_template(
+    sim: &SimContext,
+    team: TeamId,
+    templates: &[ThingTemplateId],
+    ignore_dead: bool,
+    ignore_under_construction: bool,
+) -> Vec<Int> {
+    let mut counts = vec![0; templates.len()];
+    let Some(members) = sim.world.team_members.get(&team) else {
+        return counts;
+    };
+    for &slot in members {
+        let Some(obj) = sim.world.objects.get(slot) else {
+            continue;
+        };
+        let Some(objtmpl) = obj
+            .thing
+            .template_override()
+            .get_final(&sim.rules.thing_factory)
+        else {
+            continue;
+        };
+        for (i, &tmpl_id) in templates.iter().enumerate() {
+            let Some(target) = sim
+                .rules
+                .thing_factory
+                .find_by_template_id_final(tmpl_id.0 as u16)
+            else {
+                continue;
+            };
+            if objtmpl.is_equivalent_to(target) == FALSE {
+                continue;
+            }
+            if ignore_dead && obj.is_effectively_dead() != FALSE {
+                continue;
+            }
+            if ignore_under_construction
+                && obj.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE
+            {
+                continue;
+            }
+            counts[i] += 1;
+            break;
+        }
+    }
+    counts
+}
+
+/// `Team::transferUnitsTo` (`Team.cpp:2315-2324`), assuming both teams belong to
+/// the same controlling player.
+pub fn transfer_units_to(
+    sim: &mut SimContext,
+    teams: &mut TeamFactory,
+    from_team: TeamId,
+    to_team: TeamId,
+) {
+    if from_team == to_team || from_team == TeamId::INVALID || to_team == TeamId::INVALID {
+        return;
+    }
+    loop {
+        let first = sim
+            .world
+            .team_members
+            .get(&from_team)
+            .and_then(|m| m.first().copied());
+        let Some(slot) = first else {
+            break;
+        };
+        sim.set_object_team_same_player(slot, to_team);
+    }
+    flush_pending_team_member_moves(sim, teams);
+}
+
+/// `isInBuildVariations` (`Team.cpp:2327-2339`).
+pub fn is_in_build_variations(tt_with_variations: &ThingTemplate, candidate: &ThingTemplate) -> bool {
+    let name = candidate.get_name();
+    tt_with_variations
+        .get_build_variations()
+        .iter()
+        .any(|bv| bv == name)
+}
+
+/// `Team::tryToRecruit` (`Team.cpp:2343-2407`).
+pub fn try_to_recruit(
+    sim: &SimContext,
+    teams: &TeamFactory,
+    players: &PlayerList,
+    recruiting_team: TeamId,
+    tmpl_id: ThingTemplateId,
+    team_home: &Coord3D,
+    max_dist: Real,
+) -> Option<ObjectSlot> {
+    let my_player = teams.controlling_player(recruiting_team)?;
+    let my_priority = teams
+        .prototype_of(recruiting_team)?
+        .template
+        .production_priority;
+    let default_team = players.player(my_player)?.default_team;
+    let t_template = sim
+        .rules
+        .thing_factory
+        .find_by_template_id_final(tmpl_id.0 as u16)?;
+    let mut dist_sqr = max_dist * max_dist;
+    let mut recruit: Option<ObjectSlot> = None;
+
+    for slot in sim.world.objects.world_iter() {
+        let Some(obj) = sim.world.objects.get(slot) else {
+            continue;
+        };
+        let Some(obj_tmpl) = obj
+            .thing
+            .template_override()
+            .get_final(&sim.rules.thing_factory)
+        else {
+            continue;
+        };
+        if obj_tmpl.is_equivalent_to(t_template) == FALSE
+            && !is_in_build_variations(t_template, obj_tmpl)
+        {
+            continue;
+        }
+        if sim.controlling_player(obj.team_id) != Some(my_player) {
+            continue;
+        }
+        let is_default_team = default_team == Some(obj.team_id);
+        let Some(team) = teams.team(obj.team_id) else {
+            continue;
+        };
+        let Some(proto) = teams.prototype(team.prototype) else {
+            continue;
+        };
+        if !team.active {
+            continue;
+        }
+        if proto.template.production_priority >= my_priority {
+            continue;
+        }
+        let mut team_is_recruitable = is_default_team;
+        if proto.template.is_ai_recruitable {
+            team_is_recruitable = true;
+        }
+        if team.is_recruitability_set {
+            team_is_recruitable = team.is_recruitable;
+        }
+        if !team_is_recruitable {
+            continue;
+        }
+        let recruitable = obj
+            .ai_slot
+            .and_then(|ms| sim.world.modules.payload(ms))
+            .and_then(|m| m.as_any())
+            .and_then(|a| a.downcast_ref::<AiUpdate>())
+            .is_none_or(|ai| ai.is_recruitable != FALSE);
+        if !recruitable {
+            continue;
+        }
+        if obj.is_disabled_by_type(DisabledType::Held) != FALSE {
+            continue;
+        }
+        let dx = team_home.x - obj.thing.get_position().x;
+        let dy = team_home.y - obj.thing.get_position().y;
+        let d2 = dx * dx + dy * dy;
+        // Exact C++ quirk (`Team.cpp:2392-2395`): picks first default-team candidate
+        // even beyond `maxDist`, updating `distSqr` to its distance.
+        if is_default_team && recruit.is_none() {
+            recruit = Some(slot);
+            dist_sqr = d2;
+        }
+        if d2 > dist_sqr {
+            continue;
+        }
+        dist_sqr = d2;
+        recruit = Some(slot);
+    }
+    recruit
 }

@@ -21,6 +21,7 @@ use zh_common::math::{
 use zh_common::types::{Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, FALSE, TRUE};
 
 use crate::arena::{ObjectSlot, ThingTemplateId};
+use crate::gamelogic::game_engine::StartupStores;
 use crate::gamelogic::global_data::PlayerType;
 use crate::ai::ai_state_machine::state_id;
 use crate::ai::seams::MapTerrain;
@@ -31,9 +32,11 @@ use crate::pathfinder::pathfind_cell::CellType;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::player::player_list::PlayerList;
 use crate::player::seams::PlayerIndex;
+use crate::player::team::TeamFactory;
 use crate::rules::kind_of::KindOfType;
 use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
 use crate::rules::object_status_types::{ObjectStatusMaskType, ObjectStatusType};
+use crate::scripts::GameScripts;
 use crate::sim::{SimApi, SimContext, SimView};
 use crate::spatial::partition_collide::{geom_collides_with_geom, CollideInfo};
 use crate::spatial::partition_query::{DistanceCalculationType, QueryCenter};
@@ -57,6 +60,10 @@ pub struct BuildContext<'a> {
     pub unported: &'a mut BTreeMap<&'static str, u32>,
     /// `TheTerrainLogic->getMaximumPathfindExtent`.
     pub pathfind_extent: Region3D,
+    pub teams: Option<&'a mut TeamFactory>,
+    pub scripts: Option<&'a mut GameScripts>,
+    pub stores: Option<&'a StartupStores>,
+    pub waypoints: &'a [(String, Coord3D)],
 }
 
 impl BuildContext<'_> {

@@ -2571,6 +2571,15 @@ pub struct SimWorld {
     pub object_count_changed_frame: UnsignedInt,
     /// `AIPlayer::onUnitProduced` calls (factory, unit); the AI player is unported.
     pub units_produced: Vec<(ObjectId, ObjectId)>,
+    /// `(obj_id, old_team, new_team)` from same-player team transfers in `SimContext`.
+    pub pending_team_member_moves: Vec<(ObjectId, TeamId, TeamId)>,
+    /// `(player, unit_id)` supply gatherers produced synchronously during step 10.
+    pub pending_supply_truck_dock: Vec<(Int, ObjectId)>,
+    /// `(player, structure_id)` structures completed synchronously during step 10.
+    pub pending_structures_produced: Vec<(Int, ObjectId)>,
+    /// `(script_name, calling_team)` deferred script actions from `create_inactive_team`
+    /// or `build_specific_ai_team` when invoked from inside `ScriptEngine`.
+    pub pending_team_actions: Vec<(String, Option<TeamId>)>,
 }
 
 impl Default for SimWorld {
@@ -2702,6 +2711,10 @@ impl SimWorld {
             completed_upgrades: Vec::new(),
             object_count_changed_frame: 0,
             units_produced: Vec::new(),
+            pending_team_member_moves: Vec::new(),
+            pending_supply_truck_dock: Vec::new(),
+            pending_structures_produced: Vec::new(),
+            pending_team_actions: Vec::new(),
         }
     }
 
@@ -2887,6 +2900,47 @@ impl SimContext {
     /// object without a resident AI module.
     pub(crate) fn deliver_ai_command(&mut self, owner: ObjectSlot, parms: AiCommandParms) -> bool {
         self.call_ai(owner, &AiCall::Command(parms))
+    }
+
+    /// `AIUpdateInterface::joinTeam` from the AI player ready-team transition.
+    pub fn ai_join_team(&mut self, owner: ObjectSlot) {
+        let _ = self.call_ai(owner, &AiCall::JoinTeam);
+    }
+
+    /// `AIUpdateInterface::aiDock` from `AIPlayer::onUnitProduced` / `queueSupplyTruck`.
+    pub fn ai_dock(
+        &mut self,
+        owner: ObjectSlot,
+        target_id: ObjectId,
+        cmd_source: CommandSourceType,
+    ) {
+        let mut parms = AiCommandParms::new(AiCommandType::Dock, cmd_source);
+        parms.obj = Some(target_id);
+        let _ = self.deliver_ai_command(owner, parms);
+    }
+
+    /// Transfers `owner` between two teams belonging to the SAME controlling player,
+    /// without firing `onCapture`, `idle_on_capture`, power adjust, or capture score.
+    pub fn set_object_team_same_player(&mut self, owner: ObjectSlot, new_team: TeamId) {
+        let Some((old_team, obj_id)) = self.world.objects.get_mut(owner).and_then(|obj| {
+            if obj.team_id == new_team {
+                return None;
+            }
+            let old = obj.team_id;
+            obj.team_id = new_team;
+            Some((old, obj.id))
+        }) else {
+            return;
+        };
+        if old_team != TeamId::INVALID {
+            self.world.team_member_remove(old_team, owner);
+        }
+        if new_team != TeamId::INVALID {
+            self.world.team_member_prepend(new_team, owner);
+        }
+        self.world
+            .pending_team_member_moves
+            .push((obj_id, old_team, new_team));
     }
 
     /// Delivers `call` to the owner's AI if that is a resident module with a
@@ -7720,7 +7774,7 @@ impl SimApi for SimContext {
     }
 
     fn production_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
-        self.unit_created(factory, unit);
+        self.unit_created(Some(factory), unit);
     }
 
     fn record_unit_production(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
@@ -10381,7 +10435,7 @@ impl SimApi for SimContext {
     }
 
     fn on_unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
-        self.unit_created(factory, unit);
+        self.unit_created(Some(factory), unit);
     }
 
     fn exit_object_by_budding(
@@ -11533,6 +11587,15 @@ impl SimApi for SimContext {
             self.record_structure_built(structure);
         }
         self.friend_adjust_power_for_player(structure, TRUE);
+        if let Some((team, id)) = self.world.objects.get(structure).map(|o| (o.team_id, o.id)) {
+            if let Some(player) = self.controlling_player(team) {
+                if let Some(ai) = self.world.ai_players.get_mut(&player) {
+                    ai.team_delay = 0;
+                    ai.build_delay = 0;
+                    self.world.pending_structures_produced.push((player, id));
+                }
+            }
+        }
     }
 
     fn object_template_id(&self, owner: ObjectSlot) -> Option<ThingTemplateId> {

@@ -1528,6 +1528,7 @@ fn place_network_buildings(
     loader: &mut Loader<'_>,
     players: &mut PlayerList,
     teams: &mut TeamFactory,
+    stores: &StartupStores,
     pathfind_extent: &Region3D,
     waypoints: &[(String, Coord3D)],
     team: TeamId,
@@ -1566,6 +1567,10 @@ fn place_network_buildings(
             named: &mut *loader.named,
             unported: &mut loader.report.unported,
             pathfind_extent: *pathfind_extent,
+            teams: Some(teams),
+            scripts: None,
+            stores: Some(stores),
+            waypoints,
         },
         yard,
         owner,
@@ -1595,7 +1600,7 @@ fn place_network_buildings(
             continue;
         };
         if let Some(unit) = place_object(loader, teams, name, &unit_pos, team) {
-            loader.sim.on_unit_created(yard, unit);
+            loader.sim.unit_created(None, unit);
         } else {
             loader.report.skip_object("no starting unit");
         }
@@ -1900,6 +1905,7 @@ pub fn start_new_game_observed(
                 },
                 &mut players,
                 &mut teams,
+                &stores,
                 &pathfind_extent,
                 &waypoints,
                 team,
@@ -1921,6 +1927,10 @@ pub fn start_new_game_observed(
         named: &mut named,
         unported: &mut report.unported,
         pathfind_extent,
+        teams: Some(&mut teams),
+        scripts: Some(&mut script_run),
+        stores: Some(&stores),
+        waypoints: &waypoints,
     });
     sync_teams(&mut sim, &players, &teams);
     sync_members(&sim, &players, &mut teams);

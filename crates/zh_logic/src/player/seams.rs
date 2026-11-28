@@ -105,6 +105,8 @@ pub trait PlayerWorld {
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)>;
 
     // Teams, scripts and objects.
+    /// Synchronizes a newly created team instance with the host world.
+    fn notify_team_created(&mut self, _players: &PlayerList, _teams: &TeamFactory, _team: TeamId) {}
     /// `ScriptEngine::notifyOfTeamDestruction`.
     fn notify_team_destroyed(&mut self, team: TeamId);
     /// `Object::setTeam(nullptr)` on a member of a team being deleted.

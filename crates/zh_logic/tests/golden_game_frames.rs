@@ -259,6 +259,10 @@ impl FrameSeams for Frame<'_, '_, '_> {
             named: self.named_objects,
             unported: self.unported,
             pathfind_extent,
+            teams: Some(self.teams),
+            scripts: Some(self.scripts),
+            stores: Some(self.stores),
+            waypoints: self.waypoints,
         };
         ai_player::update(&mut cx, player);
     }

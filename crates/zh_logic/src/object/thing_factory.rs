@@ -68,6 +68,13 @@ impl ThingFactory {
         self.entries.last().map(OverridableEntry::get_base)
     }
 
+    /// Iterates base templates in C++ `firstTemplate() -> friend_getNextTemplate()`
+    /// order (reverse creation order, newest first).
+    #[inline]
+    pub fn templates_in_first_order(&self) -> impl Iterator<Item = &ThingTemplate> + '_ {
+        self.entries.iter().rev().map(OverridableEntry::get_base)
+    }
+
     #[inline]
     pub fn find_template_id(&self, name: &str) -> Option<ThingTemplateId> {
         self.by_name

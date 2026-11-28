@@ -458,6 +458,10 @@ fn build_whole_base(game: &mut GameStart) {
             unported: &mut unported,
             // Only the skirmish setup reads the extent.
             pathfind_extent: Region3D::default(),
+            teams: Some(&mut game.teams),
+            scripts: Some(&mut game.scripts),
+            stores: Some(&game.stores),
+            waypoints: &game.waypoints,
         },
         player,
     );

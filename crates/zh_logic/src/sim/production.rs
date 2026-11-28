@@ -174,6 +174,20 @@ impl SimContext {
         .flatten()
     }
 
+    /// Queues a unit for an AI player (`ProductionUpdateInterface::queueCreateUnit`
+    /// with `requestUniqueUnitID`).
+    pub(crate) fn ai_queue_create_unit(
+        &mut self,
+        factory: ObjectSlot,
+        tmpl: ThingTemplateId,
+    ) -> bool {
+        self.with_production(factory, |production, sim, ctx| {
+            let id = production.request_unique_unit_id();
+            production.queue_create_unit(sim, ctx, tmpl, id) != FALSE
+        })
+        .unwrap_or(false)
+    }
+
     fn can_build_more_of_type(
         &self,
         team: TeamId,
@@ -738,12 +752,19 @@ impl SimContext {
         }
     }
 
-    /// `Player::onUnitCreated`.
-    pub(super) fn unit_created(&mut self, factory: ObjectSlot, unit: ObjectSlot) {
+    /// `Player::onUnitCreated`. `factory` is `None` for starting network units
+    /// (`GameLogic::placeNetworkBuildingsForPlayer`).
+    pub(crate) fn unit_created(&mut self, factory: Option<ObjectSlot>, unit: ObjectSlot) {
         self.world.object_count_changed_frame = self.world.frame;
-        let Some((team, factory_id)) = self.world.objects.get(factory).map(|o| (o.team_id, o.id))
-        else {
-            return;
+        let (team, factory_id) = match factory {
+            Some(f) => match self.world.objects.get(f) {
+                Some(o) => (o.team_id, o.id),
+                None => return,
+            },
+            None => match self.world.objects.get(unit) {
+                Some(o) => (o.team_id, zh_common::types::ObjectId::INVALID),
+                None => return,
+            },
         };
         let Some((unit_id, under_construction)) = self.world.objects.get(unit).map(|o| {
             (
@@ -766,8 +787,12 @@ impl SimContext {
             },
             scoring,
         );
-        // `AIPlayer::onUnitProduced` is unported.
         self.world.units_produced.push((factory_id, unit_id));
+        if let Some(f) = factory {
+            if self.world.ai_players.contains_key(&player) {
+                crate::ai::ai_player::on_unit_produced_in_sim(self, player, f, unit);
+            }
+        }
     }
 
     /// `AcademyStats::recordProduction`.

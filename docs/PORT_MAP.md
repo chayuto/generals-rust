@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`292` implemented, `35` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `126` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `121` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `127` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `122` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -383,6 +383,7 @@
 | `zh_ffi` | `crates/zh_ffi/src/test_engine.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/ai_states/attack.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/ai_states/movement.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/ai/ai_team_queue.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/mood.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/gamelogic/client_name_keys.rs` | `implemented` |
@@ -433,6 +434,7 @@
 |---|---:|---|
 | `docs/golden_vectors/AST_assets.json` | - | no |
 | `docs/golden_vectors/AiNewMap.json` | - | no |
+| `docs/golden_vectors/AiPlayerTeams.json` | - | no |
 | `docs/golden_vectors/BoneFXUpdate.json` | - | no |
 | `docs/golden_vectors/FIXES_ObjectWeapon.json` | - | no |
 | `docs/golden_vectors/GameDataLoad.json` | - | no |
@@ -581,6 +583,7 @@
 | `zh_common` | `crates/zh_common/tests/golden_wp7_2b_compression.rs` | `active` |
 | `zh_common` | `crates/zh_common/tests/golden_xfer.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_ai_new_map.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_ai_player_teams.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_bone_fx_update.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_bridge_behavior.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_fixes_object_weapon.rs` | `active` |

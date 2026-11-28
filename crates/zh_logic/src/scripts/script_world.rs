@@ -30,6 +30,9 @@ use super::script_engine::{
 use super::scripts::{Condition, Parameter, ScriptAction, ScriptList};
 use crate::ai::ai_player::{build_by_supplies, AiPlayer, SupplyOrder};
 use crate::ai::ai_skirmish_player::{build_specific_ai_building, get_ai_enemy, EnemyView};
+use crate::ai::ai_team_queue::{
+    ai_pre_team_destroy, build_specific_ai_team_with_env, recruit_specific_ai_team_with_env,
+};
 use crate::arena::{with_module_dispatch, ModuleSlot};
 use crate::modules::update::ai_update::AiUpdate;
 use crate::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpdate;
@@ -41,7 +44,10 @@ use crate::player::player_list::PlayerList;
 use crate::player::seams::{
     AiKind, PlayerEnv, PlayerIndex, PlayerPart, PlayerWorld, SkirmishScripts,
 };
-use crate::player::team::TeamFactory;
+use crate::player::team::{
+    flush_pending_team_member_moves, remove_team_from_sim_world, sync_team_to_sim_world,
+    TeamFactory,
+};
 use crate::rules::kind_of::KindOfType;
 use crate::rules::science::{ScienceType, SCIENCE_INVALID};
 use crate::rules::upgrade::UpgradeMaskType;
@@ -97,6 +103,7 @@ impl GameScripts {
 
     /// `TheScriptEngine->UPDATE()`.
     pub fn update(&mut self, sim: &mut SimContext, game: ScriptGame<'_>) {
+        flush_pending_team_member_moves(sim, game.teams);
         self.notify_object_changes(sim, game.named_objects);
         let Self {
             engine,
@@ -108,6 +115,7 @@ impl GameScripts {
         let mut world = LiveWorld::new(sim, game, unported, ui, exit_requested);
         engine.update(&mut world);
         let destroyed = std::mem::take(&mut world.destroyed_teams);
+        drop(world);
         for team in destroyed {
             engine.notify_of_team_destruction(team.0 as ScriptTeamId);
         }
@@ -640,14 +648,7 @@ impl ScriptWorld for LiveWorld<'_> {
         }
         self.with_players(|players, teams, env| players.update_team_states(teams, env));
         for &team in &self.destroyed_teams {
-            self.sim.world.team_players.remove(&team);
-            self.sim.world.team_members.remove(&team);
-            for lists in self.sim.world.player_team_prototypes.values_mut() {
-                for list in lists.iter_mut() {
-                    list.retain(|&t| t != team);
-                }
-                lists.retain(|list| !list.is_empty());
-            }
+            remove_team_from_sim_world(&mut self.sim.world, team);
         }
     }
 
@@ -980,6 +981,70 @@ impl ScriptWorld for LiveWorld<'_> {
         build_by_supplies(&mut order, minimum_cash, template);
     }
 
+    fn ai_build_team(&mut self, team_name: &str) {
+        flush_pending_team_member_moves(self.sim, self.game.teams);
+        let Some(proto_id) = self
+            .game
+            .teams
+            .find_team_prototype(team_name, &mut self.sim.rules.name_keys)
+        else {
+            return;
+        };
+        let Some(player) = self.game.teams.prototype(proto_id).map(|p| p.owner) else {
+            return;
+        };
+        if !self.ai_players.get_mut().contains_key(&player) {
+            return;
+        }
+        build_specific_ai_team_with_env(
+            self.sim,
+            self.ai_players.get_mut(),
+            self.game.players,
+            self.game.teams,
+            self.game.stores,
+            self.game.waypoints,
+            &mut self.destroyed_teams,
+            player,
+            proto_id,
+            true,
+        );
+    }
+
+    fn ai_recruit_team(&mut self, team_name: &str, recruit_radius: Real) {
+        flush_pending_team_member_moves(self.sim, self.game.teams);
+        let Some(proto_id) = self
+            .game
+            .teams
+            .find_team_prototype(team_name, &mut self.sim.rules.name_keys)
+        else {
+            return;
+        };
+        let Some(player) = self.game.teams.prototype(proto_id).map(|p| p.owner) else {
+            return;
+        };
+        if !self.ai_players.get_mut().contains_key(&player) {
+            return;
+        }
+        recruit_specific_ai_team_with_env(
+            self.sim,
+            self.ai_players.get_mut(),
+            self.game.players,
+            self.game.teams,
+            self.game.stores,
+            self.game.waypoints,
+            &mut self.destroyed_teams,
+            player,
+            proto_id,
+            recruit_radius,
+        );
+    }
+
+    fn take_pending_team_actions(&mut self) -> Vec<(String, Option<ScriptTeamId>)> {
+        std::mem::take(&mut self.sim.world.pending_team_actions)
+            .into_iter()
+            .map(|(name, team)| (name, team.map(|t| t.0 as ScriptTeamId)))
+            .collect()
+    }
 }
 
 /// The middle of `getPlayerStructureBounds`, all zero without structures.
@@ -1042,12 +1107,12 @@ impl EnemyView for LiveWorld<'_> {
 
 /// What `updateTeamStates` and `addScience` need during a frame. Everything of
 /// the game start is not reached from them and is counted if it is.
-struct FramePlayers<'a> {
-    world: &'a mut SimWorld,
-    ai_players: &'a BTreeMap<Int, AiPlayer>,
-    waypoints: &'a [(String, Coord3D)],
-    unported: &'a mut BTreeMap<&'static str, u64>,
-    destroyed_teams: &'a mut Vec<TeamId>,
+pub(crate) struct FramePlayers<'a> {
+    pub(crate) world: &'a mut SimWorld,
+    pub(crate) ai_players: &'a mut BTreeMap<Int, AiPlayer>,
+    pub(crate) waypoints: &'a [(String, Coord3D)],
+    pub(crate) unported: &'a mut BTreeMap<&'static str, u64>,
+    pub(crate) destroyed_teams: &'a mut Vec<TeamId>,
 }
 
 impl FramePlayers<'_> {
@@ -1109,10 +1174,8 @@ impl PlayerWorld for FramePlayers<'_> {
     fn ai_new_map(&mut self, _player: PlayerIndex) {
         self.missing("AIPlayer::newMap");
     }
-    fn ai_pre_team_destroy(&mut self, player: PlayerIndex, _team: TeamId) {
-        if self.ai_players.contains_key(&player) {
-            self.missing("AIPlayer::aiPreTeamDestroy");
-        }
+    fn ai_pre_team_destroy(&mut self, player: PlayerIndex, team: TeamId) {
+        ai_pre_team_destroy(self.ai_players, player, team);
     }
     fn qualify_skirmish_scripts(&mut self, _sides: &mut SidesList, _copy: &SkirmishScripts<'_>) {
         self.missing("Player::initFromDict");
@@ -1138,6 +1201,9 @@ impl PlayerWorld for FramePlayers<'_> {
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)> {
         Vec::new()
     }
+    fn notify_team_created(&mut self, players: &PlayerList, teams: &TeamFactory, team: TeamId) {
+        sync_team_to_sim_world(self.world, players, teams, team);
+    }
     fn notify_team_destroyed(&mut self, team: TeamId) {
         self.destroyed_teams.push(team);
     }
@@ -1151,9 +1217,13 @@ impl PlayerWorld for FramePlayers<'_> {
         &mut self,
         _players: &mut PlayerList,
         _teams: &mut TeamFactory,
-        _condition: &str,
+        condition: &str,
     ) {
-        self.missing("team create actions");
+        if !condition.is_empty() {
+            self.world
+                .pending_team_actions
+                .push((condition.to_owned(), None));
+        }
     }
     fn duplicate_script(&mut self, _name: &str) -> Option<UnsignedInt> {
         self.missing("team generic script");

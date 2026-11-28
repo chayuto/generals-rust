@@ -161,6 +161,11 @@ fn acquire_enemy(
 }
 
 impl AiSkirmishPlayer {
+    /// `AISkirmishPlayer::crc` (`AISkirmishPlayer.cpp:1183-1186`).
+    pub fn crc(&self, _xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        Ok(())
+    }
+
     pub(super) fn xfer_members(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
         xfer.xfer_int(&mut self.cur_front_base_defense)?;
         xfer.xfer_int(&mut self.cur_flank_base_defense)?;

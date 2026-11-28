@@ -157,6 +157,14 @@ pub trait ScriptWorld {
     fn ai_build_building(&mut self, player: ScriptPlayer, template: &str);
     /// `Player::buildBySupplies`.
     fn ai_build_by_supplies(&mut self, player: ScriptPlayer, minimum_cash: Int, template: &str);
+    /// `ScriptActions::doBuildTeam`.
+    fn ai_build_team(&mut self, team: &str);
+    /// `ScriptActions::doRecruitTeam`.
+    fn ai_recruit_team(&mut self, team: &str, recruit_radius: Real);
+    /// Pending `(script_name, calling_team)` actions queued during a team script action.
+    fn take_pending_team_actions(&mut self) -> Vec<(String, Option<ScriptTeamId>)> {
+        Vec::new()
+    }
 
     // Teams.
     fn team_prototype(&self, name: &str) -> Option<TeamPrototypeInfo>;
@@ -893,6 +901,47 @@ impl ScriptEngine {
                     script.or_conditions[o].conditions[a] = condition;
                 }
                 if !value {
+                    term = false;
+                    break;
+                }
+            }
+            if term {
+                result = true;
+                break;
+            }
+        }
+
+        self.calling_team = saved_team;
+        self.current_player = saved_player;
+        result
+    }
+
+    /// Evaluates conditions of a standalone duplicated `Script` (used by
+    /// `TeamPrototype::evaluateProductionCondition`).
+    pub fn evaluate_script_conditions(
+        &mut self,
+        world: &mut dyn ScriptWorld,
+        script: &mut Script,
+        this_team: Option<ScriptTeamId>,
+        player: Option<ScriptPlayer>,
+    ) -> bool {
+        let saved_team = self.calling_team;
+        let saved_player = self.current_player;
+        self.calling_team = this_team;
+        let player = match this_team {
+            Some(t) => world.team_controlling_player(t),
+            None => player,
+        };
+        self.current_player = player.or(self.current_player);
+
+        let mut result = false;
+        for or in &mut script.or_conditions {
+            if or.conditions.is_empty() {
+                continue;
+            }
+            let mut term = true;
+            for condition in &mut or.conditions {
+                if !self.evaluate_condition(world, condition) {
                     term = false;
                     break;
                 }

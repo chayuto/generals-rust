@@ -25,9 +25,16 @@ use zh_common::types::{
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
 use crate::ai::ai_skirmish_player::{self, AiSkirmishPlayer};
-use crate::arena::{ObjectSlot, ThingTemplateId};
+use crate::ai::ai_state_machine::state_id;
+pub use crate::ai::ai_team_queue::{on_unit_produced_in_sim, TeamInQueue, WorkOrder};
+use crate::ai::ai_team_queue;
+use crate::arena::{FacetMask, ObjectSlot, ThingTemplateId};
+use crate::gamelogic::game_engine::StartupStores;
 use crate::modules::update::ai_update::{AiUpdate, DerivedAi};
 use crate::modules::update::supply_warehouse_dock_update::SupplyWarehouseDockUpdate;
+use crate::object::thing_factory::ThingFactory;
+use crate::player::team::TeamFactory;
+use crate::scripts::ScriptGame;
 use crate::sim::PRIVATE_STATUS_OFF_MAP;
 use crate::player::player::Player;
 use crate::modules::update::dozer_ai_update::{is_task_pending, DOZER_TASK_BUILD};
@@ -77,6 +84,11 @@ pub struct AiPlayer {
     pub dozer_queued_for_repair: Bool,
     pub dozer_is_repairing: Bool,
     pub bridge_timer: Int,
+    pub team_build_queue: Vec<TeamInQueue>,
+    pub team_ready_queue: Vec<TeamInQueue>,
+    pub repair_dozer_origin: Coord3D,
+    pub supply_source_attack_check_frame: UnsignedInt,
+    pub attacked_supply_center: ObjectId,
     /// The members `AISkirmishPlayer` adds; `None` for a plain `AIPlayer`.
     pub skirmish: Option<AiSkirmishPlayer>,
 }
@@ -113,19 +125,57 @@ impl AiPlayer {
             dozer_queued_for_repair: FALSE,
             dozer_is_repairing: FALSE,
             bridge_timer: 0,
+            team_build_queue: Vec::new(),
+            team_ready_queue: Vec::new(),
+            repair_dozer_origin: Coord3D::default(),
+            supply_source_attack_check_frame: 0,
+            attacked_supply_center: ObjectId::INVALID,
             skirmish: (kind == AiKind::Skirmish).then(AiSkirmishPlayer::default),
         }
     }
 
-    /// `AIPlayer::xfer` or `AISkirmishPlayer::xfer`, with empty team queues.
+    /// `AIPlayer::crc` / `AISkirmishPlayer::crc` (`AIPlayer.cpp:3333-3336`).
+    pub fn crc(&self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        if let Some(skirmish) = &self.skirmish {
+            skirmish.crc(xfer)?;
+        }
+        Ok(())
+    }
+
+    /// `AIPlayer::clearTeamsInQueue` (`AIPlayer.cpp:444-448`).
+    pub fn clear_teams_in_queue(&mut self, teams: &mut TeamFactory) {
+        for item in self
+            .team_build_queue
+            .drain(..)
+            .chain(self.team_ready_queue.drain(..))
+        {
+            if item.team_id != zh_common::types::TeamId::INVALID {
+                if let Some(team) = teams.team_mut(item.team_id) {
+                    team.set_active();
+                }
+            }
+        }
+    }
+
+    /// `AIPlayer::xfer` or `AISkirmishPlayer::xfer`, without factory/team resolution.
     pub fn xfer(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+        self.xfer_with(xfer, None, None)
+    }
+
+    /// `AIPlayer::xfer` or `AISkirmishPlayer::xfer`, resolving template and team ids.
+    pub fn xfer_with(
+        &mut self,
+        xfer: &mut dyn Xfer,
+        thing_factory: Option<&ThingFactory>,
+        teams: Option<&TeamFactory>,
+    ) -> Result<(), XferError> {
         match self.skirmish.take() {
-            None => self.xfer_base(xfer),
+            None => self.xfer_base(xfer, thing_factory, teams),
             Some(mut skirmish) => {
                 let mut version: XferVersion = 1;
                 let result = xfer
                     .xfer_version(&mut version, 1)
-                    .and_then(|()| self.xfer_base(xfer))
+                    .and_then(|()| self.xfer_base(xfer, thing_factory, teams))
                     .and_then(|()| skirmish.xfer_members(xfer));
                 self.skirmish = Some(skirmish);
                 result
@@ -133,15 +183,46 @@ impl AiPlayer {
         }
     }
 
-    fn xfer_base(&mut self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
+    fn xfer_base(
+        &mut self,
+        xfer: &mut dyn Xfer,
+        thing_factory: Option<&ThingFactory>,
+        teams: Option<&TeamFactory>,
+    ) -> Result<(), XferError> {
         let mut version: XferVersion = 1;
         xfer.xfer_version(&mut version, 1)?;
-        // The build queue and the ready queue.
-        for _ in 0..2 {
-            let mut count = 0;
-            xfer.xfer_unsigned_short(&mut count)?;
-            if count != 0 && xfer.mode() == XferMode::Load {
+        // Team build queue (head-to-tail order matching C++ prepend + reverse on load).
+        let mut build_count = self.team_build_queue.len() as zh_common::types::UnsignedShort;
+        xfer.xfer_unsigned_short(&mut build_count)?;
+        if xfer.mode() == XferMode::Save {
+            for team in &mut self.team_build_queue {
+                team.xfer(xfer, thing_factory, teams)?;
+            }
+        } else {
+            if !self.team_build_queue.is_empty() {
                 return Err(XferError::InvalidData);
+            }
+            for _ in 0..build_count {
+                let mut team = TeamInQueue::new();
+                team.xfer(xfer, thing_factory, teams)?;
+                self.team_build_queue.push(team);
+            }
+        }
+        // Team ready queue (head-to-tail order matching C++ prepend + reverse on load).
+        let mut ready_count = self.team_ready_queue.len() as zh_common::types::UnsignedShort;
+        xfer.xfer_unsigned_short(&mut ready_count)?;
+        if xfer.mode() == XferMode::Save {
+            for team in &mut self.team_ready_queue {
+                team.xfer(xfer, thing_factory, teams)?;
+            }
+        } else {
+            if !self.team_ready_queue.is_empty() {
+                return Err(XferError::InvalidData);
+            }
+            for _ in 0..ready_count {
+                let mut team = TeamInQueue::new();
+                team.xfer(xfer, thing_factory, teams)?;
+                self.team_ready_queue.push(team);
             }
         }
         let mut player = self.player;
@@ -174,7 +255,7 @@ impl AiPlayer {
     }
 }
 
-fn xfer_flag(xfer: &mut dyn Xfer, value: &mut Bool) -> Result<(), XferError> {
+pub(super) fn xfer_flag(xfer: &mut dyn Xfer, value: &mut Bool) -> Result<(), XferError> {
     let mut byte = i8::from(*value != FALSE);
     xfer.xfer_byte(&mut byte)?;
     *value = if byte != 0 { TRUE } else { FALSE };
@@ -390,7 +471,7 @@ fn build_structure_now(cx: &mut BuildContext<'_>, player: PlayerIndex, at: usize
 }
 
 /// `checkForSupplyCenter`.
-fn check_for_supply_center(
+pub(super) fn check_for_supply_center(
     cx: &mut BuildContext<'_>,
     player: PlayerIndex,
     at: usize,
@@ -447,25 +528,141 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
     let Some(id) = cx.sim.world.objects.id_of(building) else {
         return;
     };
-    let list = cx
+    let found_at = cx
         .players
         .player(player)
-        .map_or(&[][..], |p| p.build_list.as_slice());
-    if list.iter().any(|info| info.object_id == id) {
-        // Finishing a listed structure: its map properties and script.
-        cx.unported("AIPlayer::onStructureProduced of a listed structure");
+        .and_then(|p| p.build_list.iter().position(|info| info.object_id == id));
+    if let Some(at) = found_at {
+        let Some((building_name, script, health, unsellable)) = cx
+            .players
+            .player_mut(player)
+            .and_then(|p| p.build_list.get_mut(at))
+            .map(|info| {
+                info.under_construction = FALSE;
+                (
+                    info.building_name.clone(),
+                    info.script.clone(),
+                    info.health,
+                    info.unsellable,
+                )
+            })
+        else {
+            return;
+        };
+        if !building_name.is_empty() {
+            cx.named.push((building_name.clone(), id));
+            if let Some(scripts) = cx.scripts.as_deref_mut() {
+                scripts.engine.add_object_to_cache(&building_name, id);
+            }
+        }
+        #[cfg(feature = "retail-crc")]
+        cx.sim.set_initial_health(building, health);
+        #[cfg(not(feature = "retail-crc"))]
+        let _ = health;
+        if let Some(obj) = cx.sim.world.objects.get_mut(building) {
+            if unsellable != FALSE {
+                obj.script_status |= OBJECT_STATUS_SCRIPT_UNSELLABLE;
+            } else {
+                obj.script_status &= !OBJECT_STATUS_SCRIPT_UNSELLABLE;
+            }
+        }
+        cx.sim
+            .clear_status(building, ObjectStatusType::UnderConstruction);
+        cx.sim
+            .clear_status(building, ObjectStatusType::Reconstructing);
+        cx.sim.update_upgrade_modules(building);
+        if !script.is_empty() {
+            if let (Some(scripts), Some(teams)) =
+                (cx.scripts.as_deref_mut(), cx.teams.as_deref_mut())
+            {
+                let default_stores;
+                let stores = match cx.stores {
+                    Some(s) => s,
+                    None => {
+                        default_stores = StartupStores::default();
+                        &default_stores
+                    }
+                };
+                scripts.with_world(
+                    cx.sim,
+                    ScriptGame {
+                        players: cx.players,
+                        teams,
+                        stores,
+                        waypoints: cx.waypoints,
+                        named_objects: cx.named,
+                    },
+                    |engine, world| engine.run_object_script(world, &script, Some(id)),
+                );
+            }
+        }
+        check_for_supply_center(cx, player, at, building);
         return;
     }
-    // A listed structure may be a rebuild hole which made this one.
-    let holes = list.iter().any(|info| {
-        cx.sim
+
+    // Check rebuild holes in the build list (`AIPlayer.cpp:151-178`).
+    let len = cx.players.player(player).map_or(0, |p| p.build_list.len());
+    for at in 0..len {
+        let Some((tmpl_name, hole_id)) = cx
+            .players
+            .player(player)
+            .and_then(|p| p.build_list.get(at))
+            .map(|info| (info.template_name.clone(), info.object_id))
+        else {
+            continue;
+        };
+        if hole_id == ObjectId::INVALID {
+            continue;
+        }
+        let equiv = {
+            let tf = &cx.sim.rules.thing_factory;
+            let bldg_plan = tf.find_template_final(&tmpl_name);
+            let bldg_tmpl = cx
+                .sim
+                .world
+                .objects
+                .get(building)
+                .and_then(|o| o.thing.template_override().get_final(tf));
+            matches!((bldg_plan, bldg_tmpl), (Some(p), Some(b)) if p.is_equivalent_to(b) != FALSE)
+        };
+        if !equiv {
+            continue;
+        }
+        let Some(hole_slot) = cx.sim.world.objects.slot_by_id(hole_id) else {
+            continue;
+        };
+        if cx.sim.object_is_kind_of(hole_slot, KindOfType::RebuildHole) == FALSE {
+            continue;
+        }
+        let spawned_match = cx
+            .sim
             .world
             .objects
-            .slot_by_id(info.object_id)
-            .is_some_and(|s| cx.sim.object_is_kind_of(s, KindOfType::RebuildHole) != FALSE)
-    });
-    if holes {
-        cx.unported("AIPlayer::onStructureProduced with a rebuild hole");
+            .get(hole_slot)
+            .is_some_and(|hole_obj| {
+                hole_obj
+                    .behaviors
+                    .iter()
+                    .filter(|(_, facets)| facets.contains(FacetMask::REBUILD_HOLE))
+                    .any(|&(ms, _)| {
+                        cx.sim
+                            .world
+                            .modules
+                            .payload(ms)
+                            .and_then(|m| m.as_rebuild_hole())
+                            .is_some_and(|rh| rh.get_reconstructed_building_id() == id)
+                    })
+            });
+        if spawned_match {
+            if let Some(info) = cx
+                .players
+                .player_mut(player)
+                .and_then(|p| p.build_list.get_mut(at))
+            {
+                info.object_id = id;
+            }
+            return;
+        }
     }
 }
 
@@ -479,22 +676,21 @@ const PATHFIND_CELL_SIZE_F: Real = 10.0;
 
 /// `Player::update`'s `m_ai->update()`: `AIPlayer::update`, with the overrides of
 /// `AISkirmishPlayer`.
-///
-/// Not ported: the ready and build queues of teams (`checkReadyTeams`,
-/// `checkQueuedTeams`, `doTeamBuilding`).
 pub fn update(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     if !cx.sim.world.ai_players.contains_key(&player) {
         return;
     }
+    ai_team_queue::drain_pending_sim_events_for_player(cx, player);
     do_base_building(cx, player);
+    ai_team_queue::check_ready_teams(cx, player);
+    ai_team_queue::check_queued_teams(cx, player);
+    ai_team_queue::do_team_building(cx, player);
     do_upgrades_and_skills(cx, player);
     update_bridge_repair(cx, player);
 }
 
 /// `doUpgradesAndSkills`: once the player has points to spend, a skirmish AI picks
 /// one of its side's skill sets at random, and attempts to purchase each science from it.
-///
-/// Script notification is passed as `None` until [`BuildContext`] carries scripts.
 fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     // Nothing in the first two frames.
     if cx.sim.world.frame < 2 {
@@ -538,7 +734,11 @@ fn do_upgrades_and_skills(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     let skills: Vec<_> = cx.sim.rules.ai_data.side_info[side_idx].skill_sets[set].clone();
     for science in skills {
         crate::player::science_purchase::attempt_to_purchase_science(
-            cx.sim, cx.players, None, player, science,
+            cx.sim,
+            cx.players,
+            cx.scripts.as_deref_mut().map(|s| &mut s.engine),
+            player,
+            science,
         );
     }
 }
@@ -612,8 +812,10 @@ fn dozer_state(sim: &SimContext, slot: ObjectSlot) -> Option<DozerState> {
         .downcast_ref::<AiUpdate>()?;
     let (brain, forced) = match &ai.derived {
         DerivedAi::Dozer(d) => (&d.brain, false),
-        // The supply half of the worker is not ported: none is ferrying.
-        DerivedAi::Worker(w) => (&w.brain, w.force_pending != FALSE),
+        DerivedAi::Worker(w) => (
+            &w.brain,
+            ai.machine.current_state_id() == state_id::DOCK || w.force_pending != FALSE,
+        ),
         DerivedAi::Base => return None,
     };
     Some(DozerState {
@@ -682,9 +884,9 @@ pub(super) fn find_dozer(
     closest.map(|c| c.0).or(dozer)
 }
 
-/// `queueDozer`: not ported.
-pub(super) fn queue_dozer(cx: &mut BuildContext<'_>, _player: PlayerIndex) {
-    cx.unported("AIPlayer::queueDozer");
+/// `queueDozer`.
+pub(super) fn queue_dozer(cx: &mut BuildContext<'_>, player: PlayerIndex) {
+    ai_team_queue::queue_dozer(cx, player);
 }
 
 /// `isLocationSafe`: no enemy of any account stands within the supply center safe
