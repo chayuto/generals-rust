@@ -540,6 +540,9 @@ fn no_team_means_no_player_state() {
     assert_eq!(sim.withdraw_player_money(none, 50), 0);
     assert_eq!(sim.player_money(none), 0);
     assert_eq!(sim.money_of(0), 100);
+    // An index outside the list holds nothing.
+    assert_eq!(sim.money_of(99), 0);
+    assert_eq!(sim.withdraw_from_player(99, 5), 0);
     for index in 0..16 {
         let player = sim.world.players.player(index).expect("player");
         assert_eq!(player.upgrades_completed, Default::default());
