@@ -19,9 +19,8 @@ use zh_logic::combat::damage::{DamageInfo, PlayerMaskType, PLAYERMASK_ALL};
 use zh_logic::combat::damage_fx::DamageFXStore;
 use zh_logic::combat::locomotor::{Locomotor, LocomotorStore};
 use zh_logic::combat::locomotor_set::LocomotorSetType;
-use zh_logic::economy::energy::{Energy, EnergyObjectInfo};
+use zh_logic::economy::energy::EnergyObjectInfo;
 use zh_logic::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
-use zh_logic::economy::score_keeper::ScoreKeeper;
 use zh_logic::economy::MAX_PLAYER_COUNT;
 use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use zh_logic::modules::module_factory::ModuleParseContext;
@@ -347,9 +346,6 @@ impl SimView for EngineSim<'_> {
     }
     fn find_special_power_module( &self, owner: ObjectSlot, template_id: UnsignedInt, ) -> Option<ModuleSlot> {
         not_wired("find_special_power_module")
-    }
-    fn player_captured_object_count(&self, team_id: TeamId) -> Int {
-        not_wired("player_captured_object_count")
     }
     fn special_power_uses_delay(&self) -> Bool {
         not_wired("special_power_uses_delay")

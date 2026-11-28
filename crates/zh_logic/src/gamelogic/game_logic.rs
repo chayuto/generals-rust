@@ -981,8 +981,6 @@ pub fn sync_teams(sim: &mut SimContext, teams: &TeamFactory) {
                 sim.world
                     .player_is_human
                     .insert(team, Bool::from(player.player_type == PlayerType::Human));
-                sim.world.team_sides.insert(team, player.side.clone());
-                sim.world.team_colors.insert(team, player.color);
                 if player.ai == Some(AiKind::Skirmish) {
                     sim.world.skirmish_ai_teams.insert(team);
                 }
@@ -999,7 +997,7 @@ pub fn sync_teams(sim: &mut SimContext, teams: &TeamFactory) {
 }
 
 /// The player state the sim keeps itself, once after `PlayerList::newGame`.
-fn sync_players(sim: &mut SimContext, stores: &StartupStores) {
+fn sync_players(sim: &mut SimContext) {
     let players = &sim.world.players;
     sim.world.local_player_index = players.local_player();
     for index in 0..players.player_count() {
@@ -1009,19 +1007,6 @@ fn sync_players(sim: &mut SimContext, stores: &StartupStores) {
         for other in 0..players.player_count() {
             if let Some(r) = player.player_relations.get(other as u32) {
                 sim.world.player_relationships.insert((index, other), r);
-            }
-        }
-        let playable = player
-            .template_name_key
-            .and_then(|k| {
-                stores
-                    .player_templates
-                    .find_player_template(k, &sim.rules.name_keys)
-            })
-            .is_some_and(|t| t.is_playable_side() != FALSE);
-        if playable {
-            if let Some(team) = player.default_team {
-                sim.world.playable_side_teams.insert(team);
             }
         }
     }
@@ -1762,7 +1747,7 @@ pub fn start_new_game_observed(
             skirmish_scripts.remove(&copy.source);
         }
     }
-    sync_players(&mut sim, &stores);
+    sync_players(&mut sim);
     sync_teams(&mut sim, &teams);
     let mut script_run = GameScripts::default();
     script_run.new_map(

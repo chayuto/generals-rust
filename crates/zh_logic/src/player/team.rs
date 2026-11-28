@@ -1305,8 +1305,6 @@ pub fn sync_team_to_sim_world(
     world
         .player_is_human
         .insert(team, Bool::from(player.player_type == PlayerType::Human));
-    world.team_sides.insert(team, player.side.clone());
-    world.team_colors.insert(team, player.color);
     if player.ai == Some(AiKind::Skirmish) {
         world.skirmish_ai_teams.insert(team);
     }
@@ -1325,8 +1323,6 @@ pub fn remove_team_from_sim_world(world: &mut SimWorld, team: TeamId) {
     world.team_members.remove(&team);
     world.team_is_neutral.remove(&team);
     world.player_is_human.remove(&team);
-    world.team_sides.remove(&team);
-    world.team_colors.remove(&team);
     world.skirmish_ai_teams.remove(&team);
     world.team_common_targets.remove(&team);
     for lists in world.player_team_prototypes.values_mut() {

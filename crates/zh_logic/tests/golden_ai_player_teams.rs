@@ -304,8 +304,6 @@ impl PlayerWorld for TestPlayerWorld<'_> {
         self.world
             .player_is_human
             .insert(team, Bool::from(p.player_type == PlayerType::Human));
-        self.world.team_sides.insert(team, p.side.clone());
-        self.world.team_colors.insert(team, p.color);
         if p.ai == Some(AiKind::Skirmish) {
             self.world.skirmish_ai_teams.insert(team);
         }
@@ -475,8 +473,6 @@ fn sync_all(sim: &mut SimContext, teams: &TeamFactory) {
                 sim.world
                     .player_is_human
                     .insert(team, Bool::from(player.player_type == PlayerType::Human));
-                sim.world.team_sides.insert(team, player.side.clone());
-                sim.world.team_colors.insert(team, player.color);
                 if player.ai == Some(AiKind::Skirmish) {
                     sim.world.skirmish_ai_teams.insert(team);
                 }

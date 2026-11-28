@@ -312,9 +312,10 @@ fn new_world(frame: u32, seed: u32) -> SimWorld {
         world.team_players.insert(team, player as i32);
         world.team_is_neutral.insert(team, Bool::from(player == 0));
     }
-    for (team, side) in [(TEAMS[1], "America"), (TEAMS[2], "China")] {
-        world.playable_side_teams.insert(team);
-        world.team_sides.insert(team, side.to_string());
+    for (player, side) in [(1, "America"), (2, "China")] {
+        let player = world.players.player_mut(player).expect("player");
+        player.playable_side = true;
+        player.side = side.to_string();
     }
     world.neutral_team_id = TEAM_NEUTRAL;
     world.local_player_index = 1;
@@ -1107,9 +1108,9 @@ fn run_ocl(sim: &mut SimContext, v: &Vector) {
     let team = s.num() as usize;
     let pos = s.pos();
     let angle = s.real();
-    for team in TEAMS {
+    for player in 0..TEAMS.len() as i32 {
         let color = s.num() as i32;
-        sim.world.team_colors.insert(team, color);
+        sim.world.players.player_mut(player).expect("player").color = color;
     }
     let o = spawn(sim, &format!("M_Ocl{variant}"), TEAMS[team], pos, angle);
     let m = module_named(sim, o, "OCLUpdate");
@@ -1135,9 +1136,9 @@ fn run_ocl(sim: &mut SimContext, v: &Vector) {
                 sim.set_object_team(o, team);
             }
             3 => {
-                let team = TEAMS[f.num() as usize];
+                let player = f.num() as i32;
                 let color = f.num() as i32;
-                sim.world.team_colors.insert(team, color);
+                sim.world.players.player_mut(player).expect("player").color = color;
             }
             4 => {
                 if f.num() != 0 {

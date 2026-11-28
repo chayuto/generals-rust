@@ -1282,7 +1282,6 @@ pub trait SimView {
         owner: ObjectSlot,
         template_id: UnsignedInt,
     ) -> Option<ModuleSlot>;
-    fn player_captured_object_count(&self, team_id: TeamId) -> Int;
     fn special_power_uses_delay(&self) -> Bool;
     fn player_energy_production(&self, team_id: TeamId) -> Int;
     fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int);
@@ -2474,7 +2473,6 @@ pub struct SimWorld {
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
     /// `Player::m_ai` of every computer player, by player index.
     pub ai_players: BTreeMap<Int, crate::ai::ai_player::AiPlayer>,
-    pub player_captured_objects: BTreeMap<TeamId, Int>,
     pub special_power_uses_delay: Bool,
     /// `ScriptEngine::m_toppleDirections`, keyed by the named object's id (objects
     /// have no name yet).
@@ -2486,8 +2484,6 @@ pub struct SimWorld {
     /// The `static const UpgradeTemplate*` of `AutoDepositUpdate`: unset until the
     /// first lookup, then its result for good.
     pub auto_deposit_boost_upgrade: Option<Option<UpgradeMaskType>>,
-    /// Teams whose controlling player is a playable side (`Player::isPlayableSide`).
-    pub playable_side_teams: BTreeSet<TeamId>,
     pub car_bombed_objects: Vec<(ObjectId, ObjectId)>,
     pub hijacked_objects: Vec<(ObjectId, ObjectId)>,
     pub dam_break_events: Vec<ObjectId>,
@@ -2528,10 +2524,6 @@ pub struct SimWorld {
     /// Set only by differential suites whose C++ oracle replaces `fireWeaponTemplate`.
     pub weapon_templates_stubbed: bool,
     pub weapon_store_state: WeaponStoreState,
-    /// `Player::m_color` by team.
-    pub team_colors: BTreeMap<TeamId, Int>,
-    /// `PlayerTemplate::getSide` by team.
-    pub team_sides: BTreeMap<TeamId, String>,
     pub slaved_die_notifications: Vec<ObjectId>,
     pub ai_exit_orders: Vec<(ObjectId, ObjectId, CommandSourceType)>,
     pub ai_commands: Vec<(ObjectId, String)>,
@@ -2628,13 +2620,11 @@ impl SimWorld {
             player_is_human: BTreeMap::new(),
             team_is_neutral: BTreeMap::new(),
             ai_players: BTreeMap::new(),
-            player_captured_objects: BTreeMap::new(),
             special_power_uses_delay: TRUE,
             script_topple_directions: BTreeMap::new(),
             bone_fx_stops: Vec::new(),
             floating_money_texts: Vec::new(),
             auto_deposit_boost_upgrade: None,
-            playable_side_teams: BTreeSet::new(),
             car_bombed_objects: Vec::new(),
             hijacked_objects: Vec::new(),
             dam_break_events: Vec::new(),
@@ -2669,8 +2659,6 @@ impl SimWorld {
             projectile_detonations: Vec::new(),
             weapon_templates_stubbed: false,
             weapon_store_state: WeaponStoreState::default(),
-            team_colors: BTreeMap::new(),
-            team_sides: BTreeMap::new(),
             slaved_die_notifications: Vec::new(),
             ai_exit_orders: Vec::new(),
             ai_commands: Vec::new(),
@@ -3671,11 +3659,6 @@ impl SimContext {
                 {
                     self.ai_idle(slot, CommandSourceType::FromAi);
                 }
-                *self
-                    .world
-                    .player_captured_objects
-                    .entry(new_owner_team)
-                    .or_insert(0) += 1;
                 self.record_object_captured(slot, new_owner_team);
                 for ms in beh_slots {
                     if self.world.modules.is_alive(ms) {
@@ -5591,7 +5574,7 @@ impl SimView for SimContext {
     }
 
     fn player_is_playable_side(&self, team_id: TeamId) -> Bool {
-        Bool::from(self.world.playable_side_teams.contains(&team_id))
+        Bool::from(self.player_of_team(team_id).is_some_and(|p| p.playable_side))
     }
 
     fn object_max_health(&self, owner: ObjectSlot) -> Real {
@@ -5854,14 +5837,6 @@ impl SimView for SimContext {
             }
         }
         None
-    }
-
-    fn player_captured_object_count(&self, team_id: TeamId) -> Int {
-        self.world
-            .player_captured_objects
-            .get(&team_id)
-            .copied()
-            .unwrap_or(0)
     }
 
     fn special_power_uses_delay(&self) -> Bool {
@@ -6901,11 +6876,12 @@ impl SimView for SimContext {
     }
 
     fn player_color(&self, team_id: TeamId) -> Int {
-        self.world.team_colors.get(&team_id).copied().unwrap_or(0)
+        self.player_of_team(team_id).map_or(0, |p| p.color)
     }
 
     fn player_side(&self, team_id: TeamId) -> String {
-        self.world.team_sides.get(&team_id).cloned().unwrap_or_default()
+        self.player_of_team(team_id)
+            .map_or_else(String::new, |p| p.side.clone())
     }
 
     fn contain_is_garrisonable(&self, owner: ObjectSlot) -> Bool {
@@ -9556,7 +9532,6 @@ impl SimApi for SimContext {
             return;
         }
         self.idle_on_capture(owner, old_team, new_team);
-        *self.world.player_captured_objects.entry(new_team).or_insert(0) += 1;
         self.record_object_captured(owner, new_team);
         for ms in beh_slots {
             if self.world.modules.is_alive(ms) {
@@ -12128,10 +12103,6 @@ impl SimView for MockSimApi {
         template_id: UnsignedInt,
     ) -> Option<ModuleSlot> {
         self.ctx.find_special_power_module(owner, template_id)
-    }
-
-    fn player_captured_object_count(&self, team_id: TeamId) -> Int {
-        self.ctx.player_captured_object_count(team_id)
     }
 
     fn special_power_uses_delay(&self) -> Bool {

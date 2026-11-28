@@ -296,7 +296,8 @@ fn reset_world(sim: &mut SimContext, frame: u32, seed: u32) {
     }
     w.team_is_neutral.insert(NEUTRAL, TRUE);
     w.neutral_team_id = NEUTRAL;
-    w.playable_side_teams.insert(TEAM_A);
+    let owner = w.team_players.get(&TEAM_A).copied().unwrap_or(TEAM_A.0);
+    w.players.player_mut(owner).expect("player").playable_side = true;
     for i in 0..3 {
         for j in 0..3 {
             let rel = if i == j {

@@ -101,6 +101,8 @@ pub struct Player {
     pub can_build_units: bool,
     pub can_build_base: bool,
     pub observer: bool,
+    /// `isPlayableSide`: the template's answer, kept since `Player` holds only its key.
+    pub playable_side: bool,
     pub skill_points_modifier: Real,
     pub list_in_score_screen: bool,
     pub attacked_by: [bool; MAX_PLAYER_COUNT],
@@ -344,6 +346,7 @@ impl Player {
             can_build_units: true,
             can_build_base: true,
             observer: false,
+            playable_side: false,
             skill_points_modifier: 1.0,
             list_in_score_screen: true,
             attacked_by: [false; MAX_PLAYER_COUNT],
@@ -439,6 +442,7 @@ impl Player {
         }
         self.score_keeper.reset(self.index);
         self.template_name_key = template.map(PlayerTemplate::name_key);
+        self.playable_side = template.is_some_and(|t| t.is_playable_side() != FALSE);
 
         self.reset_rank(template, env);
         self.sciences_disabled.clear();
