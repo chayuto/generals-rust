@@ -1035,9 +1035,7 @@ impl Scene<'_> {
             money(TEAMS[1]),
             money(TEAMS[2]),
             self.sim
-                .world
-                .score_keepers
-                .get(&self.sim.player_index(TEAMS[1]))
+                .world.players.player(self.sim.player_index(TEAMS[1])).map(|p| &p.score_keeper)
                 .map_or(0, |k| k.total_money_earned),
             self.sim
                 .world
@@ -1046,9 +1044,7 @@ impl Scene<'_> {
                 .copied()
                 .unwrap_or(0),
             self.sim
-                .world
-                .player_academy
-                .get(&1)
+                .world.players.player(1).map(|p| &p.academy)
                 .map_or(0, |a| a.structures_captured),
         );
 

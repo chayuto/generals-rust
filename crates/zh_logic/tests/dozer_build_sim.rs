@@ -171,7 +171,7 @@ fn builds_to_completion(builder: &str) {
     );
     let id = sim.object(unit).expect("builder").id;
     assert_eq!(sim.object(building).expect("building").producer_id, id);
-    assert_eq!(sim.world.score_keepers[&1].total_buildings_built, 1);
+    assert_eq!(sim.world.players.player(1).expect("player").score_keeper.total_buildings_built, 1);
     let state = brain(&mut sim, ms);
     assert_eq!(state.current_task, DOZER_TASK_INVALID);
     assert_eq!(state.tasks[0].target.0, 0);

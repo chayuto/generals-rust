@@ -270,9 +270,7 @@ impl Game {
         for p in [1, 2] {
             let spent = self
                 .sim
-                .world
-                .player_academy
-                .get(&p)
+                .world.players.player(p).map(|p| &p.academy)
                 .map_or(0, |a| a.generals_points_spent);
             let player = self.sim.world.players.player(p).expect("player");
             let (points, held) = (player.science_purchase_points, player.sciences.clone());

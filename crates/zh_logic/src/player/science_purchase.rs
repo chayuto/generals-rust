@@ -54,11 +54,9 @@ pub fn attempt_to_purchase_science(
     if let Some(scripts) = scripts {
         scripts.notify_of_acquired_science(index, science);
     }
-    sim.world
-        .player_academy
-        .entry(index)
-        .or_default()
-        .record_generals_points_spent(cost);
+    if let Some(player) = sim.world.players.player_mut(index) {
+        player.academy.record_generals_points_spent(cost);
+    }
     true
 }
 

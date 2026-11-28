@@ -211,7 +211,7 @@ impl Trial<'_> {
             .get(&player)
             .cloned()
             .unwrap_or_default();
-        let score = w.score_keepers.get(&player);
+        let score = w.players.player(player).map(|p| &p.score_keeper);
         let (earned, spent) = score.map_or((0, 0), |s| (s.total_money_earned, s.total_money_spent));
         let production = energy.get_production(frame);
         let consumption = energy.get_consumption();

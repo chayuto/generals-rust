@@ -610,9 +610,7 @@ fn deposit_row(sim: &mut SimContext, m: ModuleSlot, ret: u32) -> String {
         .collect();
     let score: Vec<String> = (0..3)
         .map(|p| {
-            sim.world
-                .score_keepers
-                .get(&p)
+            sim.world.players.player(p).map(|p| &p.score_keeper)
                 .map_or(0, |k| k.total_money_earned)
                 .to_string()
         })

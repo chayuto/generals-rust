@@ -938,9 +938,7 @@ impl Plans {
 
 fn player_text(sim: &SimContext, player: usize) -> String {
     let chose = sim
-        .world
-        .player_academy
-        .get(&sim.player_index(TEAMS[player]))
+        .world.players.player(sim.player_index(TEAMS[player])).map(|p| &p.academy)
         .is_some_and(|a| a.chose_a_strategy_for_center != FALSE);
     let plans = sim
         .player_battle_plans(player as i32)

@@ -519,18 +519,21 @@ impl SimContext {
     }
 
     /// `getControllingPlayer()->getAcademyStats()` of a team.
-    pub(super) fn academy(&mut self, team: TeamId) -> &mut AcademyStats {
+    pub(super) fn academy(&mut self, team: TeamId) -> Option<&mut AcademyStats> {
         let player = self.player_index_for_team(team);
-        self.world.player_academy.entry(player).or_default()
+        self.world
+            .players
+            .player_mut(player)
+            .map(|p| &mut p.academy)
     }
 
     /// `getControllingPlayer()->getScoreKeeper()` of a team.
-    pub(super) fn score_keeper(&mut self, team: TeamId) -> &mut ScoreKeeper {
+    pub(super) fn score_keeper(&mut self, team: TeamId) -> Option<&mut ScoreKeeper> {
         let player = self.player_index_for_team(team);
         self.world
-            .score_keepers
-            .entry(player)
-            .or_insert_with(ScoreKeeper::new)
+            .players
+            .player_mut(player)
+            .map(|p| &mut p.score_keeper)
     }
 
     /// What the score keeper counts an object by.
@@ -560,7 +563,8 @@ impl SimContext {
         };
         let scoring = self.world.scoring_enabled;
         let controlling_player_idx = self.player_index_for_team(new_team);
-        self.score_keeper(new_team).add_object_captured(
+        if let Some(score_keeper) = self.score_keeper(new_team) {
+            score_keeper.add_object_captured(
             &ScoreObjectView {
                 template: &desc,
                 controlling_player_idx,
@@ -568,6 +572,7 @@ impl SimContext {
             },
             scoring,
         );
+        }
     }
 
     fn upgrade_mask_of(&self, upgrade: NameKeyType) -> Option<UpgradeMaskType> {
@@ -624,7 +629,9 @@ impl SimContext {
             return;
         };
         let cost = template.calc_cost_to_build(None);
-        self.score_keeper(team).add_money_spent(cost);
+        if let Some(score_keeper) = self.score_keeper(team) {
+            score_keeper.add_money_spent(cost);
+        }
         let player = self.player_index_for_team(team);
         let name = template.upgrade_name().to_owned();
         self.world
@@ -641,8 +648,9 @@ impl SimContext {
             }
             self.update_upgrade_modules(owner);
         }
-        self.academy(team)
-            .record_upgrade(template.academy_classification_type(), FALSE);
+        if let Some(academy) = self.academy(team) {
+            academy.record_upgrade(template.academy_classification_type(), FALSE);
+        }
     }
 
     /// `ThingFactory::newObject`: a random build variation, then `initObject`'s upgrades.
@@ -692,7 +700,8 @@ impl SimContext {
         };
         let scoring = self.world.scoring_enabled;
         let player = self.player_index_for_team(team);
-        self.score_keeper(team).add_object_built(
+        if let Some(score_keeper) = self.score_keeper(team) {
+            score_keeper.add_object_built(
             &ScoreObjectView {
                 template: &desc,
                 controlling_player_idx: player,
@@ -700,8 +709,11 @@ impl SimContext {
             },
             scoring,
         );
+        }
         let cost = self.unit_cost_for(team, ThingTemplateId(desc.id));
-        self.score_keeper(team).add_money_spent(cost);
+        if let Some(score_keeper) = self.score_keeper(team) {
+            score_keeper.add_money_spent(cost);
+        }
     }
 
     /// `Player::onStructureUndone`.
@@ -719,7 +731,8 @@ impl SimContext {
         };
         let scoring = self.world.scoring_enabled;
         let player = self.player_index_for_team(team);
-        self.score_keeper(team).remove_object_built(
+        if let Some(score_keeper) = self.score_keeper(team) {
+            score_keeper.remove_object_built(
             &ScoreObjectView {
                 template: &desc,
                 controlling_player_idx: player,
@@ -727,6 +740,7 @@ impl SimContext {
             },
             scoring,
         );
+        }
     }
 
     /// `Object::friend_adjustPowerForPlayer`, whatever the construction status.
@@ -778,7 +792,8 @@ impl SimContext {
         };
         let scoring = self.world.scoring_enabled;
         let player = self.player_index_for_team(team);
-        self.score_keeper(team).add_object_built(
+        if let Some(score_keeper) = self.score_keeper(team) {
+            score_keeper.add_object_built(
             &ScoreObjectView {
                 template: &desc,
                 controlling_player_idx: player,
@@ -786,6 +801,7 @@ impl SimContext {
             },
             scoring,
         );
+        }
         self.world.units_produced.push((factory_id, unit_id));
         if let Some(f) = factory {
             if self.world.ai_players.contains_key(&player) {
@@ -841,6 +857,8 @@ impl SimContext {
             kind_mask,
             is_tunnel_contain,
         };
-        self.academy(team).record_production(&info, frame);
+        if let Some(academy) = self.academy(team) {
+            academy.record_production(&info, frame);
+        }
     }
 }

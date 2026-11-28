@@ -264,7 +264,7 @@ fn rows(sim: &SimContext, players: &PlayerList) -> Vec<String> {
             let bytes = saved(|x| info.xfer(x).expect("save"));
             out.push(format!("build\t{i}\t{at}\t{bytes}"));
         }
-        let score = sim.world.score_keepers.get(&i);
+        let score = sim.world.players.player(i).map(|p| &p.score_keeper);
         let mut built: Vec<String> = score.map_or_else(Vec::new, |s| {
             s.objects_built
                 .values()

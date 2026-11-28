@@ -17,6 +17,7 @@ use zh_common::xfer::{Snapshot, Xfer, XferError, XferMode};
 use crate::economy::energy::Energy;
 use crate::economy::handicap::Handicap;
 use crate::economy::money::{Money, MoneyCallbacks};
+use crate::economy::academy_stats::{AcademyPlayerContext, AcademyStats};
 use crate::economy::score_keeper::ScoreKeeper;
 use crate::gamelogic::global_data::PlayerType;
 use crate::modules::update::battle_plan_update::BattlePlanBonuses;
@@ -106,6 +107,8 @@ pub struct Player {
     pub attacked_frame: UnsignedInt,
     pub cash_bounty_percent: Real,
     pub score_keeper: ScoreKeeper,
+    /// `m_academyStats`. Neither saved nor part of the CRC with the player.
+    pub academy: AcademyStats,
     pub production_changes: Vec<KindOfProductionChange>,
     pub special_power_timers: Vec<SpecialPowerReadyTimer>,
     /// Hotkey squads and the current selection.
@@ -118,13 +121,22 @@ pub struct Player {
     pub logical_retaliation_mode: bool,
 }
 
-/// Money income reaches the academy statistics of the player that owns it.
-struct Income<'a>(&'a mut dyn PlayerWorld);
+/// Money income reaches the academy statistics of the player the money names.
+/// During `Player::init` and `initFromDict` only the player's own are at hand;
+/// every player given money there has a template, so its money names it.
+struct Income<'a> {
+    own_index: Int,
+    academy: &'a mut AcademyStats,
+    world: &'a mut dyn PlayerWorld,
+}
 
 impl MoneyCallbacks for Income<'_> {
     fn record_income(&mut self, player_index: Int) {
+        if player_index == self.own_index {
+            self.academy.record_income(self.world.frame());
+        }
         if (0..MAX_PLAYER_COUNT as Int).contains(&player_index) {
-            self.0.academy_record_income(player_index);
+            self.world.academy_record_income(player_index);
         }
     }
 }
@@ -285,6 +297,8 @@ impl Player {
         // `Money()` is player 0's until `init` copies a template's balance, so
         // the income of a player without a template counts for player 0.
         let money = Money::new();
+        let mut score_keeper = ScoreKeeper::new();
+        score_keeper.reset(index);
         Self {
             index,
             template_name_key: None,
@@ -334,7 +348,8 @@ impl Player {
             attacked_by: [false; MAX_PLAYER_COUNT],
             attacked_frame: 0,
             cash_bounty_percent: 0.0,
-            score_keeper: ScoreKeeper::new(),
+            score_keeper,
+            academy: AcademyStats::default(),
             production_changes: Vec::new(),
             special_power_timers: Vec::new(),
             squads: PlayerSquads::default(),
@@ -397,7 +412,11 @@ impl Player {
                 if self.money.count_money() == 0 {
                     let cash = env.world.starting_cash();
                     self.money
-                        .deposit(cash, FALSE, FALSE, &mut Income(&mut *env.world));
+                        .deposit(cash, FALSE, FALSE, &mut Income {
+                            own_index: self.index,
+                            academy: &mut self.academy,
+                            world: &mut *env.world,
+                        });
                 }
                 self.display_name.clear();
                 self.name.clear();
@@ -431,6 +450,20 @@ impl Player {
         self.sciences_hidden.clear();
         self.special_power_timers.clear();
         self.production_changes.clear();
+        // `AcademyStats::init`. A player without objects finds no dozer command
+        // set, so the supply center cost is the default.
+        let frame = env.world.frame();
+        self.academy.init(&AcademyPlayerContext {
+            base_side: template.map(|_| self.base_side.as_str()),
+            current_frame: frame,
+            current_money: self.money.count_money(),
+            has_sufficient_power: self.energy.has_sufficient_power(frame),
+            objects: &[],
+            dozer_supply_center_cost: None,
+            use_alternate_mouse: FALSE,
+            local_player_mines: 0,
+            neutral_player_vehicles_sniped: 0,
+        });
         env.world.academy_init(self.index);
         self.logical_retaliation_mode = false;
     }
@@ -759,7 +792,11 @@ impl Player {
                 money as UnsignedInt,
                 TRUE,
                 TRUE,
-                &mut Income(&mut *env.world),
+                &mut Income {
+                            own_index: self.index,
+                            academy: &mut self.academy,
+                            world: &mut *env.world,
+                        },
             );
         }
         self.squads = PlayerSquads::default();

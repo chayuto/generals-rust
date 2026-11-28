@@ -34,7 +34,6 @@ use crate::terrain::bridge::Bridge;
 use crate::terrain::bridge_load::{
     bridge_ends, bridge_geometry, bridge_point_pairs, BridgeModels, MAX_BRIDGES,
 };
-use crate::economy::academy_stats::AcademyStats;
 use crate::gamelogic::game_engine::{GameDataLoader, StartupStores};
 use crate::gamelogic::global_data::PlayerType;
 use crate::modules::module::{MaxHealthChangeType, ModuleType};
@@ -1028,9 +1027,6 @@ fn sync_players(sim: &mut SimContext, stores: &StartupStores) {
                 sim.world.playable_side_teams.insert(team);
             }
         }
-        sim.world
-            .player_academy
-            .insert(index, AcademyStats::default());
     }
 }
 

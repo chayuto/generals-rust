@@ -263,9 +263,7 @@ fn special_powers(sim: &SimContext, owner: ObjectSlot) -> Vec<ModuleSlot> {
 fn disable_row(sim: &mut SimContext, owner: ObjectSlot, ret: u8) -> String {
     let powers = special_powers(sim, owner);
     let used = sim
-        .world
-        .player_academy
-        .get(&sim.player_index(TEAM_A))
+        .world.players.player(sim.player_index(TEAM_A)).map(|p| &p.academy)
         .map_or(0, |a| a.special_powers_used);
     let power = sim.player_energy_production(TEAM_A);
     let record = sim.world.objects.get(owner).expect("object");

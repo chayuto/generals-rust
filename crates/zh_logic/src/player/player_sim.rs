@@ -62,11 +62,9 @@ impl SimContext {
         // The academy of the player the money names, which need not be its owner.
         if let Some(index) = income.0 {
             let frame = self.world.frame;
-            self.world
-                .player_academy
-                .entry(index)
-                .or_default()
-                .record_income(frame);
+            if let Some(p) = self.world.players.player_mut(index) {
+                p.academy.record_income(frame);
+            }
         }
     }
 

@@ -298,7 +298,7 @@ impl Scene {
             }
             out.push(s);
         }
-        let count = |p: i32| sim.world.player_academy.get(&p).map_or(0, |a| a.vehicles_disguised);
+        let count = |p: i32| sim.world.players.player(p).map(|p| &p.academy).map_or(0, |a| a.vehicles_disguised);
         out.push(format!(
             "{} {} {}",
             sim.world.rng.get_game_logic_random_seed_crc(),

@@ -458,9 +458,7 @@ fn state(sim: &mut SimContext, answer: &str) -> String {
     let mines = (0..3).fold(0, |acc, p| {
         acc * 100
             + sim
-                .world
-                .player_academy
-                .get(&p)
+                .world.players.player(p).map(|p| &p.academy)
                 .map_or(0, |a| a.mines_cleared)
     });
     let _ = write!(out, "M{mines};");

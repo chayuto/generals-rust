@@ -629,9 +629,7 @@ fn row(sim: &mut SimContext, s: &mut Scene, ret: &[u32], d: i64) -> String {
         let player = sim.world.team_players.get(&team).copied().unwrap_or(team.0);
         v.push(sim.money_of(player));
         v.push(
-            sim.world
-                .score_keepers
-                .get(&player)
+            sim.world.players.player(player).map(|p| &p.score_keeper)
                 .map_or(0, |k| k.total_money_earned) as u32,
         );
     }

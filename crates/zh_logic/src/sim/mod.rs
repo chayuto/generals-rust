@@ -28,7 +28,6 @@ use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::{Energy, EnergyObjectInfo};
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
-use crate::economy::score_keeper::ScoreKeeper;
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
 use crate::modules::module_factory::ModuleParseContext;
@@ -2481,8 +2480,6 @@ pub struct SimWorld {
     pub ai_players: BTreeMap<Int, crate::ai::ai_player::AiPlayer>,
     pub player_captured_objects: BTreeMap<TeamId, Int>,
     pub special_power_uses_delay: Bool,
-    /// `Player::getScoreKeeper()` by player index.
-    pub score_keepers: BTreeMap<Int, ScoreKeeper>,
     /// `ScriptEngine::m_toppleDirections`, keyed by the named object's id (objects
     /// have no name yet).
     pub script_topple_directions: BTreeMap<ObjectId, Coord3D>,
@@ -2580,8 +2577,6 @@ pub struct SimWorld {
     pub skill_points_awarded: BTreeMap<Int, Int>,
     /// `Player::m_upgradesInProgress` by player index.
     pub player_upgrades_in_progress: BTreeMap<Int, UpgradeMaskType>,
-    /// `Player::getAcademyStats()` by player index.
-    pub player_academy: BTreeMap<Int, crate::economy::academy_stats::AcademyStats>,
     /// `GameLogic::m_thingTemplateBuildableOverrides` by template name.
     pub buildable_overrides: BTreeMap<String, crate::object::thing_template::BuildableStatus>,
     /// `GameLogic::getSuperweaponRestriction`.
@@ -2645,7 +2640,6 @@ impl SimWorld {
             ai_players: BTreeMap::new(),
             player_captured_objects: BTreeMap::new(),
             special_power_uses_delay: TRUE,
-            score_keepers: BTreeMap::new(),
             script_topple_directions: BTreeMap::new(),
             bone_fx_stops: Vec::new(),
             floating_money_texts: Vec::new(),
@@ -2717,7 +2711,6 @@ impl SimWorld {
             control_bar_overrides: BTreeMap::new(),
             skill_points_awarded: BTreeMap::new(),
             player_upgrades_in_progress: BTreeMap::new(),
-            player_academy: BTreeMap::new(),
             buildable_overrides: BTreeMap::new(),
             superweapon_restriction: 0,
             scoring_enabled: TRUE,
@@ -7317,11 +7310,15 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        self.academy(team).record_special_power_used(classification);
+        if let Some(academy) = self.academy(team) {
+            academy.record_special_power_used(classification);
+        }
     }
 
     fn record_building_capture(&mut self, team_id: TeamId) {
-        self.academy(team_id).record_building_capture();
+        if let Some(academy) = self.academy(team_id) {
+            academy.record_building_capture();
+        }
     }
 
     fn sticky_bomb_init(&mut self, charge: ObjectSlot, target: ObjectSlot, bomber: ObjectSlot) {
@@ -7983,7 +7980,9 @@ impl SimApi for SimContext {
         }
         if record_stats != FALSE {
             // `AcademyStats::recordUpgrade`, granted.
-            self.academy(team_id).record_upgrade(classification, TRUE);
+            if let Some(academy) = self.academy(team_id) {
+                academy.record_upgrade(classification, TRUE);
+            }
             self.world
                 .upgrades_recorded
                 .push((team_id, upgrade_name.to_owned()));
@@ -9005,12 +9004,9 @@ impl SimApi for SimContext {
     }
 
     fn add_money_earned(&mut self, team_id: TeamId, amount: Int) {
-        let player = self.player_index_for_team(team_id);
-        self.world
-            .score_keepers
-            .entry(player)
-            .or_default()
-            .add_money_earned(amount);
+        if let Some(score_keeper) = self.score_keeper(team_id) {
+            score_keeper.add_money_earned(amount);
+        }
     }
 
     fn receive_temporary_stealth_grant(&mut self, owner: ObjectSlot, frames: UnsignedInt) {
@@ -9282,7 +9278,9 @@ impl SimApi for SimContext {
         }
         if let Some(team) = self.world.objects.get(source).map(|o| o.team_id) {
             if found {
-                self.academy(team).record_mine_cleared();
+                if let Some(academy) = self.academy(team) {
+                    academy.record_mine_cleared();
+                }
             }
         }
     }
@@ -10418,7 +10416,9 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        self.academy(team).record_vehicle_disguised();
+        if let Some(academy) = self.academy(team) {
+            academy.record_vehicle_disguised();
+        }
     }
 
     fn contain_recalc_apparent_controlling_player(&mut self, container: ObjectSlot) {
@@ -10829,7 +10829,9 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        self.academy(team).record_cleared_garrisoned_building();
+        if let Some(academy) = self.academy(team) {
+            academy.record_cleared_garrisoned_building();
+        }
     }
 
     fn physics_set_pitch_rate(&mut self, owner: ObjectSlot, rate: Real) {
@@ -11351,7 +11353,9 @@ impl SimApi for SimContext {
         let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
             return;
         };
-        self.academy(team).record_battle_plan_selected();
+        if let Some(academy) = self.academy(team) {
+            academy.record_battle_plan_selected();
+        }
     }
 
     fn with_special_power_module(

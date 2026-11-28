@@ -536,9 +536,7 @@ fn row(sim: &mut SimContext, scene: &mut Scene, query: &str) -> String {
     let mut tail = format!("R {}", sim.rng_logic_int(0, 1_000_000));
     for player in 0..3 {
         let built = sim
-            .world
-            .score_keepers
-            .get(&player)
+            .world.players.player(player).map(|p| &p.score_keeper)
             .map_or(0, |k| k.total_units_built);
         let _ = write!(tail, " {built}");
     }

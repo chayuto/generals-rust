@@ -990,9 +990,7 @@ fn run_projectile(sim: &mut SimContext, v: &Vector) {
         row += &format!("{} ", dashed(dead));
         for player in 0..3 {
             row += &sim
-                .world
-                .player_academy
-                .get(&player)
+                .world.players.player(player).map(|p| &p.academy)
                 .map_or(0, |a| a.cleared_garrisoned_buildings)
                 .to_string();
         }

@@ -478,7 +478,10 @@ fn world(sim: &mut SimContext) {
     for (player, team) in TEAMS.into_iter().enumerate() {
         w.team_players.insert(team, player as i32);
         w.player_default_teams.insert(player as i32, team);
-        w.players.player_mut(player as i32).expect("player").money.set_starting_cash(5000);
+        let money = &mut w.players.player_mut(player as i32).expect("player").money;
+        // As the harness does: without a template the money names player 0.
+        money.set_player_index(player as i32);
+        money.set_starting_cash(5000);
         w.player_is_human.insert(team, FALSE);
     }
     w.team_is_neutral.insert(TEAMS[0], TRUE);
@@ -661,13 +664,9 @@ fn players_row(sim: &SimContext) -> String {
         let energy = sim.world.player_energy.get(&p);
         let (prod, cons) =
             energy.map_or((0, 0), |e| (e.get_production(frame), e.get_consumption()));
-        let sk = sim.world.score_keepers.get(&p).cloned().unwrap_or_default();
+        let sk = sim.world.players.player(p).map(|p| p.score_keeper.clone()).unwrap_or_else(|| zh_logic::player::player::Player::blank(-1).score_keeper);
         let a = sim
-            .world
-            .player_academy
-            .get(&p)
-            .cloned()
-            .unwrap_or_default();
+            .world.players.player(p).map(|p| p.academy.clone()).unwrap_or_else(|| zh_logic::player::player::Player::blank(-1).academy);
         let _ = write!(
             s,
             "{},{prod},{cons},{},{},{},{},{},{},{},{},{},{},{},{};",
@@ -1088,9 +1087,7 @@ fn extra_row(sim: &mut SimContext) -> String {
     s.push('|');
     for (player, team) in TEAMS.into_iter().enumerate() {
         let chose = sim
-            .world
-            .player_academy
-            .get(&sim.player_index(team))
+            .world.players.player(sim.player_index(team)).map(|p| &p.academy)
             .is_some_and(|a| a.chose_a_strategy_for_center != FALSE);
         let plans = sim
             .player_battle_plans(player as i32)

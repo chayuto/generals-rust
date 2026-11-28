@@ -407,7 +407,7 @@ impl Trial {
             out.push(if *by { '1' } else { '0' });
         }
         let _ = write!(out, ",{}", player.attacked_frame);
-        let academy = self.sim.world.player_academy.get(&index);
+        let academy = self.sim.world.players.player(index).map(|p| &p.academy);
         let _ = write!(
             out,
             " m{},{},{},{}",

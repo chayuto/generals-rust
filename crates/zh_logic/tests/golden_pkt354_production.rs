@@ -431,6 +431,8 @@ fn world() -> SimWorld {
     w.player_default_teams.insert(0, TeamId(0));
     w.player_default_teams.insert(1, TEAM);
     w.player_default_teams.insert(2, OTHER_TEAM);
+    // As the harness does: without a template the money names player 0.
+    w.players.player_mut(1).expect("player").money.set_player_index(1);
     w
 }
 
@@ -580,9 +582,7 @@ impl Run {
             let _ = write!(s, ",{n}");
         }
         let score = sim
-            .world
-            .score_keepers
-            .get(&TEAM.0)
+            .world.players.player(TEAM.0).map(|p| &p.score_keeper)
             .map_or((0, 0, 0), |k| {
                 (
                     k.total_money_spent,
@@ -592,11 +592,7 @@ impl Run {
             });
         let _ = write!(s, " {},{},{} ", score.0, score.1, score.2);
         let a = sim
-            .world
-            .player_academy
-            .get(&TEAM.0)
-            .cloned()
-            .unwrap_or_default();
+            .world.players.player(TEAM.0).map(|p| p.academy.clone()).unwrap_or_else(|| zh_logic::player::player::Player::blank(-1).academy);
         for v in [
             a.supply_centers_built,
             u32::from(a.researched_radar),
