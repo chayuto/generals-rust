@@ -579,7 +579,7 @@ fn launch_text(sim: &mut SimContext, ids: &[ObjectId]) -> String {
             .into_iter()
             .enumerate()
         {
-            let matrix = launch_transform(sim, slot, weapon_slot);
+            let matrix = launch_transform(sim, slot, weapon_slot, 0);
             let words: String = matrix.rows.iter().flatten().map(|&v| bits(v)).collect();
             rows.push(format!("{unit},{index},{words}"));
         }

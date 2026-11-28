@@ -6,12 +6,18 @@ use std::sync::Arc;
 
 use zh_common::golden_json::{decode_hex_bytes, get_str};
 use zh_common::ini::{IniLoadType, IniReader};
-use zh_common::math::{Coord3D, Matrix3D};
+use zh_common::math::{Coord3D, Matrix3D, Region3D};
+use zh_common::types::NameKeyType;
 use zh_logic::combat::turret_ai::WhichTurretType;
+use zh_logic::modules::update::ai_update::AiUpdate;
+use zh_logic::modules::update::dock_update::{DockUpdateModuleData, DockUpdateState};
 use zh_logic::object::model_bones::{AttachBoneOffsets, DrawableBones, ModelBoneCatalog};
 use zh_logic::object::model_draw::{ModelDrawModuleData, ModelDrawSpec};
 use zh_logic::rules::model_state::ModelConditionFlags;
-use zh_logic::sim::RulesRegistry;
+use zh_logic::object::weapon_fire::launch_transform;
+use zh_logic::object::weapon_set::WeaponSlotType;
+use zh_common::types::TeamId;
+use zh_logic::sim::{RulesRegistry, SimApi, SimContext, SimWorld};
 
 const JSON: &str = include_str!("../../../docs/golden_vectors/ModelBones.json");
 
@@ -165,7 +171,7 @@ fn draw_module_data_and_best_states_match_the_reference() {
 
 /// The generated objects and files, with the catalog the port builds from them.
 struct Objects {
-    rules: RulesRegistry,
+    sim: SimContext,
     /// `(name, approach positions, position and angle)`.
     objects: Vec<(&'static str, i32, Vec<f32>)>,
 }
@@ -178,6 +184,7 @@ fn objects() -> Objects {
             (name, decode_hex_bytes(get_str(l, "hex").unwrap()).unwrap())
         })
         .collect();
+    let mut sim = SimContext::new();
     let mut rules = new_rules();
     let standard = rows("standard");
     rules.global_data.standard_public_bones = get_str(standard[0], "names")
@@ -202,7 +209,17 @@ fn objects() -> Objects {
         files.get(name.as_str()).cloned()
     });
     rules.model_bones = Some(Arc::new(catalog));
-    Objects { rules, objects }
+    sim.rules = rules;
+    sim.world = SimWorld::new();
+    let extent = Region3D {
+        lo: Coord3D::new(0.0, 0.0, 0.0),
+        hi: Coord3D::new(1000.0, 1000.0, 100.0),
+    };
+    sim.init_partition(20.0, extent);
+    sim.world.next_object_id = 1;
+    sim.world.player_default_teams.insert(1, TeamId(1));
+    sim.add_player_team(TeamId(1), 1);
+    Objects { sim, objects }
 }
 
 #[test]
@@ -216,9 +233,10 @@ fn drawable_bone_queries_match_the_reference() {
         let name = get_str(line, "name").unwrap();
         let (object, _, _) = &o.objects[n / 6];
         assert_eq!(*object, name);
-        let template = o.rules.thing_factory.find_template(name).unwrap();
+        let rules = &o.sim.rules;
+        let template = rules.thing_factory.find_template(name).unwrap();
         let conditions = flags_of(get_str(line, "conditions").unwrap());
-        let bones = DrawableBones::new(&o.rules, template, conditions).unwrap();
+        let bones = DrawableBones::new(rules, template, conditions).unwrap();
         for query in get_str(line, "results").unwrap().split_terminator(';') {
             let (head, expected) = query.split_once('=').unwrap();
             let head: Vec<&str> = head.split(':').collect();
@@ -260,4 +278,73 @@ fn drawable_bone_queries_match_the_reference() {
         }
     }
     assert_eq!(checked, 360 * 35);
+}
+
+#[test]
+fn launch_and_dock_positions_match_the_reference() {
+    let mut o = objects();
+    let queries = rows("query");
+    let sim = &mut o.sim;
+    let mut object = None;
+    let mut checked = 0;
+    let mut turreted = 0;
+    for (n, line) in queries.iter().enumerate() {
+        let name = get_str(line, "name").unwrap();
+        let (_, approach, at) = &o.objects[n / 6];
+        if n % 6 == 0 {
+            if let Some(slot) = object {
+                sim.destroy_object(slot);
+            }
+            let template = sim.rules.thing_factory.find_template_id(name).unwrap();
+            let slot = sim.factory_new_object(template, TeamId(1));
+            sim.set_object_position(slot, &Coord3D::new(at[0], at[1], at[2]));
+            sim.set_object_orientation(slot, at[3]);
+            object = Some(slot);
+        }
+        let slot = object.unwrap();
+        let object = sim.world.objects.get_mut(slot).unwrap();
+        object.model_condition = flags_of(get_str(line, "conditions").unwrap());
+        let ai = object.ai_slot;
+        let turned = words(get_str(line, "turrets").unwrap());
+        assert_eq!(ai.is_some(), !turned.is_empty(), "{name}");
+        if let Some(ai) = ai {
+            let state = sim.resident_state_mut(ai).unwrap();
+            let state = state.downcast_mut::<AiUpdate>().unwrap();
+            for (turret, angles) in state.turrets.iter_mut().zip(turned.chunks(2)) {
+                let turret = turret.as_mut().unwrap();
+                (turret.angle, turret.pitch) = (angles[0], angles[1]);
+            }
+            turreted += 1;
+        }
+        for query in get_str(line, "results").unwrap().split_terminator(';') {
+            let (head, expected) = query.split_once('=').unwrap();
+            let head: Vec<&str> = head.split(':').collect();
+            let actual = match head[0] {
+                "W" => {
+                    let wslot = WeaponSlotType::from_i32(number(head[1])).unwrap();
+                    matrix_text(&launch_transform(sim, slot, wslot, number(head[2])))
+                }
+                "D" => {
+                    let mut data =
+                        DockUpdateModuleData::new(NameKeyType::INVALID, NameKeyType::INVALID);
+                    data.number_approach_positions = *approach;
+                    let mut dock = DockUpdateState::new(data);
+                    dock.load_dock_positions(sim, slot);
+                    let positions: String = dock.approach_positions.iter().map(pos_text).collect();
+                    format!(
+                        "{}{}{}:{}:{positions}",
+                        pos_text(&dock.enter_position),
+                        pos_text(&dock.dock_position),
+                        pos_text(&dock.exit_position),
+                        dock.number_approach_position_bones
+                    )
+                }
+                _ => continue,
+            };
+            assert_eq!(actual, expected, "{name} row {n} {head:?}");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 360 * 5);
+    assert!(turreted > 100, "{turreted}");
 }

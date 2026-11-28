@@ -4,9 +4,8 @@
 //! Packet: `packets/phase5/PKT-367_SpawnPointProductionExitUpdate.md`.
 //! Golden test: `crates/zh_logic/tests/golden_pkt315_379_357_367_exits.rs`.
 //!
-//! The spawn points are model bones. Models are not loaded, so the bones come
-//! from `SimWorld::pristine_bones`; without an entry the exit has no spawn
-//! points, which is what the reference does for a drawable without draw modules.
+//! The spawn points are the model bones `name01`..`name10`. Without them the exit
+//! has no spawn points, which is what the reference does for such a drawable.
 
 use crate::arena::{FacetMask, ModuleContext, ObjectSlot, ThingTemplateId};
 use crate::modules::behavior::behavior_module::{xfer_module_version, UpdateScheduleTracker};
@@ -91,7 +90,12 @@ impl SpawnPointProductionExitUpdate {
         let Some(me) = producer(sim, owner) else {
             return;
         };
-        let bones = sim.pristine_bone_transforms(owner, &self.data.spawn_point_bone_name);
+        let bones = sim.pristine_bone_transforms_indexed(
+            owner,
+            &self.data.spawn_point_bone_name,
+            1,
+            MAX_SPAWN_POINTS,
+        );
         self.spawn_point_count = bones.len().min(MAX_SPAWN_POINTS);
         for (i, bone) in bones.iter().take(MAX_SPAWN_POINTS).enumerate() {
             let world = Matrix3D::mul(&me.transform, bone);

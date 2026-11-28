@@ -713,7 +713,7 @@ pub struct ObjectRecord {
     pub weapon_bonus_condition: UnsignedInt,
     pub experience_tracker: ExperienceTrackerState,
     pub weapon_set: WeaponSet,
-    /// `Drawable::getBarrelCount` per slot. It comes from the model, which the port does not load.
+    /// A barrel count to answer in place of `Drawable::getBarrelCount`'s models; 0 for none.
     pub weapon_barrel_count: [Int; WEAPONSLOT_COUNT],
     pub armor_set_flags: ArmorSetFlags,
     pub layer: PathfindLayerEnum,
@@ -1431,8 +1431,18 @@ pub trait SimView {
     fn path_units(&self) -> &dyn crate::pathfinder::PathUnits;
     /// The buildings aircraft go around.
     fn tall_buildings(&self) -> &dyn crate::pathfinder::TallBuildings;
-    /// `Drawable::getPristineBonePositions` transforms from `SimWorld::pristine_bones`.
+    /// `Drawable::getPristineBonePositions` of the bone named `bone_prefix`.
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D>;
+    /// `Drawable::getPristineBonePositions`: `bone_prefix` itself (`start_index` 0) or
+    /// `prefix01`.. up to `max_bones`, in model space. An entry of
+    /// `SimWorld::pristine_bones` answers in place of the models.
+    fn pristine_bone_transforms_indexed(
+        &self,
+        owner: ObjectSlot,
+        bone_prefix: &str,
+        start_index: Int,
+        max_bones: usize,
+    ) -> Vec<Matrix3D>;
     fn get_highest_layer_for_destination(
         &self,
         pos: &Coord3D,
@@ -1527,6 +1537,14 @@ pub trait SimView {
 
 /// Mutable simulation interface passed into all [`BehaviorModule`] facet callbacks.
 pub trait SimApi: SimView {
+    /// `Drawable::getProjectileLaunchOffset`; `None` without a drawable's models.
+    fn projectile_launch_offset(
+        &mut self,
+        owner: ObjectSlot,
+        wslot: WeaponSlotType,
+        barrel: Int,
+        turret: crate::combat::WhichTurretType,
+    ) -> Option<crate::object::model_bones::ProjectileLaunch>;
     fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool);
     fn ai_recenter_turret(&mut self, owner: ObjectSlot, turret: WhichTurretType);
     /// `Object::reactToTurretChange`: tell the contain module that a turret turned.
@@ -1769,32 +1787,7 @@ pub trait SimApi: SimView {
         &mut self,
         ocl_name: &str,
         args: crate::object::ocl_runtime::OclCreateArgs,
-    ) -> Option<ObjectSlot> {
-        let pos = self
-            .object(args.primary)
-            .map(|o| *o.thing.get_position())
-            .unwrap_or_default();
-        let (log_pos, target_pos) = match args.mode {
-            crate::object::ocl_runtime::OclCreateMode::Object { secondary } => {
-                let sec = secondary
-                    .and_then(|s| self.object(s))
-                    .map_or(pos, |o| *o.thing.get_position());
-                (pos, sec)
-            }
-            crate::object::ocl_runtime::OclCreateMode::PositionAngle {
-                primary_pos,
-                secondary_pos,
-                ..
-            }
-            | crate::object::ocl_runtime::OclCreateMode::PositionCreateOwner {
-                primary_pos,
-                secondary_pos,
-                ..
-            } => (primary_pos, secondary_pos.unwrap_or(primary_pos)),
-        };
-        self.spawn_ocl(ocl_name, args.primary, &log_pos, &target_pos);
-        None
-    }
+    ) -> Option<ObjectSlot>;
     fn trigger_fx_list(&mut self, fx_name: &str, pos: &Coord3D);
     fn trigger_damage_fx(
         &mut self,
@@ -2559,6 +2552,8 @@ pub struct SimWorld {
     /// Pristine model bones by template name and bone prefix, as a model loader would
     /// report them. No entry means the model has no such bones.
     pub pristine_bones: BTreeMap<(String, String), Vec<Matrix3D>>,
+    /// Not saved, as the reference keeps these in its module data.
+    pub attach_bone_offsets: crate::object::model_bones::AttachBoneOffsets,
     pub pathfind_map_objects: BTreeSet<ObjectId>,
     pub pathfind_goals: BTreeMap<ObjectId, (Coord3D, PathfindLayerEnum)>,
     pub blocked_pathfind_cells: BTreeMap<(Int, Int, Int), PathfindCellType>,
@@ -2718,6 +2713,7 @@ impl SimWorld {
             attack_abilities: BTreeMap::new(),
             exit_path_orders: Vec::new(),
             pristine_bones: BTreeMap::new(),
+            attach_bone_offsets: Default::default(),
             pathfind_map_objects: BTreeSet::new(),
             pathfind_goals: BTreeMap::new(),
             blocked_pathfind_cells: BTreeMap::new(),
@@ -5452,10 +5448,15 @@ impl SimView for SimContext {
     }
 
     fn weapon_barrel_count(&self, owner: ObjectSlot, wslot: WeaponSlotType) -> Int {
-        self.world
-            .objects
-            .get(owner)
-            .map_or(0, |o| o.weapon_barrel_count[wslot.as_i32() as usize])
+        let Some(object) = self.world.objects.get(owner) else {
+            return 0;
+        };
+        let slot = wslot.as_i32() as usize;
+        match object.weapon_barrel_count[slot] {
+            0 => crate::object::model_bones::object_bones(&self.rules, object)
+                .map_or(0, |b| b.barrel_count(slot)),
+            set => set,
+        }
     }
 
     fn last_shot_fired_frame(&self, owner: ObjectSlot) -> UnsignedInt {
@@ -6711,21 +6712,34 @@ impl SimView for SimContext {
     }
 
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
-        self.world
-            .objects
-            .get(owner)
-            .and_then(|o| {
-                o.thing
-                    .template_override()
-                    .get_final(&self.rules.thing_factory)
-            })
+        self.pristine_bone_transforms_indexed(owner, bone_prefix, 0, 1)
+    }
+
+    fn pristine_bone_transforms_indexed(
+        &self,
+        owner: ObjectSlot,
+        bone_prefix: &str,
+        start_index: Int,
+        max_bones: usize,
+    ) -> Vec<Matrix3D> {
+        let Some(object) = self.world.objects.get(owner) else {
+            return Vec::new();
+        };
+        let forced = object
+            .thing
+            .template_override()
+            .get_final(&self.rules.thing_factory)
             .and_then(|t| {
                 self.world
                     .pristine_bones
                     .get(&(t.get_name().to_owned(), bone_prefix.to_owned()))
-            })
-            .cloned()
-            .unwrap_or_default()
+            });
+        if let Some(bones) = forced {
+            return bones.iter().take(max_bones).copied().collect();
+        }
+        crate::object::model_bones::object_bones(&self.rules, object).map_or_else(Vec::new, |b| {
+            b.pristine_bone_transforms(bone_prefix, start_index, max_bones)
+        })
     }
 
     fn get_highest_layer_for_destination(
@@ -7261,6 +7275,23 @@ impl CollisionHost for SimContext {
 }
 
 impl SimApi for SimContext {
+    fn projectile_launch_offset(
+        &mut self,
+        owner: ObjectSlot,
+        wslot: WeaponSlotType,
+        barrel: Int,
+        turret: crate::combat::WhichTurretType,
+    ) -> Option<crate::object::model_bones::ProjectileLaunch> {
+        let object = self.world.objects.get(owner)?;
+        let bones = crate::object::model_bones::object_bones(&self.rules, object)?;
+        Some(bones.projectile_launch_offset(
+            wslot.as_i32() as usize,
+            barrel,
+            turret,
+            &mut self.world.attach_bone_offsets,
+        ))
+    }
+
     fn ai_busy(&mut self, owner: ObjectSlot, cmd_source: CommandSourceType) {
         if self.resident_order(owner, "aiBusy", AiCommandType::Busy, cmd_source, |_, _| {}) {
             return;
@@ -12557,6 +12588,17 @@ impl SimView for MockSimApi {
         self.ctx.pristine_bone_transforms(owner, bone_prefix)
     }
 
+    fn pristine_bone_transforms_indexed(
+        &self,
+        owner: ObjectSlot,
+        bone_prefix: &str,
+        start_index: Int,
+        max_bones: usize,
+    ) -> Vec<Matrix3D> {
+        self.ctx
+            .pristine_bone_transforms_indexed(owner, bone_prefix, start_index, max_bones)
+    }
+
     fn get_highest_layer_for_destination(
         &self,
         pos: &Coord3D,
@@ -12660,6 +12702,16 @@ impl SimView for MockSimApi {
 }
 
 impl SimApi for MockSimApi {
+    fn projectile_launch_offset(
+        &mut self,
+        owner: ObjectSlot,
+        wslot: WeaponSlotType,
+        barrel: Int,
+        turret: crate::combat::WhichTurretType,
+    ) -> Option<crate::object::model_bones::ProjectileLaunch> {
+        self.ctx.projectile_launch_offset(owner, wslot, barrel, turret)
+    }
+
     fn take_pathfinder(&mut self) -> Option<Box<crate::pathfinder::Pathfinder>> {
         self.ctx.take_pathfinder()
     }

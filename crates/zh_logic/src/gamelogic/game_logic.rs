@@ -11,6 +11,7 @@
 //! `tests/cpp_harness/gen_game_start.py`).
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use zh_common::core::dict::Dict;
 use zh_common::core::name_key_generator::NameKeyGenerator;
@@ -37,6 +38,7 @@ use crate::economy::academy_stats::AcademyStats;
 use crate::gamelogic::game_engine::{GameDataLoader, StartupStores};
 use crate::gamelogic::global_data::PlayerType;
 use crate::modules::module::{MaxHealthChangeType, ModuleType};
+use crate::object::model_bones::ModelBoneCatalog;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
 use crate::object::object_script_status_bits::{
     OBJECT_STATUS_SCRIPT_DISABLED, OBJECT_STATUS_SCRIPT_TARGETABLE, OBJECT_STATUS_SCRIPT_UNPOWERED,
@@ -93,6 +95,8 @@ pub struct StartParms {
     pub challenge_mode_ini: Vec<u8>,
     /// The models of the bridge definitions, for the bridges drawn into the map.
     pub bridge_models: BridgeModels,
+    /// The bones of the models of the loaded templates. `None` plays without them.
+    pub model_bones: Option<Arc<ModelBoneCatalog>>,
 }
 
 /// Everything the start left out, by reason.
@@ -1630,6 +1634,7 @@ pub fn start_new_game_observed(
     parms: StartParms,
     mut observe: impl FnMut(StartStage, &SimContext, &PlayerList, &TeamFactory),
 ) -> Result<GameStart, StartError> {
+    loader.rules.model_bones = parms.model_bones.clone();
     // `GameLogic::loadMapINI`.
     for (name, bytes) in &parms.map.inis {
         loader.load_bytes(name, bytes, zh_common::ini::IniLoadType::CreateOverrides);

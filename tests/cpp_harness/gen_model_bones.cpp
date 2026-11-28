@@ -11,15 +11,16 @@
 //   (also with --opt O0 and with --opt O2 --sanitize)
 //   /tmp/gen docs/golden_vectors/ModelBones.json
 //
-// Not covered: transition states (logic reads `findBestInfo`), turreted launchers
-// in `calcProjectileLaunchPosition` (no AI here), compressed animations and
-// aggregates (see `gen_ast_assets.cpp`).
+// Not covered: transition states (logic reads `findBestInfo`), contained launchers,
+// compressed animations and aggregates (see `gen_ast_assets.cpp`).
 
 #include "oracle_common.h"
 
 #define private public
 #define protected public
+#include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/DockUpdate.h"
+#include "GameLogic/TurretAI.h"
 #undef private
 #undef protected
 
@@ -493,6 +494,13 @@ static void object_cases(oracle_wp51::World& w) {
         const int approach = chance(20) ? -1 : (int)pick(11);
         ini += "  Behavior = RepairDockUpdate ModuleTag_Dock\n    NumberApproachPositions = "
             + std::to_string(approach) + "\n  End\n";
+        // Some launchers have turrets, to be turned and pitched about their bones.
+        const bool turreted = chance(50);
+        if (turreted) {
+            ini += "  Behavior = AIUpdateInterface ModuleTag_AI\n    Turret\n"
+                   "      ControlledWeaponSlots = PRIMARY SECONDARY\n    End\n"
+                   "    AltTurret\n      ControlledWeaponSlots = TERTIARY\n    End\n  End\n";
+        }
         ini += "End\n";
         try {
             w.load_ini(ini);
@@ -526,6 +534,15 @@ static void object_cases(oracle_wp51::World& w) {
             }
             obj->clearAndSetModelConditionFlags(clear, set);
 
+            std::string turn;
+            if (AIUpdateInterface* ai = obj->getAIUpdateInterface()) {
+                for (int t = 0; t < MAX_TURRETS; ++t) {
+                    if (!ai->m_turretAI[t]) exit(7);
+                    ai->m_turretAI[t]->m_angle = frand();
+                    ai->m_turretAI[t]->m_pitch = frand() / 4.0f;
+                    turn += flt(ai->m_turretAI[t]->m_angle) + flt(ai->m_turretAI[t]->m_pitch);
+                }
+            }
             std::string out;
             for (int q = 0; q < 24; ++q) out += pristine_query(draw) + ";";
             for (int slot = 0; slot < 3; ++slot) {
@@ -545,7 +562,7 @@ static void object_cases(oracle_wp51::World& w) {
                     + pos_text(rot) + pos_text(pitch) + ";";
             }
             for (int q = 0; q < 4; ++q) {
-                const int slot = q < 2 ? 0 : (int)pick(3);
+                const int slot = q < 2 ? 0 : q == 2 ? 2 : (int)pick(3);
                 const int barrel = (int)pick(3);
                 Matrix3D world(true);
                 Coord3D where;
@@ -566,7 +583,8 @@ static void object_cases(oracle_wp51::World& w) {
                 out += ";";
             }
             g_rows.push_back("{\"case\":\"query\",\"name\":\"" + name + "\",\"conditions\":\""
-                + bits_text(draw->getModelConditionFlags()) + "\",\"results\":\"" + out + "\"}");
+                + bits_text(draw->getModelConditionFlags()) + "\",\"turrets\":\"" + turn
+                + "\",\"results\":\"" + out + "\"}");
         }
         TheGameLogic->destroyObject(obj);
         w.flush_destroy_list();

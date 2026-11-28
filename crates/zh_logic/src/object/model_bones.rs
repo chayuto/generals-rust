@@ -21,12 +21,13 @@ use zh_common::types::{Int, Real};
 
 use crate::arena::ModuleDataId;
 use crate::combat::turret_ai::WhichTurretType;
+use crate::gamelogic::global_data::{TimeOfDay, Weather};
 use crate::object::model_draw::{
     add_public_bone, ModelConditionBoneSpec, ModelDrawModuleData, ModelDrawSpec,
 };
 use crate::object::thing_template::ThingTemplate;
-use crate::rules::model_state::ModelConditionFlags;
-use crate::sim::RulesRegistry;
+use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
+use crate::sim::{ObjectRecord, RulesRegistry};
 
 /// `MAX_BONE_GET`.
 const MAX_BONE_GET: usize = 64;
@@ -294,6 +295,25 @@ impl<'a> DrawableBones<'a> {
         }
         out
     }
+}
+
+/// The drawable bones of an object, in the condition state of its drawable: the
+/// object's flags, plus night and snow where models follow the weather
+/// (`friend_bindToDrawable`). A map object's own time and weather are not kept.
+pub fn object_bones<'a>(rules: &'a RulesRegistry, object: &ObjectRecord) -> Option<DrawableBones<'a>> {
+    let template = object
+        .thing
+        .template_override()
+        .get_final(&rules.thing_factory)?;
+    let global = &rules.global_data;
+    let mut conditions = object.model_condition.clone();
+    if global.force_models_to_follow_time_of_day != 0 && global.time_of_day == TimeOfDay::Night {
+        conditions.set(ModelConditionFlagType::Night.as_i32(), 1);
+    }
+    if global.force_models_to_follow_weather != 0 && global.weather == Weather::Snowy {
+        conditions.set(ModelConditionFlagType::Snow.as_i32(), 1);
+    }
+    DrawableBones::new(rules, template, conditions)
 }
 
 fn weapon_bones(state: &ModelConditionBoneSpec, wslot: usize) -> WeaponBones<'_> {

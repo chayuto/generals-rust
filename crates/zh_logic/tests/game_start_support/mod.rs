@@ -3,6 +3,7 @@
 //! reference's.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use zh_common::io::archive_file_system::ArchiveFilter;
 use zh_common::io::big_file_system::BigFileSystem;
@@ -10,6 +11,7 @@ use zh_common::io::recorder::{read_replay_header, GameOptions};
 use zh_common::types::Relationship;
 use zh_logic::gamelogic::game_engine::GameDataLoader;
 use zh_logic::gamelogic::game_logic::{MapSource, ReplayGameRules, StartParms};
+use zh_logic::object::model_bones::ModelBoneCatalog;
 use zh_logic::terrain::BridgeModels;
 use zh_logic::player::player_list::PlayerList;
 use zh_logic::pathfinder::PathfindLayerEnum;
@@ -104,6 +106,17 @@ fn map_source(fs: &BigFileSystem, portable: &[u8], user_dir: &str) -> Option<Map
     Some(source)
 }
 
+/// The model bones of the installed game's templates, read once per process.
+fn model_bones(
+    loader: &GameDataLoader,
+    read: impl FnMut(&str) -> Option<Vec<u8>>,
+) -> Arc<ModelBoneCatalog> {
+    static LOADED: OnceLock<Arc<ModelBoneCatalog>> = OnceLock::new();
+    LOADED
+        .get_or_init(|| Arc::new(ModelBoneCatalog::load(&loader.rules, read)))
+        .clone()
+}
+
 fn parms_for(
     fs: &BigFileSystem,
     loader: &GameDataLoader,
@@ -128,6 +141,7 @@ fn parms_for(
         skirmish_scripts: read("Data\\Scripts\\SkirmishScripts.scb"),
         challenge_mode_ini: read("Data\\INI\\ChallengeMode.ini").unwrap_or_default(),
         bridge_models: BridgeModels::load(loader.rules.terrain_roads.bridges.iter(), read),
+        model_bones: Some(model_bones(loader, read)),
     })
 }
 

@@ -14,7 +14,7 @@ use crate::rules::kind_of::KindOfType;
 use crate::rules::model_state::{ModelConditionFlagType, ModelConditionFlags};
 use crate::sim::{FindPositionOptions, SimApi, SimView};
 use zh_common::ini::{IniError, IniReader};
-use zh_common::math::{gm_sqrtf, Coord3D};
+use zh_common::math::{gm_sqrtf, Coord3D, Matrix3D};
 use zh_common::types::{Bool, Int, NameKeyType, ObjectId, UpdateSleepTime, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
@@ -131,20 +131,38 @@ impl DockUpdateState {
         }
     }
 
-    /// `loadDockPositions` for a model without the dock bones.
+    /// `loadDockPositions`.
     pub fn load_dock_positions(&mut self, sim: &dyn SimView, owner: ObjectSlot) {
         if sim.object_has_drawable(owner) == FALSE {
             return;
         }
         self.number_approach_position_bones = 0;
-        if sim.object_is_kind_of(owner, KindOfType::IgnoreDockingBones) == FALSE
-            && self.number_approach_positions != DYNAMIC_APPROACH_VECTOR_FLAG
-            && usize::try_from(self.number_approach_positions)
-                .is_ok_and(|n| n == self.approach_positions.len())
-        {
-            // The reference copies from a zeroed array of ten. Past ten it reads
-            // beyond the array; zero stands in for that.
-            self.approach_positions.fill(Coord3D::default());
+        if sim.object_is_kind_of(owner, KindOfType::IgnoreDockingBones) == FALSE {
+            // A missing bone leaves the position as it is.
+            for (name, position) in [
+                ("DockStart", &mut self.enter_position),
+                ("DockAction", &mut self.dock_position),
+                ("DockEnd", &mut self.exit_position),
+            ] {
+                if let Some(bone) = sim.pristine_bone_transforms_indexed(owner, name, 0, 1).first()
+                {
+                    *position = bone.get_translation();
+                }
+            }
+            if self.number_approach_positions != DYNAMIC_APPROACH_VECTOR_FLAG {
+                let most = usize::try_from(self.number_approach_positions).unwrap_or(0);
+                let bones = sim.pristine_bone_transforms_indexed(owner, "DockWaiting", 1, most);
+                self.number_approach_position_bones = bones.len() as Int;
+                if most == self.approach_positions.len() {
+                    // The reference copies from a zeroed array of ten. Past ten it
+                    // reads beyond the array; zero stands in for that.
+                    for (i, position) in self.approach_positions.iter_mut().enumerate() {
+                        *position = bones
+                            .get(i)
+                            .map_or_else(Coord3D::default, Matrix3D::get_translation);
+                    }
+                }
+            }
         }
         self.positions_loaded = TRUE;
     }

@@ -620,6 +620,9 @@ impl SimView for EngineSim<'_> {
     fn pristine_bone_transforms(&self, owner: ObjectSlot, bone_prefix: &str) -> Vec<Matrix3D> {
         not_wired("pristine_bone_transforms")
     }
+    fn pristine_bone_transforms_indexed( &self, owner: ObjectSlot, bone_prefix: &str, start_index: Int, max_bones: usize, ) -> Vec<Matrix3D> {
+        not_wired("pristine_bone_transforms_indexed")
+    }
     fn get_highest_layer_for_destination( &self, pos: &Coord3D, only_healthy_bridges: Bool, ) -> PathfindLayerEnum {
         not_wired("get_highest_layer_for_destination")
     }
@@ -734,6 +737,9 @@ impl SimView for EngineSim<'_> {
 }
 
 impl SimApi for EngineSim<'_> {
+    fn projectile_launch_offset( &mut self, owner: ObjectSlot, wslot: WeaponSlotType, barrel: Int, turret: zh_logic::combat::WhichTurretType, ) -> Option<zh_logic::object::model_bones::ProjectileLaunch> {
+        not_wired("projectile_launch_offset")
+    }
     fn ai_set_turret_enabled(&mut self, owner: ObjectSlot, turret: WhichTurretType, enabled: Bool) {
         not_wired("ai_set_turret_enabled")
     }
@@ -1006,6 +1012,9 @@ impl SimApi for EngineSim<'_> {
     }
     fn spawn_ocl(&mut self, ocl_name: &str, creator: ObjectSlot, pos: &Coord3D, target_pos: &Coord3D) {
         not_wired("spawn_ocl")
+    }
+    fn create_ocl( &mut self, ocl_name: &str, args: zh_logic::object::ocl_runtime::OclCreateArgs, ) -> Option<ObjectSlot> {
+        not_wired("create_ocl")
     }
     fn trigger_fx_list(&mut self, fx_name: &str, pos: &Coord3D) {
         not_wired("trigger_fx_list")

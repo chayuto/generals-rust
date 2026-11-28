@@ -173,17 +173,18 @@ pub fn which_for_weapon_slot(state: &AiUpdate, slot: WeaponSlotType) -> Option<u
     })
 }
 
-/// The angle and pitch of the turret carrying a weapon slot of an object
+/// The index, angle and pitch of the turret carrying a weapon slot of an object
 /// (`getWhichTurretForWeaponSlot`).
-pub fn rot_and_pitch_for_slot(
+pub fn turret_for_slot(
     sim: &mut dyn SimApi,
     owner: ObjectSlot,
     slot: WeaponSlotType,
-) -> Option<(Real, Real)> {
+) -> Option<(usize, Real, Real)> {
     let ms = sim.object(owner)?.ai_slot?;
     let state = sim.resident_state_mut(ms)?.downcast_mut::<AiUpdate>()?;
-    let turret = state.turrets[which_for_weapon_slot(state, slot)?].as_ref()?;
-    Some((turret.angle, turret.pitch))
+    let which = which_for_weapon_slot(state, slot)?;
+    let turret = state.turrets[which].as_ref()?;
+    Some((which, turret.angle, turret.pitch))
 }
 
 /// `isTurretInNaturalPosition` of the turret, for an owner under construction or

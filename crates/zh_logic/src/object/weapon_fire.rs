@@ -26,6 +26,7 @@ use super::weapon_set::WeaponSlotType;
 use crate::modules::update::ai_update::turrets;
 use crate::ai::seams::ai_seams;
 use crate::arena::ObjectSlot;
+use crate::combat::WhichTurretType;
 use crate::gamelogic::global_data::{WeaponBonus, WeaponBonusField};
 use crate::modules::update::physics_update;
 use crate::rules::combat_types::{DamageType, WeaponStatus};
@@ -370,10 +371,15 @@ pub fn handle_projectile_detonation(
     );
 }
 
-/// `Weapon::calcProjectileLaunchPosition` without the launch bones of the
-/// model (the reference's answer when a drawable has none): the launcher's
-/// transform, turned and pitched with the turret of the slot.
-pub fn launch_transform(sim: &mut dyn SimApi, launcher: ObjectSlot, wslot: WeaponSlotType) -> Matrix3D {
+/// `Weapon::calcProjectileLaunchPosition`: the launch bone of the barrel, turned
+/// and pitched about the turret bones of the slot. Without loaded models, or without
+/// a barrel, the bones are at the origin.
+pub fn launch_transform(
+    sim: &mut dyn SimApi,
+    launcher: ObjectSlot,
+    wslot: WeaponSlotType,
+    barrel: Int,
+) -> Matrix3D {
     let Some((container, launcher_mtx)) = sim
         .object(launcher)
         .map(|o| (o.contained_by, *o.thing.get_transform_matrix()))
@@ -383,31 +389,42 @@ pub fn launch_transform(sim: &mut dyn SimApi, launcher: ObjectSlot, wslot: Weapo
     if container.is_some_and(|c| sim.contain_is_enclosing_container_for(c, launcher) != FALSE) {
         return launcher_mtx;
     }
-    let mut attach = Matrix3D::identity();
-    if let Some((angle, pitch)) = turrets::rot_and_pitch_for_slot(sim, launcher, wslot) {
-        // The turret turns about the origin while no bone says otherwise.
+    let turret = turrets::turret_for_slot(sim, launcher, wslot);
+    let which = match turret {
+        Some((0, ..)) => WhichTurretType::Main,
+        Some(_) => WhichTurretType::Alt,
+        None => WhichTurretType::Invalid,
+    };
+    let offset = sim.projectile_launch_offset(launcher, wslot, barrel, which);
+    let (mut attach, turn_at, pitch_at) = match offset.and_then(|o| Some((o.launch?, o))) {
+        Some((launch, o)) => (launch, o.turret_rot_pos, o.turret_pitch_pos),
+        None => (
+            Matrix3D::identity(),
+            Coord3D::default(),
+            Coord3D::default(),
+        ),
+    };
+    if let Some((_, angle, pitch)) = turret {
         let mut pitched = Matrix3D::identity();
-        pitched.translate(0.0, 0.0, 0.0);
+        pitched.translate(pitch_at.x, pitch_at.y, pitch_at.z);
         pitched.in_place_pre_rotate_y(-pitch);
-        pitched.translate(-0.0, -0.0, -0.0);
+        pitched.translate(-pitch_at.x, -pitch_at.y, -pitch_at.z);
         let mut turned = Matrix3D::identity();
-        turned.translate(0.0, 0.0, 0.0);
+        turned.translate(turn_at.x, turn_at.y, turn_at.z);
         turned.in_place_pre_rotate_z(angle);
-        turned.translate(-0.0, -0.0, -0.0);
+        turned.translate(-turn_at.x, -turn_at.y, -turn_at.z);
         attach = Matrix3D::mul(&Matrix3D::mul(&turned, &pitched), &attach);
     }
     Matrix3D::mul(&launcher_mtx, &attach)
 }
 
-/// `Weapon::positionProjectileForLaunch`. Launch bones come from the unported draw
-/// modules, so the projectile starts at [`launch_transform`], the reference's
-/// answer for a launcher without them.
+/// `Weapon::positionProjectileForLaunch`.
 pub fn position_projectile_for_launch(
     sim: &mut dyn SimApi,
     projectile: ObjectSlot,
     launcher: Option<ObjectSlot>,
     wslot: WeaponSlotType,
-    _specific_barrel_to_use: Int,
+    specific_barrel_to_use: Int,
 ) {
     let Some((launcher, launcher_id)) =
         launcher.and_then(|l| sim.object(l).map(|o| (l, o.id)))
@@ -416,7 +433,7 @@ pub fn position_projectile_for_launch(
         return;
     };
 
-    let world = launch_transform(sim, launcher, wslot);
+    let world = launch_transform(sim, launcher, wslot, specific_barrel_to_use);
     let world_pos = Coord3D::new(world.rows[0][3], world.rows[1][3], world.rows[2][3]);
     sim.set_object_transform_matrix(projectile, &world);
     sim.set_object_position(projectile, &world_pos);
