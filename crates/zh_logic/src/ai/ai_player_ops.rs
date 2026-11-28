@@ -720,10 +720,9 @@ pub fn is_supply_source_attacked(sim: &SimContext, ai: &mut AiPlayer) -> bool {
     }
     let attacked_frame = sim
         .world
-        .player_attacked_frame
-        .get(&ai.player)
-        .copied()
-        .unwrap_or(0);
+        .players
+        .player(ai.player)
+        .map_or(0, |p| p.attacked_frame);
     if attacked_frame.wrapping_add(scan_window) < cur_frame {
         return false;
     }

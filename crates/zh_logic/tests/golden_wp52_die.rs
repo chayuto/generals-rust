@@ -164,7 +164,10 @@ fn wp52_die_golden_vectors() {
     api.ctx.rules.ocl_names.insert("OCL_EjectAir".to_owned());
     api.ctx.rules.ocl_names.insert("OCL_EjectGround".to_owned());
 
-    let team_a = TeamId(0); // Neutral
+    // The neutral player's team: `TeamId(0)` is a null `Team*`, which has no player.
+    let team_a = TeamId(1);
+    api.ctx.world.team_players.insert(team_a, 0);
+    api.ctx.world.neutral_team_id = team_a;
     let team_b = TeamId(2); // Active non-neutral
     api.ctx.world.team_is_neutral.insert(team_a, TRUE);
     api.ctx.world.team_is_neutral.insert(team_b, FALSE);
@@ -362,7 +365,10 @@ fn wp52_die_golden_vectors() {
         api.ctx.world.frame = frame0;
 
         api.ctx.world.player_upgrades.clear();
-        api.ctx.world.player_sciences.clear();
+        for p in 0..16 {
+            let player = api.ctx.world.players.player_mut(p).expect("player");
+            player.sciences.clear();
+        }
 
         let df = get_i32(line, "df").unwrap();
         let vf = get_i32(line, "vf").unwrap();
@@ -611,11 +617,9 @@ fn wp52_die_golden_vectors() {
             )),
             3 => {
                 api.ctx
-                    .world
-                    .player_sciences
-                    .entry(team_a)
-                    .or_default()
-                    .insert(sci_die);
+                    .player_of_team_mut(team_a)
+                    .expect("player")
+                    .push_science(sci_die);
                 Some(spawn(
                     &mut api,
                     "WP52_KillerInf",
@@ -626,11 +630,9 @@ fn wp52_die_golden_vectors() {
             }
             4 => {
                 api.ctx
-                    .world
-                    .player_sciences
-                    .entry(team_a)
-                    .or_default()
-                    .insert(sci_die);
+                    .player_of_team_mut(team_a)
+                    .expect("player")
+                    .push_science(sci_die);
                 Some(spawn(
                     &mut api,
                     "WP52_KillerVeh",

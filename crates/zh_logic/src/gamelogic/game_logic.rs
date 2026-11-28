@@ -984,15 +984,6 @@ pub fn sync_teams(sim: &mut SimContext, teams: &TeamFactory) {
                     .insert(team, Bool::from(player.player_type == PlayerType::Human));
                 sim.world.team_sides.insert(team, player.side.clone());
                 sim.world.team_colors.insert(team, player.color);
-                sim.world
-                    .player_sciences
-                    .insert(team, player.sciences.iter().copied().collect());
-                sim.world
-                    .player_preorder
-                    .insert(team, Bool::from(player.is_preorder));
-                sim.world
-                    .player_handicaps
-                    .insert(team, player.handicap.clone());
                 if player.ai == Some(AiKind::Skirmish) {
                     sim.world.skirmish_ai_teams.insert(team);
                 }

@@ -487,10 +487,15 @@ End
 
         sim.world.frame = frame0;
         sim.world.player_upgrades.clear();
-        sim.world.player_sciences.clear();
-        sim.world.player_radars.clear();
+        for p in 0..16 {
+            let player = sim.world.players.player_mut(p).expect("player");
+            player.sciences.clear();
+            player.radar_count = 0;
+            player.disable_proof_radar_count = 0;
+            player.radar_disabled = false;
+            player.production_changes.clear();
+        }
         sim.world.player_energy.clear();
-        sim.world.player_cost_modifiers.clear();
         sim.world.registered_supply_centers.clear();
         sim.world.spawned_ocls.clear();
         sim.world.triggered_fx_lists.clear();

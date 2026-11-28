@@ -470,12 +470,20 @@ impl Player {
         self.sciences.contains(&science)
     }
 
-    /// `addScience`.
-    pub fn add_science(&mut self, science: ScienceType, world: &mut dyn PlayerWorld) -> bool {
+    /// The list part of `addScience`; `false` when the player has it already.
+    pub fn push_science(&mut self, science: ScienceType) -> bool {
         if self.has_science(science) {
             return false;
         }
         self.sciences.push(science);
+        true
+    }
+
+    /// `addScience`.
+    pub fn add_science(&mut self, science: ScienceType, world: &mut dyn PlayerWorld) -> bool {
+        if !self.push_science(science) {
+            return false;
+        }
         world.science_added(self.index, science);
         true
     }
@@ -508,6 +516,122 @@ impl Player {
                 refs: 1,
             }),
         }
+    }
+
+    /// `removeKindOfProductionCostChange`: the first equal pair loses a reference.
+    pub fn remove_production_cost_change(&mut self, kind_of: &KindOfMaskType, percent: Real) {
+        let Some(at) = self
+            .production_changes
+            .iter()
+            .position(|c| c.percent == percent && c.kind_of == *kind_of)
+        else {
+            return;
+        };
+        let change = &mut self.production_changes[at];
+        change.refs = change.refs.wrapping_sub(1);
+        if change.refs == 0 {
+            self.production_changes.remove(at);
+        }
+    }
+
+    /// `getProductionCostChangeBasedOnKindOf`: the product of every change whose
+    /// kinds `kind_of` all has.
+    pub fn production_cost_change_for(&self, kind_of: &KindOfMaskType) -> Real {
+        let mut factor: Real = 1.0;
+        for change in &self.production_changes {
+            if kind_of.test_for_all(&change.kind_of) != FALSE {
+                factor *= 1.0 + change.percent;
+            }
+        }
+        factor
+    }
+
+    /// `addRadar`. The radar sounds are the client's.
+    pub fn add_radar(&mut self, disable_proof: bool) {
+        self.radar_count = self.radar_count.wrapping_add(1);
+        if disable_proof {
+            self.disable_proof_radar_count = self.disable_proof_radar_count.wrapping_add(1);
+        }
+    }
+
+    /// `removeRadar`; the counts are not clamped.
+    pub fn remove_radar(&mut self, disable_proof: bool) {
+        self.radar_count = self.radar_count.wrapping_sub(1);
+        if disable_proof {
+            self.disable_proof_radar_count = self.disable_proof_radar_count.wrapping_sub(1);
+        }
+    }
+
+    pub fn disable_radar(&mut self) {
+        self.radar_disabled = true;
+    }
+
+    pub fn enable_radar(&mut self) {
+        self.radar_disabled = false;
+    }
+
+    /// `hasRadar`.
+    pub fn has_radar(&self) -> bool {
+        if self.radar_disabled && self.disable_proof_radar_count == 0 {
+            return false;
+        }
+        self.radar_count > 0
+    }
+
+    /// `getOrStartSpecialPowerReadyFrame`: a power without a timer starts one,
+    /// ready at `now`.
+    pub fn get_or_start_special_power_ready_frame(
+        &mut self,
+        template_id: UnsignedInt,
+        now: UnsignedInt,
+    ) -> UnsignedInt {
+        if let Some(timer) = self.special_power_timer(template_id) {
+            return timer.ready_frame;
+        }
+        self.add_special_power_timer(template_id, now);
+        now
+    }
+
+    /// `expressSpecialPowerReadyFrame`.
+    pub fn express_special_power_ready_frame(
+        &mut self,
+        template_id: UnsignedInt,
+        frame: UnsignedInt,
+    ) {
+        match self.special_power_timer(template_id) {
+            Some(timer) => timer.ready_frame = frame,
+            None => self.add_special_power_timer(template_id, frame),
+        }
+    }
+
+    /// `resetOrStartSpecialPowerReadyFrame`: a running timer restarts; a new one
+    /// is ready at `now`, without the reload time.
+    pub fn reset_or_start_special_power_ready_frame(
+        &mut self,
+        template_id: UnsignedInt,
+        now: UnsignedInt,
+        reload_time: UnsignedInt,
+    ) {
+        match self.special_power_timer(template_id) {
+            Some(timer) => timer.ready_frame = now.wrapping_add(reload_time),
+            None => self.add_special_power_timer(template_id, now),
+        }
+    }
+
+    fn special_power_timer(
+        &mut self,
+        template_id: UnsignedInt,
+    ) -> Option<&mut SpecialPowerReadyTimer> {
+        self.special_power_timers
+            .iter_mut()
+            .find(|t| t.template_id == template_id)
+    }
+
+    fn add_special_power_timer(&mut self, template_id: UnsignedInt, ready_frame: UnsignedInt) {
+        self.special_power_timers.push(SpecialPowerReadyTimer {
+            template_id,
+            ready_frame,
+        });
     }
 
     fn delete_ai(&mut self, world: &mut dyn PlayerWorld) {

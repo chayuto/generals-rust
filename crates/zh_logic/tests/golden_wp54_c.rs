@@ -329,14 +329,16 @@ fn run_special_power(sim: &mut SimContext, case: &Case) -> (Vec<String>, u32) {
                 result = i32::from(pass == TRUE);
             }
             1 => {
-                sim.world
-                    .player_sciences
-                    .entry(teams[who])
-                    .or_default()
-                    .insert(science_of(op[2]));
+                let science = science_of(op[2]);
+                sim.player_of_team_mut(teams[who])
+                    .expect("player")
+                    .push_science(science);
             }
             2 => {
-                sim.world.player_sciences.remove(&teams[who]);
+                sim.player_of_team_mut(teams[who])
+                    .expect("player")
+                    .sciences
+                    .clear();
             }
             3 => trackers[who].schedule.set_next_call_frame(op[2]),
             other => panic!("unknown op {other}"),

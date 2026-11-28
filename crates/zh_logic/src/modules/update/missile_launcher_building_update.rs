@@ -144,7 +144,7 @@ impl MissileLauncherBuildingUpdate {
         let mut out = (FALSE, 0);
         if let Some(module) = self.special_power_module {
             sim.with_special_power_module(module, &mut |spm, sim, ctx| {
-                out = (spm.is_ready(&*sim, ctx), spm.get_ready_frame(&*sim, ctx));
+                out = (spm.is_ready(sim, ctx), spm.get_ready_frame(sim, ctx));
             });
         }
         out

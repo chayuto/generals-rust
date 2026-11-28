@@ -20,7 +20,7 @@ use zh_logic::rules::rank_info::RankInfoStore;
 use zh_logic::rules::science::{ScienceTextLookup, ScienceType, SCIENCE_INVALID};
 use zh_logic::rules::upgrade::UpgradeMaskType;
 use zh_logic::scripts::script_engine::ScriptEngine;
-use zh_logic::sim::{SimApi, SimContext, SimWorld};
+use zh_logic::sim::{SimApi, SimContext, SimView, SimWorld};
 use zh_logic::spatial::sides_list::SidesList;
 
 const GOLDEN: &str = include_str!("../../../docs/golden_vectors/SciencePurchase.json");
@@ -236,18 +236,6 @@ fn new_game(lines: &[String]) -> Game {
             sim.factory_new_object(template, TeamId(team))
         })
         .collect();
-    // The harness's first read of a shared power starts the player's timer
-    // (`getOrStartSpecialPowerReadyFrame`). The sim's read does not start one
-    // (its timers are also by team), so start them here.
-    let shared = sim
-        .rules
-        .special_power_store
-        .find_special_power_template("SP_B")
-        .expect("SP_B")
-        .id();
-    for team in [1, 2] {
-        sim.express_shared_special_power_ready_frame(TeamId(team), shared, 1);
-    }
     let modules = slots
         .iter()
         .map(|&slot| {
@@ -343,9 +331,6 @@ fn science_purchase_matches_reference() {
                         let player = game.sim.world.players.player_mut(q).expect("player");
                         player.set_science_availability(science, 0);
                     }
-                    // The harness leaves the objects alone, and the sim's copy
-                    // only matters to them.
-                    game.sim.world.player_sciences.clear();
                 }
             }
             1 => {
@@ -372,11 +357,6 @@ fn science_purchase_matches_reference() {
                 if got {
                     bought += 1;
                     assert!(game.scripts.acquired_sciences[p as usize].ends_with(&[science]));
-                    for team in game.sim.world.team_players.iter() {
-                        if *team.1 == p {
-                            assert!(game.sim.world.player_sciences[team.0].contains(&science));
-                        }
-                    }
                 }
             }
         }
@@ -413,8 +393,8 @@ fn the_recorded_order_buys_the_science() {
     assert!(state.unknown_names.is_empty());
 }
 
-/// The sim keeps the sciences by team: every team of the player gets one, the
-/// others none. No player, no purchase.
+/// Every team of the player reads the player's science, the others none. No
+/// player, no purchase.
 #[test]
 fn every_team_of_the_player_holds_the_science() {
     let lines = lines();
@@ -430,13 +410,10 @@ fn every_team_of_the_player_holds_the_science() {
     };
     assert!(!buy(&mut game, 99));
     assert!(buy(&mut game, 1));
-    let holders: Vec<TeamId> = game
-        .sim
-        .world
-        .player_sciences
-        .iter()
-        .filter(|(_, held)| held.contains(&science))
-        .map(|(&team, _)| team)
+    let holders: Vec<TeamId> = [1, 2, 7]
+        .map(TeamId)
+        .into_iter()
+        .filter(|&team| game.sim.player_has_science(team, science) != 0)
         .collect();
     assert_eq!(holders, [TeamId(1), TeamId(7)]);
 }

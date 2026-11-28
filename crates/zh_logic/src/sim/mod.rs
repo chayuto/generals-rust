@@ -26,7 +26,7 @@ use crate::combat::damage::{DamageInfo, PlayerMaskType, PLAYERMASK_ALL};
 use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
-use crate::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
+use crate::economy::energy::{Energy, EnergyObjectInfo};
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use crate::economy::score_keeper::ScoreKeeper;
 use crate::economy::MAX_PLAYER_COUNT;
@@ -1149,8 +1149,6 @@ pub trait SimView {
     fn find_special_ability_update(&self, owner: ObjectSlot, power_type: SpecialPowerType) -> Option<ModuleSlot>;
     /// `SpecialPowerUpdateInterface::isActive`.
     fn special_ability_is_active(&self, module: ModuleSlot) -> Bool;
-    /// `(isReady(), getReadyFrame())` of the owner's special power module.
-    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)>;
     /// An `ActionManager::can...` answer. The action manager is unported; the world holds them.
     fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool;
     /// The terrain half of `PartitionFilterLineOfSight`; the whole filter is
@@ -1285,7 +1283,6 @@ pub trait SimView {
         owner: ObjectSlot,
         template_id: UnsignedInt,
     ) -> Option<ModuleSlot>;
-    fn shared_special_power_ready_frame(&self, team_id: TeamId, template_id: UnsignedInt) -> UnsignedInt;
     fn player_captured_object_count(&self, team_id: TeamId) -> Int;
     fn special_power_uses_delay(&self) -> Bool;
     fn player_energy_production(&self, team_id: TeamId) -> Int;
@@ -1871,7 +1868,19 @@ pub trait SimApi: SimView {
     fn set_passengers_allowed_to_fire(&mut self, owner: ObjectSlot, allowed: Bool);
     fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool);
     fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool);
-    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt);
+    /// `getOrStartSpecialPowerReadyFrame` of the controlling player: the first
+    /// read of a shared power starts its timer.
+    fn shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt;
+    /// `(isReady(), getReadyFrame())` of the owner's special power module.
+    fn special_power_module_ready(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+    ) -> Option<(Bool, UnsignedInt)>;
     /// `RadarUpdate::extendRadar` on the owner's first `RadarUpdate`, if any.
     fn extend_radar_update(&mut self, owner: ObjectSlot);
     /// `PowerPlantUpdateInterface::extendRods(TRUE)` on every module that has it.
@@ -2451,16 +2460,12 @@ pub struct SimWorld {
     /// listed nowhere counts as a prototype of its own, after the listed ones.
     pub player_team_prototypes: BTreeMap<Int, Vec<Vec<TeamId>>>,
     pub player_relationships: BTreeMap<(Int, Int), Relationship>,
-    pub player_sciences: BTreeMap<TeamId, BTreeSet<ScienceType>>,
     /// `Player::m_upgradesCompleted` by player index.
     pub player_upgrades: BTreeMap<Int, UpgradeMaskType>,
-    pub player_preorder: BTreeMap<TeamId, Bool>,
     pub registered_supply_centers: Vec<ObjectId>,
     pub registered_supply_warehouses: Vec<ObjectId>,
     pub kills_scored: Vec<(ObjectId, ObjectId)>,
     pub upgrades_recorded: Vec<(TeamId, String)>,
-    pub attacked_by: BTreeMap<TeamId, BTreeSet<Int>>,
-    pub player_attacked_frame: BTreeMap<Int, UnsignedInt>,
     pub spawned_ocls: Vec<(String, ObjectId, Coord3D, Coord3D)>,
     pub delivered_payloads: Vec<crate::object::ocl_runtime::DeliveredPayloadRecord>,
     pub transferred_object_names: Vec<(ObjectId, ObjectId)>,
@@ -2472,16 +2477,11 @@ pub struct SimWorld {
     pub player_money: BTreeMap<Int, UnsignedInt>,
     pub player_is_human: BTreeMap<TeamId, Bool>,
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
-    pub player_cost_modifiers: BTreeMap<TeamId, Vec<(KindOfMaskType, Real, Int)>>,
-    pub player_radars: BTreeMap<TeamId, (Int, Int)>,
     /// `Player::m_energy` by player index.
     pub player_energy: BTreeMap<Int, Energy>,
     /// `Player::m_ai` of every computer player, by player index.
     pub ai_players: BTreeMap<Int, crate::ai::ai_player::AiPlayer>,
-    pub player_radar_disabled_until: BTreeMap<TeamId, UnsignedInt>,
-    pub player_bounty_percent: BTreeMap<TeamId, Real>,
     pub player_captured_objects: BTreeMap<TeamId, Int>,
-    pub shared_special_power_ready_frames: BTreeMap<(TeamId, UnsignedInt), UnsignedInt>,
     pub special_power_uses_delay: Bool,
     /// `Player::getScoreKeeper()` by player index.
     pub score_keepers: BTreeMap<Int, ScoreKeeper>,
@@ -2582,16 +2582,6 @@ pub struct SimWorld {
     pub skill_points_awarded: BTreeMap<Int, Int>,
     /// `Player::m_upgradesInProgress` by player index.
     pub player_upgrades_in_progress: BTreeMap<Int, UpgradeMaskType>,
-    /// `Player::m_handicap`; absent means every handicap is 1.
-    pub player_handicaps: BTreeMap<TeamId, crate::economy::handicap::Handicap>,
-    /// `Player::m_productionCostChanges` by template name.
-    pub player_cost_change_percent: BTreeMap<(TeamId, String), Real>,
-    /// `Player::m_productionTimeChanges` by template name.
-    pub player_time_change_percent: BTreeMap<(TeamId, String), Real>,
-    /// Teams whose player has `m_canBuildBase` cleared.
-    pub teams_cannot_build_base: BTreeSet<TeamId>,
-    /// Teams whose player has `m_canBuildUnits` cleared.
-    pub teams_cannot_build_units: BTreeSet<TeamId>,
     /// `Player::getAcademyStats()` by player index.
     pub player_academy: BTreeMap<Int, crate::economy::academy_stats::AcademyStats>,
     /// `GameLogic::m_thingTemplateBuildableOverrides` by template name.
@@ -2640,15 +2630,11 @@ impl SimWorld {
             team_members: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),
             player_relationships: BTreeMap::new(),
-            player_sciences: BTreeMap::new(),
             player_upgrades: BTreeMap::new(),
-            player_preorder: BTreeMap::new(),
             registered_supply_centers: Vec::new(),
             registered_supply_warehouses: Vec::new(),
             kills_scored: Vec::new(),
             upgrades_recorded: Vec::new(),
-            attacked_by: BTreeMap::new(),
-            player_attacked_frame: BTreeMap::new(),
             spawned_ocls: Vec::new(),
             delivered_payloads: Vec::new(),
             transferred_object_names: Vec::new(),
@@ -2658,14 +2644,9 @@ impl SimWorld {
             player_money: BTreeMap::new(),
             player_is_human: BTreeMap::new(),
             team_is_neutral: BTreeMap::new(),
-            player_cost_modifiers: BTreeMap::new(),
-            player_radars: BTreeMap::new(),
             player_energy: BTreeMap::new(),
             ai_players: BTreeMap::new(),
-            player_radar_disabled_until: BTreeMap::new(),
-            player_bounty_percent: BTreeMap::new(),
             player_captured_objects: BTreeMap::new(),
-            shared_special_power_ready_frames: BTreeMap::new(),
             special_power_uses_delay: TRUE,
             score_keepers: BTreeMap::new(),
             script_topple_directions: BTreeMap::new(),
@@ -2739,11 +2720,6 @@ impl SimWorld {
             control_bar_overrides: BTreeMap::new(),
             skill_points_awarded: BTreeMap::new(),
             player_upgrades_in_progress: BTreeMap::new(),
-            player_handicaps: BTreeMap::new(),
-            player_cost_change_percent: BTreeMap::new(),
-            player_time_change_percent: BTreeMap::new(),
-            teams_cannot_build_base: BTreeSet::new(),
-            teams_cannot_build_units: BTreeSet::new(),
             player_academy: BTreeMap::new(),
             buildable_overrides: BTreeMap::new(),
             superweapon_restriction: 0,
@@ -3125,7 +3101,7 @@ impl SimContext {
     }
 
     /// `Player::getEnergy`. `Player::init` makes every player the owner of its pool.
-    fn energy_of(&mut self, player_idx: Int) -> &mut Energy {
+    pub(crate) fn energy_of(&mut self, player_idx: Int) -> &mut Energy {
         self.world
             .player_energy
             .entry(player_idx)
@@ -4278,6 +4254,7 @@ impl SimContext {
 
             // `Object::~Object` leaves its team before it deletes the modules.
             if let Some(team) = self.world.objects.get(slot).map(|o| o.team_id) {
+                self.world.team_member_remove(team, slot);
                 self.adjust_team_power(slot, team, FALSE);
             }
 
@@ -4296,9 +4273,6 @@ impl SimContext {
             if let Some(id) = self.world.objects.id_of(slot) {
                 self.world.partition.unregister(id);
                 crate::ai::ai_group::leave_group(self, id);
-            }
-            if let Some(team) = self.world.objects.get(slot).map(|o| o.team_id) {
-                self.world.team_member_remove(team, slot);
             }
             let _ = self.world.objects.despawn(slot);
         }
@@ -4836,7 +4810,6 @@ impl SimContext {
     /// The energy half of `Player::becomingTeamMember`, which every `Object::setTeam`
     /// runs (also at construction and destruction): unless under construction,
     /// `Object::friend_adjustPowerForPlayer`. A disabled producer is not counted.
-    /// `Player::onPowerBrownOutChange` is unported.
     fn adjust_team_power(&mut self, owner: ObjectSlot, team_id: TeamId, incoming: Bool) {
         let under_construction = self.world.objects.get(owner).is_none_or(|o| {
             o.status.test(ObjectStatusType::UnderConstruction.as_i32()) != FALSE
@@ -4853,13 +4826,13 @@ impl SimContext {
         {
             return;
         }
-        let frame = self.world.frame;
-        let energy = self.energy_of(player_idx);
-        if incoming != FALSE {
-            energy.object_entering_influence(Some(info), frame, &mut NoopEnergyCallbacks);
-        } else {
-            energy.object_leaving_influence(Some(info), frame, &mut NoopEnergyCallbacks);
-        }
+        self.change_energy(player_idx, |energy, frame, told| {
+            if incoming != FALSE {
+                energy.object_entering_influence(Some(info), frame, told);
+            } else {
+                energy.object_leaving_influence(Some(info), frame, told);
+            }
+        });
     }
 
     /// `Object::onDisabledEdge`: every behaviour, then the power adjustment.
@@ -5149,13 +5122,6 @@ impl SimView for SimContext {
         self.world.player_battle_plans.get(&player)
     }
 
-    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
-        let ms = self.find_special_power_module(owner, template_id)?;
-        let sp = self.world.modules.payload(ms)?.as_special_power()?;
-        let ctx = self.world.modules.meta(ms).context(ms);
-        Some((sp.is_ready(self, ctx), sp.get_ready_frame(self, ctx)))
-    }
-
     fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
         let ids = self.world.objects.id_of(actor).zip(self.world.objects.id_of(target));
         Bool::from(ids.is_some_and(|(a, t)| self.world.action_permissions.contains(&(a, t, query))))
@@ -5412,24 +5378,17 @@ impl SimView for SimContext {
     }
 
     fn player_has_science(&self, team_id: TeamId, science: ScienceType) -> Bool {
-        if self
-            .world
-            .player_sciences
-            .get(&team_id)
-            .is_some_and(|set| set.contains(&science))
-        {
-            TRUE
-        } else {
-            FALSE
-        }
+        Bool::from(
+            self.player_of_team(team_id)
+                .is_some_and(|p| p.has_science(science)),
+        )
     }
 
     fn player_is_preorder(&self, team_id: TeamId) -> Bool {
-        self.world
-            .player_preorder
-            .get(&team_id)
-            .copied()
-            .unwrap_or(FALSE)
+        Bool::from(
+            self.player_of_team(team_id)
+                .is_some_and(|p| p.is_preorder),
+        )
     }
 
     fn weapon_bonus_condition_flags(&self, owner: ObjectSlot) -> UnsignedInt {
@@ -5936,18 +5895,6 @@ impl SimView for SimContext {
         None
     }
 
-    fn shared_special_power_ready_frame(
-        &self,
-        team_id: TeamId,
-        template_id: UnsignedInt,
-    ) -> UnsignedInt {
-        self.world
-            .shared_special_power_ready_frames
-            .get(&(team_id, template_id))
-            .copied()
-            .unwrap_or(self.world.frame)
-    }
-
     fn player_captured_object_count(&self, team_id: TeamId) -> Int {
         self.world
             .player_captured_objects
@@ -5967,23 +5914,13 @@ impl SimView for SimContext {
     }
 
     fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int) {
-        self.world
-            .player_radars
-            .get(&team_id)
-            .copied()
-            .unwrap_or((0, 0))
+        self.player_of_team(team_id)
+            .map_or((0, 0), |p| (p.radar_count, p.disable_proof_radar_count))
     }
 
     fn production_cost_change(&self, team_id: TeamId, kindof: &KindOfMaskType) -> Real {
-        let mut start = 1.0_f32;
-        if let Some(list) = self.world.player_cost_modifiers.get(&team_id) {
-            for (ko_mask, percent, _refs) in list {
-                if kindof.test_for_all(ko_mask) != FALSE {
-                    start *= 1.0_f32 + *percent;
-                }
-            }
-        }
-        start
+        self.player_of_team(team_id)
+            .map_or(1.0, |p| p.production_cost_change_for(kindof))
     }
 
     fn world_object_slots(&self) -> Vec<ObjectSlot> {
@@ -6006,11 +5943,8 @@ impl SimView for SimContext {
     }
 
     fn player_bounty_percent(&self, team_id: TeamId) -> Real {
-        self.world
-            .player_bounty_percent
-            .get(&team_id)
-            .copied()
-            .unwrap_or(0.0)
+        self.player_of_team(team_id)
+            .map_or(0.0, |p| p.cash_bounty_percent)
     }
 
     fn object_is_trainable(&self, owner: ObjectSlot) -> Bool {
@@ -7907,16 +7841,19 @@ impl SimApi for SimContext {
         let Some(atk_team) = self.world.objects.get(atk_slot).map(|o| o.team_id) else {
             return;
         };
+        // `Player::setAttackedBy`.
         let atk_player = self.player_index_for_team(atk_team);
-        let victim_player = self.player_index_for_team(victim_team);
-        self.world
-            .attacked_by
-            .entry(victim_team)
-            .or_default()
-            .insert(atk_player);
-        self.world
-            .player_attacked_frame
-            .insert(victim_player, self.world.frame);
+        let frame = self.world.frame;
+        let Some(victim) = self.player_of_team_mut(victim_team) else {
+            return;
+        };
+        if let Some(by) = usize::try_from(atk_player)
+            .ok()
+            .and_then(|at| victim.attacked_by.get_mut(at))
+        {
+            *by = true;
+        }
+        victim.attacked_frame = frame;
     }
 
     fn notify_subdual_damage(&mut self, owner: ObjectSlot, amount: Real) {
@@ -8510,38 +8447,33 @@ impl SimApi for SimContext {
     }
 
     fn grant_player_science(&mut self, team_id: TeamId, science: ScienceType) -> Bool {
-        let inserted = self
+        // `Player::grantScience`.
+        if !self.rules.science_store.is_science_grantable(science) {
+            return FALSE;
+        }
+        let Some(player) = self.controlling_player(team_id) else {
+            return FALSE;
+        };
+        let added = self
             .world
-            .player_sciences
-            .entry(team_id)
-            .or_default()
-            .insert(science);
-        Bool::from(inserted)
+            .players
+            .player_mut(player)
+            .is_some_and(|p| p.push_science(science));
+        if added {
+            crate::player::science_purchase::science_added_to_world(self, player, science);
+        }
+        Bool::from(added)
     }
 
     fn add_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
-        let list = self.world.player_cost_modifiers.entry(team_id).or_default();
-        if let Some((_, _, refs)) = list
-            .iter_mut()
-            .find(|(k, p, _)| k == kindof && p.to_bits() == percent.to_bits())
-        {
-            *refs += 1;
-            return;
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.add_production_cost_change(kindof.clone(), percent);
         }
-        list.push((kindof.clone(), percent, 1));
     }
 
     fn remove_cost_modifier(&mut self, team_id: TeamId, kindof: &KindOfMaskType, percent: Real) {
-        if let Some(list) = self.world.player_cost_modifiers.get_mut(&team_id) {
-            if let Some(pos) = list
-                .iter()
-                .position(|(k, p, _)| k == kindof && p.to_bits() == percent.to_bits())
-            {
-                list[pos].2 -= 1;
-                if list[pos].2 <= 0 {
-                    list.remove(pos);
-                }
-            }
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.remove_production_cost_change(kindof, percent);
         }
     }
 
@@ -8995,24 +8927,40 @@ impl SimApi for SimContext {
     }
 
     fn add_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
-        let entry = self.world.player_radars.entry(team_id).or_insert((0, 0));
-        entry.0 += 1;
-        if disable_proof != FALSE {
-            entry.1 += 1;
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.add_radar(disable_proof != FALSE);
         }
     }
 
     fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
-        let entry = self.world.player_radars.entry(team_id).or_insert((0, 0));
-        entry.0 = (entry.0 - 1).max(0);
-        if disable_proof != FALSE {
-            entry.1 = (entry.1 - 1).max(0);
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.remove_radar(disable_proof != FALSE);
         }
     }
 
-    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
-        let until = self.world.frame.saturating_add(frames);
-        self.world.player_radar_disabled_until.insert(team_id, until);
+    fn special_power_module_ready(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+    ) -> Option<(Bool, UnsignedInt)> {
+        let module = self.find_special_power_module(owner, template_id)?;
+        self.dispatch_module(module, |m, sim, ctx| {
+            m.as_special_power_mut()
+                .map(|sp| (sp.is_ready(sim, ctx), sp.get_ready_frame(sim, ctx)))
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt {
+        let now = self.world.frame;
+        self.player_of_team_mut(team_id).map_or(now, |p| {
+            p.get_or_start_special_power_ready_frame(template_id, now)
+        })
     }
 
     fn retract_power_plant(&mut self, owner: ObjectSlot) {
@@ -9095,27 +9043,21 @@ impl SimApi for SimContext {
 
     fn add_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
         let info = self.energy_object_info(owner);
-        let now = self.world.frame;
         if let Some(p) = self.controlling_player(team_id) {
-            self.energy_of(p)
-                .add_power_bonus(info, now, &mut NoopEnergyCallbacks);
+            self.change_energy(p, |e, now, told| e.add_power_bonus(info, now, told));
         }
     }
 
     fn remove_power_bonus(&mut self, team_id: TeamId, owner: ObjectSlot) {
         let info = self.energy_object_info(owner);
-        let now = self.world.frame;
         if let Some(p) = self.controlling_player(team_id) {
-            self.energy_of(p)
-                .remove_power_bonus(info, now, &mut NoopEnergyCallbacks);
+            self.change_energy(p, |e, now, told| e.remove_power_bonus(info, now, told));
         }
     }
 
     fn adjust_player_power(&mut self, team_id: TeamId, delta: Int, adding: Bool) {
-        let now = self.world.frame;
         if let Some(p) = self.controlling_player(team_id) {
-            self.energy_of(p)
-                .adjust_power(delta, adding, now, &mut NoopEnergyCallbacks);
+            self.change_energy(p, |e, now, told| e.adjust_power(delta, adding, now, told));
         }
     }
 
@@ -9123,6 +9065,8 @@ impl SimApi for SimContext {
         let until = self.world.frame.wrapping_add(frames);
         if let Some(p) = self.controlling_player(team_id) {
             self.energy_of(p).set_power_sabotaged_till_frame(until);
+            // `SabotagePowerPlantCrateCollide::executeCrateBehavior`.
+            self.on_power_brown_out_change(p, TRUE);
         }
     }
 
@@ -9246,9 +9190,9 @@ impl SimApi for SimContext {
         template_id: UnsignedInt,
         frame: UnsignedInt,
     ) {
-        self.world
-            .shared_special_power_ready_frames
-            .insert((team_id, template_id), frame);
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.express_special_power_ready_frame(template_id, frame);
+        }
     }
 
     fn reset_shared_special_power_ready_frame(
@@ -9261,11 +9205,11 @@ impl SimApi for SimContext {
             .special_power_store
             .find_special_power_template_by_id(template_id)
             .map_or(0, |t| t.reload_time());
-        let ready = self.world.frame.saturating_add(reload);
-        self.world
-            .shared_special_power_ready_frames
-            .insert((team_id, template_id), ready);
-        ready
+        let now = self.world.frame;
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.reset_or_start_special_power_ready_frame(template_id, now, reload);
+        }
+        self.shared_special_power_ready_frame(team_id, template_id)
     }
 
     fn notify_special_power_triggered(
@@ -9501,7 +9445,9 @@ impl SimApi for SimContext {
     }
 
     fn apply_cash_bounty_percent(&mut self, team_id: TeamId, percent: Real) {
-        self.world.player_bounty_percent.insert(team_id, percent);
+        if let Some(p) = self.player_of_team_mut(team_id) {
+            p.cash_bounty_percent = percent;
+        }
     }
 
     fn trigger_dam_break(&mut self, owner: ObjectSlot) {
@@ -9605,9 +9551,12 @@ impl SimApi for SimContext {
     }
 
     fn capture_object(&mut self, owner: ObjectSlot, new_team: TeamId) {
-        // `Player::becomingTeamMember(obj, false)`, while the old team still controls it.
+        // The object leaves its old team's list, then
+        // `Player::becomingTeamMember(obj, false)` while that team still controls it:
+        // a brown-out change from the lost power no longer reaches the object.
         if let Some(old) = self.world.objects.get(owner).map(|o| o.team_id) {
             if old != new_team {
+                self.world.team_member_remove(old, owner);
                 self.adjust_team_power(owner, old, FALSE);
             }
         }
@@ -9626,7 +9575,6 @@ impl SimApi for SimContext {
         if old_team != TeamId::INVALID {
             battle_plan_update::battle_plan_team_member(self, old_team, owner, FALSE);
         }
-        self.world.team_member_remove(old_team, owner);
         // `TeamId::INVALID` is a null `Team*`: `setTeam` runs `onCapture` only between two
         // teams.
         if new_team == TeamId::INVALID {
@@ -11907,10 +11855,6 @@ impl SimView for MockSimApi {
         self.ctx.special_ability_is_active(module)
     }
 
-    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
-        self.ctx.special_power_module_ready(owner, template_id)
-    }
-
     fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
         self.ctx.action_manager_allows(actor, target, query)
     }
@@ -12205,15 +12149,6 @@ impl SimView for MockSimApi {
         template_id: UnsignedInt,
     ) -> Option<ModuleSlot> {
         self.ctx.find_special_power_module(owner, template_id)
-    }
-
-    fn shared_special_power_ready_frame(
-        &self,
-        team_id: TeamId,
-        template_id: UnsignedInt,
-    ) -> UnsignedInt {
-        self.ctx
-            .shared_special_power_ready_frame(team_id, template_id)
     }
 
     fn player_captured_object_count(&self, team_id: TeamId) -> Int {
@@ -13497,8 +13432,21 @@ impl SimApi for MockSimApi {
         self.ctx.remove_radar(team_id, disable_proof);
     }
 
-    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
-        self.ctx.disable_radar(team_id, frames);
+    fn special_power_module_ready(
+        &mut self,
+        owner: ObjectSlot,
+        template_id: UnsignedInt,
+    ) -> Option<(Bool, UnsignedInt)> {
+        self.ctx.special_power_module_ready(owner, template_id)
+    }
+
+    fn shared_special_power_ready_frame(
+        &mut self,
+        team_id: TeamId,
+        template_id: UnsignedInt,
+    ) -> UnsignedInt {
+        self.ctx
+            .shared_special_power_ready_frame(team_id, template_id)
     }
 
     fn retract_power_plant(&mut self, owner: ObjectSlot) {

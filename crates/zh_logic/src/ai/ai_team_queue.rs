@@ -355,38 +355,24 @@ impl TeamInQueue {
 struct TempUnitBuildGuard {
     player: PlayerIndex,
     was_enabled: bool,
-    removed_teams: Vec<TeamId>,
 }
 
 impl TempUnitBuildGuard {
     fn enable(sim: &mut SimContext, player: PlayerIndex) -> Self {
-        let was_enabled = sim.world.players.player(player).is_some_and(|p| p.can_build_units);
-        if let Some(p) = sim.world.players.player_mut(player) {
-            p.can_build_units = true;
-        }
-        let removed_teams: Vec<TeamId> = sim
+        let was_enabled = sim
             .world
-            .team_players
-            .iter()
-            .filter(|&(&team, &p)| p == player && sim.world.teams_cannot_build_units.contains(&team))
-            .map(|(&team, _)| team)
-            .collect();
-        for team in &removed_teams {
-            sim.world.teams_cannot_build_units.remove(team);
-        }
+            .players
+            .player_mut(player)
+            .is_some_and(|p| std::mem::replace(&mut p.can_build_units, true));
         Self {
             player,
             was_enabled,
-            removed_teams,
         }
     }
 
     fn restore(self, sim: &mut SimContext) {
         if let Some(p) = sim.world.players.player_mut(self.player) {
             p.can_build_units = self.was_enabled;
-        }
-        for team in self.removed_teams {
-            sim.world.teams_cannot_build_units.insert(team);
         }
     }
 }

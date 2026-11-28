@@ -1307,21 +1307,6 @@ pub fn sync_team_to_sim_world(
         .insert(team, Bool::from(player.player_type == PlayerType::Human));
     world.team_sides.insert(team, player.side.clone());
     world.team_colors.insert(team, player.color);
-    world
-        .player_sciences
-        .insert(team, player.sciences.iter().copied().collect());
-    world
-        .player_preorder
-        .insert(team, Bool::from(player.is_preorder));
-    world
-        .player_handicaps
-        .insert(team, player.handicap.clone());
-    if !player.can_build_base {
-        world.teams_cannot_build_base.insert(team);
-    }
-    if !player.can_build_units {
-        world.teams_cannot_build_units.insert(team);
-    }
     if player.ai == Some(AiKind::Skirmish) {
         world.skirmish_ai_teams.insert(team);
     }
@@ -1342,13 +1327,8 @@ pub fn remove_team_from_sim_world(world: &mut SimWorld, team: TeamId) {
     world.player_is_human.remove(&team);
     world.team_sides.remove(&team);
     world.team_colors.remove(&team);
-    world.player_sciences.remove(&team);
-    world.player_preorder.remove(&team);
-    world.player_handicaps.remove(&team);
     world.skirmish_ai_teams.remove(&team);
     world.team_common_targets.remove(&team);
-    world.teams_cannot_build_base.remove(&team);
-    world.teams_cannot_build_units.remove(&team);
     for lists in world.player_team_prototypes.values_mut() {
         for list in lists.iter_mut() {
             list.retain(|&t| t != team);

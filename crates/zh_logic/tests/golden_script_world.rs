@@ -469,12 +469,7 @@ fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
         .expect("a unit");
     let name = template_name(game, slot);
     let team = game.sim.world.objects.get(slot).unwrap().team_id;
-    game.sim
-        .world
-        .attacked_by
-        .entry(team)
-        .or_default()
-        .insert(computer);
+    game.sim.player_of_team_mut(team).expect("player").attacked_by[computer as usize] = true;
     let neutral = game.sim.world.players.player(0).unwrap().default_team.unwrap();
     let neutral_members = game.sim.world.team_members[&neutral].len();
     assert!(neutral_members > 0);

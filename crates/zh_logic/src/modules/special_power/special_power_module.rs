@@ -13,7 +13,7 @@ use crate::modules::module::SpecialPowerCaller;
 use crate::sim::{SimApi, SimView};
 use zh_common::ini::{IniError, IniReader, SEPS_DEFAULT};
 use zh_common::math::Coord3D;
-use zh_common::types::{Bool, NameKeyType, Real, UnsignedInt, XferVersion, FALSE, Int, TRUE};
+use zh_common::types::{Bool, Int, NameKeyType, Real, TeamId, UnsignedInt, XferVersion, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
 /// Shared INI configuration parsed for `SpecialPowerModuleData`.
@@ -210,6 +210,20 @@ impl SpecialPowerModule {
     pub fn resolve_template_id(&self, sim: &dyn SimView) -> UnsignedInt {
         self.resolve_template(sim)
             .map_or(self.data.special_power_id, |t| t.id())
+    }
+
+    /// The team and template id of a shared power's player timer.
+    fn shared_timer_key(
+        &self,
+        sim: &dyn SimView,
+        ctx: ModuleContext,
+    ) -> Option<(TeamId, UnsignedInt)> {
+        let template = self.resolve_template(sim)?;
+        if template.is_shared_n_sync() == FALSE {
+            return None;
+        }
+        let id = template.id();
+        sim.object(ctx.owner_slot).map(|o| (o.team_id, id))
     }
 
     #[inline]
@@ -483,23 +497,18 @@ impl SpecialPowerFacet for SpecialPowerModule {
         Bool::from(self.resolve_template_id(sim) == template_id)
     }
 
-    fn is_ready(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool {
+    fn is_ready(&self, sim: &mut dyn SimApi, ctx: ModuleContext) -> Bool {
         if sim.special_power_uses_delay() == FALSE {
             return TRUE;
         }
-        if let Some(tmpl) = self.resolve_template(sim) {
-            if tmpl.is_shared_n_sync() != FALSE {
-                if let Some(team_id) = sim.object(ctx.owner_slot).map(|o| o.team_id) {
-                    return Bool::from(
-                        sim.frame() >= sim.shared_special_power_ready_frame(team_id, tmpl.id()),
-                    );
-                }
-            }
+        if let Some((team_id, id)) = self.shared_timer_key(sim, ctx) {
+            let ready = sim.shared_special_power_ready_frame(team_id, id);
+            return Bool::from(sim.frame() >= ready);
         }
         Bool::from(self.paused_count == 0 && sim.frame() >= self.available_on_frame)
     }
 
-    fn get_percent_ready(&self, sim: &dyn SimView, ctx: ModuleContext) -> Real {
+    fn get_percent_ready(&self, sim: &mut dyn SimApi, ctx: ModuleContext) -> Real {
         if self.paused_count > 0 && self.paused_percent == 1.0 {
             return 0.99999;
         }
@@ -512,23 +521,17 @@ impl SpecialPowerFacet for SpecialPowerModule {
         let Some(tmpl) = self.resolve_template(sim) else {
             return 0.0;
         };
-        let ready_frame = if tmpl.is_shared_n_sync() != FALSE {
-            sim.object(ctx.owner_slot).map_or(self.available_on_frame, |o| {
-                sim.shared_special_power_ready_frame(o.team_id, tmpl.id())
-            })
-        } else {
-            self.available_on_frame
+        let reload_time = tmpl.reload_time();
+        let ready_frame = match self.shared_timer_key(sim, ctx) {
+            Some((team_id, id)) => sim.shared_special_power_ready_frame(team_id, id),
+            None => self.available_on_frame,
         };
-        1.0 - (ready_frame.wrapping_sub(sim.frame()) as Real) / (tmpl.reload_time() as Real)
+        1.0 - (ready_frame.wrapping_sub(sim.frame()) as Real) / (reload_time as Real)
     }
 
-    fn get_ready_frame(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt {
-        if let Some(tmpl) = self.resolve_template(sim) {
-            if tmpl.is_shared_n_sync() != FALSE {
-                if let Some(obj) = sim.object(ctx.owner_slot) {
-                    return sim.shared_special_power_ready_frame(obj.team_id, tmpl.id());
-                }
-            }
+    fn get_ready_frame(&self, sim: &mut dyn SimApi, ctx: ModuleContext) -> UnsignedInt {
+        if let Some((team_id, id)) = self.shared_timer_key(sim, ctx) {
+            return sim.shared_special_power_ready_frame(team_id, id);
         }
         if self.paused_count > 0 || Self::is_owner_disabled(sim, ctx) {
             let paused_frames = sim.frame().wrapping_sub(self.paused_on_frame);
@@ -930,7 +933,7 @@ macro_rules! impl_special_power_behavior {
 
             fn is_ready(
                 &self,
-                sim: &dyn $crate::sim::SimView,
+                sim: &mut dyn $crate::sim::SimApi,
                 ctx: $crate::arena::ModuleContext,
             ) -> zh_common::types::Bool {
                 $crate::modules::special_power::special_power_module::SpecialPowerBehaviorImpl::base(self)
@@ -939,7 +942,7 @@ macro_rules! impl_special_power_behavior {
 
             fn get_percent_ready(
                 &self,
-                sim: &dyn $crate::sim::SimView,
+                sim: &mut dyn $crate::sim::SimApi,
                 ctx: $crate::arena::ModuleContext,
             ) -> zh_common::types::Real {
                 $crate::modules::special_power::special_power_module::SpecialPowerBehaviorImpl::base(self)
@@ -948,7 +951,7 @@ macro_rules! impl_special_power_behavior {
 
             fn get_ready_frame(
                 &self,
-                sim: &dyn $crate::sim::SimView,
+                sim: &mut dyn $crate::sim::SimApi,
                 ctx: $crate::arena::ModuleContext,
             ) -> zh_common::types::UnsignedInt {
                 $crate::modules::special_power::special_power_module::SpecialPowerBehaviorImpl::base(self)

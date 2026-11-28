@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`292` implemented, `35` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `131` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `126` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `132` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `127` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -411,6 +411,7 @@
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/hierarchical.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/queries.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/pathfinder/ai_pathfind/search.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/player/player_sim.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/player/science_purchase.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/player/seams.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/rules/combat_types.rs` | `implemented` |
@@ -507,6 +508,7 @@
 | `docs/golden_vectors/PKT374_373_Stealth.json` | 1600 | no |
 | `docs/golden_vectors/PKT383_377_305_Topple.json` | 1800 | no |
 | `docs/golden_vectors/PKT399_WeaponEffects.json` | 1500 | no |
+| `docs/golden_vectors/PlayerHoldings.json` | 160 | yes |
 | `docs/golden_vectors/PlayerState.json` | 1000 | yes |
 | `docs/golden_vectors/PlayersTeams.json` | - | no |
 | `docs/golden_vectors/PlayersTeamsRetail.json` | - | no |
@@ -645,6 +647,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt434_scripts.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt442_global_data.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_pkt444_messagestream.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_player_holdings.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_player_state.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_players_teams.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s0_frame_driver.rs` | `active` |

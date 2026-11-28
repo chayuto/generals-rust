@@ -498,23 +498,13 @@ impl ScriptWorld for LiveWorld<'_> {
     }
 
     fn player_attacked_by(&self, player: ScriptPlayer, attacker: ScriptPlayer) -> bool {
-        // The world keeps it by the attacked object's team.
         self.player(player).is_some_and(|p| {
             usize::try_from(attacker)
                 .ok()
                 .and_then(|a| p.attacked_by.get(a))
                 .copied()
                 .unwrap_or(false)
-        }) || self
-            .player_teams(player)
-            .iter()
-            .any(|t| {
-                self.sim
-                    .world
-                    .attacked_by
-                    .get(t)
-                    .is_some_and(|set| set.contains(&attacker))
-            })
+        })
     }
 
     fn money_withdraw(&mut self, player: ScriptPlayer, amount: UnsignedInt) {

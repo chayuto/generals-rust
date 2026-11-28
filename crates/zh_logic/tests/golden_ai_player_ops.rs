@@ -981,7 +981,7 @@ fn matches_cpp_oracle_rows() {
     let harv = spawn(&mut f, "HarvA", t1, Coord3D::new(250.0, 250.0, 0.0));
     let harv_id = f.sim.world.objects.id_of(harv).unwrap();
     let set_harv_dmg = |f: &mut Fixture, frame: UnsignedInt, no_effect: Bool| {
-        f.sim.world.player_attacked_frame.insert(1, frame);
+        f.sim.world.players.player_mut(1).unwrap().attacked_frame = frame;
         let bs = f.sim.world.objects.get(harv).unwrap().body_slot.unwrap();
         let mut di = DamageInfo::default();
         di.output.no_effect = no_effect;
@@ -1608,13 +1608,13 @@ fn mutation_edge_cases_and_remaining_script_ops() {
         ai.supply_source_attack_check_frame = 0;
         assert!(!is_supply_source_attacked(&f.sim, &mut ai));
 
-        f.sim.world.player_attacked_frame.insert(1, 9);
+        f.sim.world.players.player_mut(1).unwrap().attacked_frame = 9;
         set_harv(&mut f, 9);
         f.sim.world.frame = 10;
         ai.supply_source_attack_check_frame = 10;
         assert!(is_supply_source_attacked(&f.sim, &mut ai));
 
-        f.sim.world.player_attacked_frame.insert(1, 10);
+        f.sim.world.players.player_mut(1).unwrap().attacked_frame = 10;
         set_harv(&mut f, 20);
         f.sim.world.frame = 310;
         ai.supply_source_attack_check_frame = 0;

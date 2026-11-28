@@ -5,14 +5,13 @@
 //! (`tests/cpp_harness/gen_science_purchase.cpp`,
 //! `crates/zh_logic/tests/golden_science_purchase.rs`).
 //!
-//! The sim still holds sciences by team, so a new science is entered for every
-//! team of the player. `TheControlBar` calls are the client's.
+//! `TheControlBar` calls are the client's.
 
 use crate::arena::{FacetMask, ModuleSlot};
 use crate::player::player::Player;
 use crate::rules::science::{SciencePlayerAccess, ScienceType, SCIENCE_INVALID};
 use crate::scripts::script_engine::ScriptEngine;
-use crate::sim::{SimApi, SimContext};
+use crate::sim::SimContext;
 use zh_common::types::Int;
 
 impl SciencePlayerAccess for Player {
@@ -63,19 +62,9 @@ pub fn attempt_to_purchase_science(
     true
 }
 
-/// The rest of `Player::addScience`: the sim's copy of the player's sciences,
-/// then every special power on the player's objects that needs this science
-/// starts over, ready now.
+/// The rest of `Player::addScience`: every special power on the player's objects
+/// that needs this science starts over, ready now.
 pub fn science_added_to_world(sim: &mut SimContext, index: Int, science: ScienceType) {
-    let owned = sim.world.team_players.iter();
-    let teams: Vec<_> = owned
-        .filter(|&(_, &player)| player == index)
-        .map(|(&team, _)| team)
-        .chain(sim.world.player_default_teams.get(&index).copied())
-        .collect();
-    for team in teams {
-        sim.grant_player_science(team, science);
-    }
     // `m_playerTeamPrototypes`, each prototype's teams, each team's members.
     let listed: Vec<_> = sim
         .world

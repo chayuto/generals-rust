@@ -117,8 +117,7 @@ Asset readers (stage 2) touch separate code and can run beside the simulation.
   orders; the terrain construction restriction is missing.
 - Turrets: no mutation run; no vectors for turreted containers, airborne pitch, bridges,
   computer crushing, version 2 saves or loading.
-- Science purchase: two survivors have a new test, not rechecked. Shared special power
-  timers are kept by team and are not started by a read, unlike the reference.
+- Science purchase: two survivors have a new test, not rechecked.
 - `BoneFXUpdate`: 9 survivors not rechecked (load path, bone positions, rubble state, FX
   calls).
 - Many earlier slices have mutation survivors not rechecked; see `OPEN_DECISIONS.md`.

@@ -1238,7 +1238,8 @@ fn golden_special_ability_and_command_button_hunt() {
                     w.player_relationships.insert((i, j), rel);
                 }
             }
-            w.player_sciences.entry(TEAMS[1]).or_default().insert(have);
+            let owner = w.team_players[&TEAMS[1]];
+            w.players.player_mut(owner).expect("player").push_science(have);
             w.player_money.insert(w.team_players[&TEAMS[1]], 100);
             w.player_money
                 .insert(w.team_players[&TEAMS[2]], get("money") as UnsignedInt);
@@ -1605,10 +1606,10 @@ fn golden_special_ability_and_command_button_hunt() {
 struct NoCaller;
 
 impl SpecialPowerFacet for NoCaller {
-    fn is_ready(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Bool {
+    fn is_ready(&self, _sim: &mut dyn SimApi, _ctx: ModuleContext) -> Bool {
         unreachable!("no special power module in this call")
     }
-    fn get_ready_frame(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> UnsignedInt {
+    fn get_ready_frame(&self, _sim: &mut dyn SimApi, _ctx: ModuleContext) -> UnsignedInt {
         unreachable!("no special power module in this call")
     }
     fn get_raw_ready_frame(&self) -> UnsignedInt {

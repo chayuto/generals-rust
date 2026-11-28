@@ -2064,10 +2064,7 @@ pub fn group_do_special_power(
         };
         if science != SCIENCE_INVALID {
             let team = sim.object(slot).map(|o| o.team_id);
-            let has = team
-                .and_then(|team| sim.world.player_sciences.get(&team))
-                .is_some_and(|s| s.contains(&science));
-            if !has {
+            if team.is_none_or(|team| sim.player_has_science(team, science) == FALSE) {
                 return;
             }
         }

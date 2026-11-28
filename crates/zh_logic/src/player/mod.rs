@@ -3,6 +3,7 @@ pub mod build_assistant;
 #[allow(clippy::module_inception)]
 pub mod player;
 pub mod player_list;
+pub mod player_sim;
 pub mod radar;
 pub mod science_purchase;
 pub mod seams;

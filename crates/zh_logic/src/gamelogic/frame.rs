@@ -32,7 +32,7 @@ pub trait FrameSeams {
     fn player_ai(&mut self, _sim: &mut SimContext, _player: Int) {}
     /// `Team::updateGenericScripts` of the player's teams.
     fn team_generic_scripts(&mut self, _sim: &mut SimContext, _player: Int) {}
-    /// `Player::onPowerBrownOutChange`, when a power sabotage runs out.
+    /// Told after a power sabotage ran out and the power state was updated.
     fn power_brown_out_change(&mut self, _sim: &mut SimContext, _player: Int) {}
     /// The rest of `Player::update`: academy statistics, the retaliation mode
     /// message of the local player and the income bucket.
@@ -124,23 +124,10 @@ fn update_players(sim: &mut SimContext, seams: &mut dyn FrameSeams) {
     for player in 0..MAX_PLAYER_COUNT as Int {
         seams.player_ai(sim, player);
         seams.team_generic_scripts(sim, player);
-        expire_power_sabotage(sim, seams, player);
+        if sim.expire_power_sabotage(player) {
+            seams.power_brown_out_change(sim, player);
+        }
         seams.player_upkeep(sim, player);
-    }
-}
-
-/// The power sabotage part of `Player::update`.
-fn expire_power_sabotage(sim: &mut SimContext, seams: &mut dyn FrameSeams, player: Int) {
-    let now = sim.world.frame;
-    let Some(energy) = sim.world.player_energy.get_mut(&player) else {
-        return;
-    };
-    let till = energy.get_power_sabotaged_till_frame();
-    if till != 0 && now > till {
-        energy.set_power_sabotaged_till_frame(0);
-        // The reference brings the objects' power state up to date here; the
-        // world keeps no brown-out state yet.
-        seams.power_brown_out_change(sim, player);
     }
 }
 

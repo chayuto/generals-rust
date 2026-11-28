@@ -255,16 +255,16 @@ End",
         // Sync world clock & player state matching C++ seed setup.
         sim.world.frame = frame;
         sim.world.player_upgrades.clear();
-        sim.world.player_preorder.insert(team_a, if preorder { TRUE } else { FALSE });
+        sim.player_of_team_mut(team_a).expect("player").is_preorder = preorder;
         sim.world.registered_supply_centers.clear();
         sim.world.registered_supply_warehouses.clear();
-        let sci_set = sim.world.player_sciences.entry(team_a).or_default();
+        let sci_set = &mut sim.player_of_team_mut(team_a).expect("player").sciences;
         sci_set.clear();
         if sci_a_known {
-            sci_set.insert(sci_a);
+            sci_set.push(sci_a);
         }
         if sci_b_known {
-            sci_set.insert(sci_b);
+            sci_set.push(sci_b);
         }
 
         let pfx = format!("C51_{seed}_");

@@ -69,7 +69,7 @@ fn world() -> SimContext {
     sim.init_partition(20.0, extent);
     sim.new_pathfind_map(&extent, 0.0);
     sim.world.team_players.insert(TEAM, 1);
-    sim.world.player_preorder.insert(TEAM, TRUE);
+    sim.world.players.player_mut(1).expect("player").is_preorder = true;
     sim.world.player_default_teams.insert(1, TEAM);
     sim.world.player_is_human.insert(TEAM, TRUE);
     sim.world

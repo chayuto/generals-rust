@@ -1279,11 +1279,13 @@ pub trait SpecialPowerFacet {
     ) -> Bool {
         FALSE
     }
-    fn is_ready(&self, sim: &dyn SimView, ctx: ModuleContext) -> Bool;
-    fn get_percent_ready(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> Real {
+    /// `isReady`, `getPercentReady` and `getReadyFrame` take the world as
+    /// changeable: reading a shared power starts the player's timer.
+    fn is_ready(&self, sim: &mut dyn SimApi, ctx: ModuleContext) -> Bool;
+    fn get_percent_ready(&self, _sim: &mut dyn SimApi, _ctx: ModuleContext) -> Real {
         0.0
     }
-    fn get_ready_frame(&self, sim: &dyn SimView, ctx: ModuleContext) -> UnsignedInt;
+    fn get_ready_frame(&self, sim: &mut dyn SimApi, ctx: ModuleContext) -> UnsignedInt;
     fn get_raw_ready_frame(&self) -> UnsignedInt;
     fn get_power_name(&self, _sim: &dyn SimView, _ctx: ModuleContext) -> String {
         String::new()

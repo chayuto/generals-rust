@@ -716,17 +716,9 @@ impl Run {
                 }
             }
             14 => {
-                let w = &mut sim.world;
-                for (set, allowed) in [
-                    (&mut w.teams_cannot_build_units, a != 0),
-                    (&mut w.teams_cannot_build_base, b != 0),
-                ] {
-                    if allowed {
-                        set.remove(&TEAM);
-                    } else {
-                        set.insert(TEAM);
-                    }
-                }
+                let player = sim.player_of_team_mut(TEAM).expect("player");
+                player.can_build_units = a != 0;
+                player.can_build_base = b != 0;
             }
             15 => {
                 let flag = if a != 0 {
@@ -797,10 +789,10 @@ impl Run {
                     .rules
                     .science_store
                     .get_science_from_internal_name("SCIENCE_P354", &mut sim.rules.name_keys);
-                let known = sim.world.player_sciences.entry(TEAM).or_default();
+                let known = &mut sim.player_of_team_mut(TEAM).expect("player").sciences;
                 known.clear();
                 if a != 0 {
-                    known.insert(science);
+                    known.push(science);
                 }
             }
             21 => script(|s| {
@@ -894,18 +886,16 @@ fn start(sim: &mut SimContext, variant: usize, frame: u32, cfg: &[u32]) -> Run {
         }
         let mut h = Handicap::new();
         h.read_from_dict(&dict, &mut sim.rules.name_keys);
-        sim.world.player_handicaps.insert(TEAM, h);
+        sim.player_of_team_mut(TEAM).expect("player").handicap = h;
     }
-    let key = (TEAM, "U0".to_owned());
+    let key = sim.rules.name_keys.name_to_key("U0");
     if cost != 0 {
-        sim.world
-            .player_cost_change_percent
-            .insert(key.clone(), CHANGE[cost]);
+        let player = sim.player_of_team_mut(TEAM).expect("player");
+        player.production_cost_changes.insert(key, CHANGE[cost]);
     }
     if time != 0 {
-        sim.world
-            .player_time_change_percent
-            .insert(key, CHANGE[time]);
+        let player = sim.player_of_team_mut(TEAM).expect("player");
+        player.production_time_changes.insert(key, CHANGE[time]);
     }
     if kind != 0 {
         let vehicles = KindOfMaskType::from_single_index(KindOfType::Vehicle as i32);

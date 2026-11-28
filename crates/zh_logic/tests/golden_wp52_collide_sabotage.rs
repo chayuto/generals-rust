@@ -483,11 +483,12 @@ fn wp52_collide_sabotage_golden_vectors() {
         api.ctx.world.player_relationships.insert((2, 1), rel_bc);
         api.ctx.world.player_is_human.insert(team_b, pb_human);
         api.ctx.world.player_is_human.insert(team_c, pc_human);
-        api.ctx.world.player_sciences.entry(team_b).or_default().clear();
-        let sci_c = api.ctx.world.player_sciences.entry(team_c).or_default();
+        let owner = api.ctx.player_of_team_mut(team_b).expect("player");
+        owner.sciences.clear();
+        let sci_c = &mut api.ctx.player_of_team_mut(team_c).expect("player").sciences;
         sci_c.clear();
         if pc_has_sci {
-            sci_c.insert(sci_col);
+            sci_c.push(sci_col);
         }
 
         let t_probe = format!("Sab52_Probe_{seed}");

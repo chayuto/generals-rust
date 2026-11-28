@@ -1,12 +1,13 @@
 //! What `ProductionUpdate` (`PKT-354`) calls outside its own module: `BuildAssistant`,
 //! the `Player` build and upgrade checks, money, and the creation of the finished unit.
-//! Player state is keyed by team, as elsewhere in `SimWorld`.
+//! The player is reached through one of its teams.
 
 use super::{SimApi, SimContext, SimView};
-use crate::economy::energy::NoopEnergyCallbacks;
 use crate::arena::{DeferredSelfOp, FacetMask, ModuleSlot, ObjectSlot, ThingTemplateId};
 use crate::economy::academy_stats::{academy_kind_bits, AcademyObjectInfo, AcademyStats};
 use crate::economy::handicap::{Handicap, HandicapType};
+use crate::player::player::Player;
+use crate::rules::player_template::ProductionChangeMap;
 use crate::economy::score_keeper::{ScoreKeeper, ScoreObjectView, ScoreTemplateDesc};
 use crate::modules::module::{CanMakeType, ExitDoorType, ProductionFacet};
 use crate::object::object_script_status_bits::{
@@ -70,15 +71,29 @@ impl PrereqPlayerView for PlayerView<'_> {
     }
 }
 
+impl PlayerView<'_> {
+    /// `getProductionCostChangePercent` / `getProductionTimeChangePercent`.
+    fn change_percent(
+        &self,
+        template_name: &str,
+        changes: impl Fn(&Player) -> &ProductionChangeMap,
+    ) -> Real {
+        let key = self.ctx.rules.name_keys.lookup_key(template_name);
+        self.ctx
+            .player_of_team(self.team)
+            .zip(key)
+            .and_then(|(p, key)| changes(p).get(&key).copied())
+            .unwrap_or(0.0)
+    }
+}
+
 impl ThingTemplatePlayerView for PlayerView<'_> {
     fn as_prereq_view(&self) -> Option<&dyn PrereqPlayerView> {
         Some(self)
     }
 
     fn get_production_cost_change_percent(&self, template_name: &str) -> Real {
-        let key = (self.team, template_name.to_owned());
-        let changes = &self.ctx.world.player_cost_change_percent;
-        changes.get(&key).copied().unwrap_or(0.0)
+        self.change_percent(template_name, |p| &p.production_cost_changes)
     }
 
     fn get_production_cost_change_based_on_kind_of(&self, kindof: &KindOfMaskType) -> Real {
@@ -86,17 +101,14 @@ impl ThingTemplatePlayerView for PlayerView<'_> {
     }
 
     fn get_production_time_change_percent(&self, template_name: &str) -> Real {
-        let key = (self.team, template_name.to_owned());
-        let changes = &self.ctx.world.player_time_change_percent;
-        changes.get(&key).copied().unwrap_or(0.0)
+        self.change_percent(template_name, |p| &p.production_time_changes)
     }
 
     fn get_handicap(&self, ht: HandicapType, tmpl: &ThingTemplate) -> Real {
         let structure = tmpl.is_kind_of(KindOfType::Structure) != FALSE;
-        let handicaps = &self.ctx.world.player_handicaps;
-        handicaps.get(&self.team).map_or_else(
+        self.ctx.player_of_team(self.team).map_or_else(
             || Handicap::new().get_handicap(ht, structure),
-            |h| h.get_handicap(ht, structure),
+            |p| p.handicap.get_handicap(ht, structure),
         )
     }
 
@@ -236,12 +248,13 @@ impl SimContext {
 
     fn allowed_to_build_template(&self, team: TeamId, tmpl: &ThingTemplate) -> bool {
         let structure = tmpl.is_kind_of(KindOfType::Structure) != FALSE;
-        let forbidden = if structure {
-            &self.world.teams_cannot_build_base
-        } else {
-            &self.world.teams_cannot_build_units
-        };
-        !forbidden.contains(&team)
+        self.player_of_team(team).is_none_or(|p| {
+            if structure {
+                p.can_build_base
+            } else {
+                p.can_build_units
+            }
+        })
     }
 
     /// `Player::canBuild`.
@@ -743,13 +756,13 @@ impl SimContext {
         if info.is_disabled != FALSE && info.energy_production > 0 {
             return;
         }
-        let frame = self.world.frame;
-        let energy = self.energy_of(player);
-        if incoming != FALSE {
-            energy.object_entering_influence(Some(info), frame, &mut NoopEnergyCallbacks);
-        } else {
-            energy.object_leaving_influence(Some(info), frame, &mut NoopEnergyCallbacks);
-        }
+        self.change_energy(player, |energy, frame, told| {
+            if incoming != FALSE {
+                energy.object_entering_influence(Some(info), frame, told);
+            } else {
+                energy.object_leaving_influence(Some(info), frame, told);
+            }
+        });
     }
 
     /// `Player::onUnitCreated`. `factory` is `None` for starting network units

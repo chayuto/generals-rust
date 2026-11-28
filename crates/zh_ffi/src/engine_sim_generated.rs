@@ -19,7 +19,7 @@ use zh_logic::combat::damage::{DamageInfo, PlayerMaskType, PLAYERMASK_ALL};
 use zh_logic::combat::damage_fx::DamageFXStore;
 use zh_logic::combat::locomotor::{Locomotor, LocomotorStore};
 use zh_logic::combat::locomotor_set::LocomotorSetType;
-use zh_logic::economy::energy::{Energy, EnergyObjectInfo, NoopEnergyCallbacks};
+use zh_logic::economy::energy::{Energy, EnergyObjectInfo};
 use zh_logic::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use zh_logic::economy::score_keeper::ScoreKeeper;
 use zh_logic::economy::MAX_PLAYER_COUNT;
@@ -51,6 +51,7 @@ use zh_logic::object::thing_template::{
     DefaultModuleMaskLookup, GameTextLookup, ThingTemplate, ThingTemplateParseContext,
 };
 use zh_logic::object::weapon::WeaponStore;
+use zh_logic::player::player_list::PlayerList;
 use zh_logic::object::weapon_effects::WeaponStoreState;
 use zh_logic::object::weapon_set::{
     self,
@@ -151,9 +152,6 @@ impl SimView for EngineSim<'_> {
     }
     fn special_ability_is_active(&self, module: ModuleSlot) -> Bool {
         not_wired("special_ability_is_active")
-    }
-    fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)> {
-        not_wired("special_power_module_ready")
     }
     fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
         not_wired("action_manager_allows")
@@ -349,9 +347,6 @@ impl SimView for EngineSim<'_> {
     }
     fn find_special_power_module( &self, owner: ObjectSlot, template_id: UnsignedInt, ) -> Option<ModuleSlot> {
         not_wired("find_special_power_module")
-    }
-    fn shared_special_power_ready_frame(&self, team_id: TeamId, template_id: UnsignedInt) -> UnsignedInt {
-        not_wired("shared_special_power_ready_frame")
     }
     fn player_captured_object_count(&self, team_id: TeamId) -> Int {
         not_wired("player_captured_object_count")
@@ -1127,8 +1122,11 @@ impl SimApi for EngineSim<'_> {
     fn remove_radar(&mut self, team_id: TeamId, disable_proof: Bool) {
         not_wired("remove_radar")
     }
-    fn disable_radar(&mut self, team_id: TeamId, frames: UnsignedInt) {
-        not_wired("disable_radar")
+    fn shared_special_power_ready_frame( &mut self, team_id: TeamId, template_id: UnsignedInt, ) -> UnsignedInt {
+        not_wired("shared_special_power_ready_frame")
+    }
+    fn special_power_module_ready( &mut self, owner: ObjectSlot, template_id: UnsignedInt, ) -> Option<(Bool, UnsignedInt)> {
+        not_wired("special_power_module_ready")
     }
     fn extend_radar_update(&mut self, owner: ObjectSlot) {
         not_wired("extend_radar_update")
