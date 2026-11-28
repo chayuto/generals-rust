@@ -111,7 +111,22 @@ Open:
 - Unverified: brown-out during an executing module, team handover, construction.
 - Mutation (40 of 81): four survivors not rechecked (`player.rs` `add_science` and the cost
   change match, the radar default in `sim/mod.rs`).
-- After that: object lifecycle gaps.
+- Object lifecycle gaps, started (`golden_object_lifecycle`). Done: weapon set changes on
+  flag changes (and the `WeaponSet` save bytes, which were wrong), contained units leave
+  their group and the pathfind map; destroy already freed its cells. No mutation run.
+- Not done, vectors already in `PKT-390_lifecycle.txt` (`gen_object_lifecycle`), with no
+  Rust test yet:
+  - `mine`: `setStatus` and `clearStatus` of `UNDER_CONSTRUCTION` must kill enemy mines
+    and destroy other mines under the object (`change_status` only dirties the cells).
+    The reference finds only mines the partition has already processed.
+  - `defect`: `defect_object` must also call `defect_all_parked_units`, then move the
+    mines it produced.
+  - `capture`, `dozer`: `set_object_team_same_player` skips `onCapture`, which the
+    reference runs (score count, module hooks, unsellable flag); non-retail
+    `idle_on_capture` must also cancel all dozer tasks.
+  - `plan`: bonuses apply once to a new object; the port's existing call is untested.
+- Also open in `onCapture`: a skirmish AI owner sells a captured faction structure
+  (`sellObject` is not ported).
 
 ## What to do next
 
