@@ -16,9 +16,12 @@ use zh_logic::object::weapon::WeaponTemplate;
 use zh_logic::pathfinder::PathfindLayerEnum;
 use zh_logic::object::weapon_set::{WeaponLockType, WeaponSlotType};
 use zh_logic::modules::update::ai_update::{AiUpdate, DerivedAi};
+use zh_logic::modules::update::battle_plan_update::{
+    change_battle_plan, BattlePlanBonuses, BattlePlanStatus,
+};
 use zh_logic::modules::update::dozer_ai_update::{is_task_pending, new_task, DOZER_TASK_REPAIR};
 use zh_logic::rules::combat_types::{DamageType, WeaponSetType};
-use zh_logic::rules::ObjectStatusType;
+use zh_logic::rules::{KindOfMaskType, KindOfType, ObjectStatusType};
 use zh_logic::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use zh_logic::sim::{SimApi, SimContext, SimView, SimWorld};
 
@@ -316,6 +319,52 @@ impl Scene {
         self.weapons_row("-vet-hero-left", o);
     }
 
+    // ---- battle plans
+
+    fn plan_row(&mut self, op: &str, o: ObjectSlot) {
+        let object = self.sim.world.objects.get(o).expect("object");
+        let (id, condition) = (object.id, object.weapon_bonus_condition);
+        let vision = object.vision_range.to_bits();
+        let clearing = object.shroud_clearing_range.to_bits();
+        let body = object.body_slot.expect("body");
+        let ModuleSidecar::Body { damage_scalar, .. } = self.sim.world.modules.sidecar(body)
+        else {
+            panic!("no body sidecar");
+        };
+        let name = self.name_of(id);
+        self.row(format!(
+            "plan {op} {name} {} {vision} {clearing} {condition}",
+            damage_scalar.to_bits()
+        ));
+    }
+
+    fn battle_plans(&mut self) {
+        self.sim.world.frame = 100;
+        let mut bonus = BattlePlanBonuses {
+            armor_scalar: 0.8,
+            sight_range_scalar: 1.25,
+            bombardment: 1,
+            ..BattlePlanBonuses::default()
+        };
+        bonus.valid_kind_of = KindOfMaskType::default();
+        bonus.valid_kind_of.set(KindOfType::Vehicle.as_i32(), 1);
+        bonus.invalid_kind_of = KindOfMaskType::default();
+        let plan = BattlePlanStatus::Bombardment;
+        change_battle_plan(&mut self.sim, TEAM_A, plan, 1, &bonus);
+        let veh = self.make("veh", "PlanVeh", TEAM_A, 100.0, 50.0);
+        let inf = self.make("inf", "PlanInf", TEAM_A, 110.0, 50.0);
+        let other = self.make("other", "PlanVeh", TEAM_B, 120.0, 50.0);
+        for o in [veh, inf, other] {
+            self.plan_row("spawn", o);
+        }
+        self.sim.set_object_team(veh, TEAM_B);
+        self.plan_row("to-b", veh);
+        self.sim.set_object_team(veh, TEAM_A);
+        self.plan_row("to-a", veh);
+        change_battle_plan(&mut self.sim, TEAM_A, plan, -1, &bonus);
+        self.plan_row("removed", veh);
+    }
+
     // ---- mines on construction
 
     fn mine_row(&mut self, op: &str, o: ObjectSlot) {
@@ -604,6 +653,13 @@ fn defection_takes_the_mines_the_building_made() {
     let mut scene = Scene::new();
     scene.defection();
     check("defect", &scene.rows);
+}
+
+#[test]
+fn a_new_object_takes_the_active_battle_plan_once() {
+    let mut scene = Scene::new();
+    scene.battle_plans();
+    check("plan", &scene.rows);
 }
 
 #[test]
