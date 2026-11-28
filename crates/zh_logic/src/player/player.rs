@@ -20,7 +20,7 @@ use crate::economy::money::{Money, MoneyCallbacks};
 use crate::economy::academy_stats::{AcademyPlayerContext, AcademyStats};
 use crate::economy::score_keeper::ScoreKeeper;
 use crate::gamelogic::global_data::PlayerType;
-use crate::modules::update::battle_plan_update::BattlePlanBonuses;
+use crate::modules::update::battle_plan_update::{BattlePlanBonuses, PlayerBattlePlans};
 use crate::player::seams::{
     AiKind, PlayerEnv, PlayerIndex, PlayerPart, PlayerWorld, SkirmishScripts,
 };
@@ -113,10 +113,8 @@ pub struct Player {
     pub special_power_timers: Vec<SpecialPowerReadyTimer>,
     /// Hotkey squads and the current selection.
     pub squads: PlayerSquads,
-    pub battle_plan_bonuses: Option<BattlePlanBonuses>,
-    pub bombard_battle_plans: Int,
-    pub hold_the_line_battle_plans: Int,
-    pub search_and_destroy_battle_plans: Int,
+    /// `m_battlePlanBonuses` and the three plan counts.
+    pub battle_plans: PlayerBattlePlans,
     pub units_should_hunt: bool,
     pub logical_retaliation_mode: bool,
 }
@@ -356,10 +354,7 @@ impl Player {
             production_changes: Vec::new(),
             special_power_timers: Vec::new(),
             squads: PlayerSquads::default(),
-            battle_plan_bonuses: None,
-            bombard_battle_plans: 0,
-            hold_the_line_battle_plans: 0,
-            search_and_destroy_battle_plans: 0,
+            battle_plans: PlayerBattlePlans::default(),
             units_should_hunt: false,
             logical_retaliation_mode: false,
         }
@@ -380,10 +375,7 @@ impl Player {
         self.radar_count = 0;
         self.disable_proof_radar_count = 0;
         self.radar_disabled = false;
-        self.bombard_battle_plans = 0;
-        self.hold_the_line_battle_plans = 0;
-        self.search_and_destroy_battle_plans = 0;
-        self.battle_plan_bonuses = None;
+        self.battle_plans = PlayerBattlePlans::default();
         env.world.delete_upgrades(self.index);
         self.upgrades_in_progress.clear();
         self.upgrades_completed.clear();
@@ -992,9 +984,9 @@ impl Player {
 
     /// `Player::crc`.
     pub fn crc(&self, xfer: &mut dyn Xfer) -> Result<(), XferError> {
-        let mut present = self.battle_plan_bonuses.is_some();
+        let mut present = self.battle_plans.bonuses.is_some();
         flag(xfer, &mut present)?;
-        if let Some(bonuses) = &self.battle_plan_bonuses {
+        if let Some(bonuses) = &self.battle_plans.bonuses {
             xfer_battle_plan_values(xfer, &mut bonuses.clone())?;
         }
         let mut skill_points = self.skill_points;
@@ -1184,17 +1176,17 @@ impl Player {
             xfer_squad(xfer, &mut self.squads.selection)?;
         }
 
-        let mut present = self.battle_plan_bonuses.is_some();
+        let mut present = self.battle_plans.bonuses.is_some();
         flag(xfer, &mut present)?;
         if load {
-            self.battle_plan_bonuses = present.then(BattlePlanBonuses::default);
+            self.battle_plans.bonuses = present.then(BattlePlanBonuses::default);
         }
-        if let Some(bonuses) = &mut self.battle_plan_bonuses {
+        if let Some(bonuses) = &mut self.battle_plans.bonuses {
             xfer_battle_plan_values(xfer, bonuses)?;
         }
-        xfer.xfer_int(&mut self.bombard_battle_plans)?;
-        xfer.xfer_int(&mut self.hold_the_line_battle_plans)?;
-        xfer.xfer_int(&mut self.search_and_destroy_battle_plans)?;
+        xfer.xfer_int(&mut self.battle_plans.bombardment_plans)?;
+        xfer.xfer_int(&mut self.battle_plans.hold_the_line_plans)?;
+        xfer.xfer_int(&mut self.battle_plans.search_and_destroy_plans)?;
         if version >= 6 {
             flag(xfer, &mut self.units_should_hunt)?;
         } else {

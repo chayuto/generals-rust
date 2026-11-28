@@ -2513,8 +2513,6 @@ pub struct SimWorld {
     pub projectile_launches: Vec<(ObjectId, Option<ObjectId>, Coord3D)>,
     pub countermeasure_reports: Vec<(ObjectId, ObjectId)>,
     pub parking_reservations: BTreeMap<ObjectId, ObjectId>,
-    /// `Player`'s battle plan members by player index.
-    pub player_battle_plans: BTreeMap<Int, PlayerBattlePlans>,
     pub passenger_orders: Vec<(ObjectId, String)>,
     pub slow_death_scale: Real,
     pub hulk_max_lifetime_override: Int,
@@ -2661,7 +2659,6 @@ impl SimWorld {
             projectile_launches: Vec::new(),
             countermeasure_reports: Vec::new(),
             parking_reservations: BTreeMap::new(),
-            player_battle_plans: BTreeMap::new(),
             passenger_orders: Vec::new(),
             slow_death_scale: 1.0,
             hulk_max_lifetime_override: -1,
@@ -5084,7 +5081,7 @@ impl SimView for SimContext {
     }
 
     fn player_battle_plans(&self, player: Int) -> Option<&PlayerBattlePlans> {
-        self.world.player_battle_plans.get(&player)
+        self.world.players.player(player).map(|p| &p.battle_plans)
     }
 
     fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool {
@@ -11323,7 +11320,13 @@ impl SimApi for SimContext {
     }
 
     fn player_battle_plans_mut(&mut self, player: Int) -> &mut PlayerBattlePlans {
-        self.world.player_battle_plans.entry(player).or_default()
+        // Every caller names a player of the list.
+        &mut self
+            .world
+            .players
+            .player_mut(player)
+            .expect("player")
+            .battle_plans
     }
 
     fn record_battle_plan_selected(&mut self, owner: ObjectSlot) {

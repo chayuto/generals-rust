@@ -960,7 +960,8 @@ impl Game {
                 self.list
                     .player_mut(player(1))
                     .expect("player")
-                    .battle_plan_bonuses = Some(b);
+                    .battle_plans
+                    .bonuses = Some(b);
             }
             "poke" => {
                 let p = self.list.player_mut(player(1)).expect("player");
