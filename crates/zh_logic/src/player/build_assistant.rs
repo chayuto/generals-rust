@@ -283,10 +283,10 @@ pub fn build_object_with_dozer(
     clear_removable_for_construction(sim, &geometry, pos, angle);
     let team = *sim.world.player_default_teams.get(&player)?;
     let human = sim.player_is_human(team) != FALSE;
-    // `Player::getRelationship`; the sim keeps the player entries.
+    // `Player::getRelationship`, the player entries only.
     let relationship = |sim: &SimContext, _, owner: Option<PlayerIndex>| {
-        let entry = owner.and_then(|o| sim.world.player_relationships.get(&(player, o)));
-        Some(entry.copied().unwrap_or(Relationship::Neutral))
+        let entry = owner.and_then(|o| sim.world.player_relation(player, o));
+        Some(entry.unwrap_or(Relationship::Neutral))
     };
     let moved = move_objects_for_construction(sim, unported, &geometry, pos, angle, relationship);
     if !moved && human {

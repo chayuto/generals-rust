@@ -22,7 +22,9 @@ use zh_logic::combat::locomotor_set::LocomotorSetType;
 use zh_logic::economy::energy::EnergyObjectInfo;
 use zh_logic::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use zh_logic::economy::MAX_PLAYER_COUNT;
-use zh_logic::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
+use zh_logic::gamelogic::global_data::{
+    BodyDamageType, GlobalData, PlayerType, WeaponBonusConditionType,
+};
 use zh_logic::modules::module_factory::ModuleParseContext;
 use zh_logic::modules::update::deletion_update::DeletionUpdate;
 use zh_logic::modules::update::ocl_update::OclUpdate;
@@ -51,6 +53,8 @@ use zh_logic::object::thing_template::{
 };
 use zh_logic::object::weapon::WeaponStore;
 use zh_logic::player::player_list::PlayerList;
+use zh_logic::player::player::Player;
+use zh_logic::player::seams::AiKind;
 use zh_logic::object::weapon_effects::WeaponStoreState;
 use zh_logic::object::weapon_set::{
     self,

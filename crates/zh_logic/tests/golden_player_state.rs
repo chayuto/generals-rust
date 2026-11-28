@@ -127,7 +127,7 @@ fn new_sim(fixture: &Fixture, line: &str) -> SimContext {
     for player in 0..3 {
         w.player_default_teams
             .insert(player, team_id(player as usize));
-        w.player_is_human.insert(team_id(player as usize), FALSE);
+        w.set_team_human(team_id(player as usize), FALSE);
     }
     w.team_players.insert(team_id(0), 0);
     w.team_is_neutral.insert(team_id(0), TRUE);
@@ -142,7 +142,7 @@ fn new_sim(fixture: &Fixture, line: &str) -> SimContext {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
     for (key, player) in [("order_a", 1), ("order_b", 2)] {

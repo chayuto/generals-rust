@@ -560,7 +560,7 @@ fn actions(game: &mut GameStart, human: Int, computer: Int, home_name: &str) {
         world.set_can_build_units(human, false);
     });
     assert_eq!(
-        game.sim.world.player_relationships[&(human, computer)],
+        game.sim.world.player_relation(human, computer).unwrap(),
         Relationship::Allies
     );
     let player = game.sim.world.players.player(human).unwrap();

@@ -328,7 +328,7 @@ fn world(tape: &SharedTape, humans: &str) -> SimContext {
         w.player_default_teams.insert(player as i32, team);
     }
     for (team, human) in TEAMS[1..].iter().zip(humans.chars()) {
-        w.player_is_human.insert(*team, Bool::from(human == '1'));
+        w.set_team_human(*team, Bool::from(human == '1'));
     }
     w.team_is_neutral.insert(TEAMS[0], TRUE);
     w.neutral_team_id = TEAMS[0];
@@ -342,7 +342,7 @@ fn world(tape: &SharedTape, humans: &str) -> SimContext {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
     sim

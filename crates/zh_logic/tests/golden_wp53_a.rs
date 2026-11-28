@@ -855,7 +855,7 @@ fn new_sim(rules: RulesRegistry) -> SimContext {
             } else {
                 Relationship::Enemies
             };
-            sim.world.player_relationships.insert((i, j), rel);
+            sim.world.set_player_relation(i, j, rel);
         }
     }
     sim

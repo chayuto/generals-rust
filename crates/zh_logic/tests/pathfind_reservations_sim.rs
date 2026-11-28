@@ -110,6 +110,8 @@ fn goals_move_a_destination_aside() {
 fn only_people_are_held_to_the_playable_area() {
     let (mut sim, units) = world();
     map(&mut sim);
+    let person = sim.object(units[0]).expect("unit").team_id;
+    sim.world.set_team_human(person, zh_common::types::TRUE);
     let playable = Region3D {
         lo: Coord3D::default(),
         hi: Coord3D::new(100.0, 100.0, 100.0),
@@ -126,7 +128,7 @@ fn only_people_are_held_to_the_playable_area() {
     );
 
     let team = sim.object(units[0]).expect("unit").team_id;
-    sim.world.player_is_human.insert(team, FALSE);
+    sim.world.set_team_human(team, FALSE);
     let mut dest = beyond;
     assert_eq!(sim.pathfinder_adjust_destination(units[0], &mut dest), TRUE);
     assert_eq!(dest, beyond);

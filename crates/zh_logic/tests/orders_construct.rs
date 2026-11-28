@@ -135,12 +135,11 @@ fn world(money: UnsignedInt) -> World {
     w.player_default_teams.insert(0, TeamId(1));
     w.team_players.insert(TEAM, PLAYER);
     w.player_default_teams.insert(PLAYER, TEAM);
-    w.player_is_human.insert(TEAM, Bool::from(true));
+    w.set_team_human(TEAM, Bool::from(true));
     w.team_is_neutral.insert(TeamId(1), TRUE);
     w.neutral_team_id = TeamId(1);
     w.players.player_mut(PLAYER).expect("player").money.set_starting_cash(money);
-    w.player_relationships
-        .insert((PLAYER, PLAYER), zh_common::types::Relationship::Allies);
+    w.set_player_relation(PLAYER, PLAYER, zh_common::types::Relationship::Allies);
     let id = sim
         .rules
         .thing_factory

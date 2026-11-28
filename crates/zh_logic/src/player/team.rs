@@ -18,11 +18,10 @@ use zh_common::types::{
 use zh_common::xfer::{Xfer, XferError, XferMode};
 
 use crate::arena::{ObjectSlot, ThingTemplateId};
-use crate::gamelogic::global_data::PlayerType;
 use crate::modules::update::ai_update::AiUpdate;
 use crate::object::thing_template::ThingTemplate;
 use crate::player::player_list::PlayerList;
-use crate::player::seams::{AiKind, PlayerEnv, PlayerIndex, PlayerWorld};
+use crate::player::seams::{PlayerEnv, PlayerIndex, PlayerWorld};
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::object_status_types::ObjectStatusType;
 use crate::scripts::scripts::Script;
@@ -1302,12 +1301,6 @@ pub fn sync_team_to_sim_world(
     }
     world.team_players.insert(team, owner);
     world.team_is_neutral.insert(team, Bool::from(owner == 0));
-    world
-        .player_is_human
-        .insert(team, Bool::from(player.player_type == PlayerType::Human));
-    if player.ai == Some(AiKind::Skirmish) {
-        world.skirmish_ai_teams.insert(team);
-    }
     let lists: Vec<Vec<TeamId>> = player
         .team_prototypes
         .iter()
@@ -1322,8 +1315,6 @@ pub fn remove_team_from_sim_world(world: &mut SimWorld, team: TeamId) {
     world.team_players.remove(&team);
     world.team_members.remove(&team);
     world.team_is_neutral.remove(&team);
-    world.player_is_human.remove(&team);
-    world.skirmish_ai_teams.remove(&team);
     world.team_common_targets.remove(&team);
     for lists in world.player_team_prototypes.values_mut() {
         for list in lists.iter_mut() {

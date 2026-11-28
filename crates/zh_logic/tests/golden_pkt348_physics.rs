@@ -886,13 +886,9 @@ fn physics_behavior_matches_reference() {
         run.sim.world = SimWorld::new();
         run.sim.world.frame = frame;
         run.sim
-            .world
-            .player_relationships
-            .insert((1, 2), Relationship::Enemies);
+            .world.set_player_relation(1, 2, Relationship::Enemies);
         run.sim
-            .world
-            .player_relationships
-            .insert((2, 1), Relationship::Enemies);
+            .world.set_player_relation(2, 1, Relationship::Enemies);
         run.sim.terrain = Box::new(Terrain {
             ground: float(setup[0]),
             cliff: setup[1] != "0",

@@ -29,7 +29,9 @@ use crate::combat::locomotor_set::LocomotorSetType;
 use crate::economy::energy::EnergyObjectInfo;
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use crate::economy::MAX_PLAYER_COUNT;
-use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
+use crate::gamelogic::global_data::{
+    BodyDamageType, GlobalData, PlayerType, WeaponBonusConditionType,
+};
 use crate::modules::module_factory::ModuleParseContext;
 use crate::modules::update::deletion_update::DeletionUpdate;
 use crate::modules::update::ocl_update::OclUpdate;
@@ -58,6 +60,8 @@ use crate::object::thing_template::{
 };
 use crate::object::weapon::WeaponStore;
 use crate::player::player_list::PlayerList;
+use crate::player::player::Player;
+use crate::player::seams::AiKind;
 use crate::object::weapon_effects::WeaponStoreState;
 use crate::object::weapon_set::{
     self,
@@ -2457,7 +2461,6 @@ pub struct SimWorld {
     /// instances, newest first. Filled by [`SimContext::add_player_team`]; a team
     /// listed nowhere counts as a prototype of its own, after the listed ones.
     pub player_team_prototypes: BTreeMap<Int, Vec<Vec<TeamId>>>,
-    pub player_relationships: BTreeMap<(Int, Int), Relationship>,
     pub registered_supply_centers: Vec<ObjectId>,
     pub registered_supply_warehouses: Vec<ObjectId>,
     pub kills_scored: Vec<(ObjectId, ObjectId)>,
@@ -2469,7 +2472,6 @@ pub struct SimWorld {
     pub damage_watch: Option<(ModuleSlot, Option<ObjectStatusMaskType>)>,
     pub triggered_fx_lists: Vec<(String, Coord3D)>,
     pub triggered_damage_fx: Vec<(String, DamageType, Real, ObjectId, ObjectId)>,
-    pub player_is_human: BTreeMap<TeamId, Bool>,
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
     /// `Player::m_ai` of every computer player, by player index.
     pub ai_players: BTreeMap<Int, crate::ai::ai_player::AiPlayer>,
@@ -2553,8 +2555,6 @@ pub struct SimWorld {
     /// `Team::m_commonAttackTarget` of the teams whose prototype attacks a common
     /// target; other teams have no entry. Filled by `sync_teams`.
     pub team_common_targets: BTreeMap<TeamId, ObjectId>,
-    /// Teams controlled by a skirmish AI player (`Player::isSkirmishAIPlayer`).
-    pub skirmish_ai_teams: BTreeSet<TeamId>,
     /// What the unported `ActionManager` would allow: (actor, target, question).
     pub action_permissions: BTreeSet<(ObjectId, ObjectId, ActionQuery)>,
     /// `GameLogic::m_controlBarOverrides`: (command set, slot) to button.
@@ -2606,7 +2606,6 @@ impl SimWorld {
             team_players: BTreeMap::new(),
             team_members: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),
-            player_relationships: BTreeMap::new(),
             registered_supply_centers: Vec::new(),
             registered_supply_warehouses: Vec::new(),
             kills_scored: Vec::new(),
@@ -2617,7 +2616,6 @@ impl SimWorld {
             damage_watch: None,
             triggered_fx_lists: Vec::new(),
             triggered_damage_fx: Vec::new(),
-            player_is_human: BTreeMap::new(),
             team_is_neutral: BTreeMap::new(),
             ai_players: BTreeMap::new(),
             special_power_uses_delay: TRUE,
@@ -2683,7 +2681,6 @@ impl SimWorld {
             local_player_index: 0,
             player_default_teams: BTreeMap::new(),
             team_common_targets: BTreeMap::new(),
-            skirmish_ai_teams: BTreeSet::new(),
             action_permissions: BTreeSet::new(),
             control_bar_overrides: BTreeMap::new(),
             skill_points_awarded: BTreeMap::new(),
@@ -2870,6 +2867,11 @@ impl SimContext {
             .get(&team_id)
             .copied()
             .unwrap_or(team_id.0)
+    }
+
+    /// The player `Object::getRelationship` takes a member of `team_id` for.
+    pub(crate) fn player_of_member(&self, team_id: TeamId) -> Option<&Player> {
+        self.world.players.player(self.player_index_for_team(team_id))
     }
 
     /// The test's answers for this object's weapons, if it gave any.
@@ -3654,8 +3656,8 @@ impl SimContext {
                     .get(slot)
                     .map_or_else(Vec::new, |o| o.behaviors.iter().map(|&(ms, _)| ms).collect());
                 if old_player != new_player
-                    && self.world.player_relationships.get(&(old_player, new_player))
-                        != Some(&Relationship::Allies)
+                    && self.world.player_relation(old_player, new_player)
+                        != Some(Relationship::Allies)
                 {
                     self.ai_idle(slot, CommandSourceType::FromAi);
                 }
@@ -3848,8 +3850,7 @@ impl SimContext {
             return;
         }
         #[cfg(not(feature = "retail-crc"))]
-        if self.world.player_relationships.get(&(old_player, new_player))
-            == Some(&Relationship::Allies)
+        if self.world.player_relation(old_player, new_player) == Some(Relationship::Allies)
         {
             return;
         }
@@ -5316,9 +5317,7 @@ impl SimView for SimContext {
             return Relationship::Allies;
         }
         self.world
-            .player_relationships
-            .get(&(pa, pb))
-            .copied()
+            .player_relation(pa, pb)
             .unwrap_or(Relationship::Neutral)
     }
 
@@ -5466,11 +5465,10 @@ impl SimView for SimContext {
     }
 
     fn player_is_human(&self, team_id: TeamId) -> Bool {
-        self.world
-            .player_is_human
-            .get(&team_id)
-            .copied()
-            .unwrap_or(FALSE)
+        Bool::from(
+            self.player_of_member(team_id)
+                .is_some_and(|p| p.player_type == PlayerType::Human),
+        )
     }
 
     fn is_neutral_controlled(&self, owner: ObjectSlot) -> Bool {
@@ -6213,7 +6211,10 @@ impl SimView for SimContext {
     }
 
     fn player_is_skirmish_ai(&self, team_id: TeamId) -> Bool {
-        Bool::from(self.world.skirmish_ai_teams.contains(&team_id))
+        Bool::from(
+            self.player_of_member(team_id)
+                .is_some_and(|p| p.ai == Some(AiKind::Skirmish)),
+        )
     }
 
     fn team_relationship_to_player(&self, team_id: TeamId, player_index: Int) -> Relationship {
@@ -6222,9 +6223,7 @@ impl SimView for SimContext {
             return Relationship::Allies;
         }
         self.world
-            .player_relationships
-            .get(&(pa, player_index))
-            .copied()
+            .player_relation(pa, player_index)
             .unwrap_or(Relationship::Neutral)
     }
 
@@ -6820,7 +6819,7 @@ impl SimView for SimContext {
         let them = self.player_index_for_team(team_id);
         (0..MAX_PLAYER_COUNT as Int)
             .filter(|&n| {
-                self.world.player_relationships.get(&(n, them)) == Some(&Relationship::Enemies)
+                self.world.player_relation(n, them) == Some(Relationship::Enemies)
             })
             .flat_map(|n| self.player_object_slots(n))
             .collect()
@@ -6927,9 +6926,7 @@ impl SimView for SimContext {
             Relationship::Allies
         } else {
             self.world
-                .player_relationships
-                .get(&(local, owner_player))
-                .copied()
+                .player_relation(local, owner_player)
                 .unwrap_or(Relationship::Neutral)
         };
         let active = self

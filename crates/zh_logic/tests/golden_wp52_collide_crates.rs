@@ -775,21 +775,13 @@ fn wp52_collide_crates_golden_vectors() {
     api.ctx.world.team_players.insert(team_b, 1);
     api.ctx.world.team_players.insert(team_c, 2);
     api.ctx
-        .world
-        .player_relationships
-        .insert((0, 1), Relationship::Neutral);
+        .world.set_player_relation(0, 1, Relationship::Neutral);
     api.ctx
-        .world
-        .player_relationships
-        .insert((1, 0), Relationship::Neutral);
+        .world.set_player_relation(1, 0, Relationship::Neutral);
     api.ctx
-        .world
-        .player_relationships
-        .insert((0, 2), Relationship::Neutral);
+        .world.set_player_relation(0, 2, Relationship::Neutral);
     api.ctx
-        .world
-        .player_relationships
-        .insert((2, 0), Relationship::Neutral);
+        .world.set_player_relation(2, 0, Relationship::Neutral);
 
     let upg_mask = api
         .ctx
@@ -817,8 +809,8 @@ fn wp52_collide_crates_golden_vectors() {
         api.ctx.world.frame = frame0;
 
         let rel_bc = rel_from_i32(get_i32(line, "rel_bc").expect("rel_bc"));
-        api.ctx.world.player_relationships.insert((1, 2), rel_bc);
-        api.ctx.world.player_relationships.insert((2, 1), rel_bc);
+        api.ctx.world.set_player_relation(1, 2, rel_bc);
+        api.ctx.world.set_player_relation(2, 1, rel_bc);
     for p in 0..16 {
         api.ctx.world.players.player_mut(p).expect("player").upgrades_completed.clear();
     }

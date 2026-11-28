@@ -391,7 +391,7 @@ fn world(sim: &mut SimContext) {
         // As the harness does: without a template the money names player 0.
         money.set_player_index(player as i32);
         money.set_starting_cash(5000);
-        w.player_is_human.insert(team, FALSE);
+        w.set_team_human(team, FALSE);
     }
     w.team_is_neutral.insert(TEAMS[0], TRUE);
     w.neutral_team_id = TEAMS[0];
@@ -405,7 +405,7 @@ fn world(sim: &mut SimContext) {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
 }

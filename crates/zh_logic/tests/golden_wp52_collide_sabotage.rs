@@ -268,21 +268,13 @@ fn wp52_collide_sabotage_golden_vectors() {
     api.ctx.world.team_is_neutral.insert(team_b, FALSE);
     api.ctx.world.team_is_neutral.insert(team_c, FALSE);
     api.ctx
-        .world
-        .player_relationships
-        .insert((0, 1), Relationship::Neutral);
+        .world.set_player_relation(0, 1, Relationship::Neutral);
     api.ctx
-        .world
-        .player_relationships
-        .insert((1, 0), Relationship::Neutral);
+        .world.set_player_relation(1, 0, Relationship::Neutral);
     api.ctx
-        .world
-        .player_relationships
-        .insert((0, 2), Relationship::Neutral);
+        .world.set_player_relation(0, 2, Relationship::Neutral);
     api.ctx
-        .world
-        .player_relationships
-        .insert((2, 0), Relationship::Neutral);
+        .world.set_player_relation(2, 0, Relationship::Neutral);
 
     load_rules_ini(
         &mut api,
@@ -479,10 +471,10 @@ fn wp52_collide_sabotage_golden_vectors() {
         let sw_kind_sel = get_u32(line, "sw_kind_sel").unwrap();
 
         api.ctx.world.frame = frame0;
-        api.ctx.world.player_relationships.insert((1, 2), rel_bc);
-        api.ctx.world.player_relationships.insert((2, 1), rel_bc);
-        api.ctx.world.player_is_human.insert(team_b, pb_human);
-        api.ctx.world.player_is_human.insert(team_c, pc_human);
+        api.ctx.world.set_player_relation(1, 2, rel_bc);
+        api.ctx.world.set_player_relation(2, 1, rel_bc);
+        api.ctx.world.set_team_human(team_b, pb_human);
+        api.ctx.world.set_team_human(team_c, pc_human);
         let owner = api.ctx.player_of_team_mut(team_b).expect("player");
         owner.sciences.clear();
         let sci_c = &mut api.ctx.player_of_team_mut(team_c).expect("player").sciences;

@@ -176,7 +176,7 @@ fn reset_world(sim: &mut SimContext) {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
 }
@@ -526,8 +526,8 @@ fn stealth_and_detector_match_reference() {
             2 => Relationship::Allies,
             other => panic!("relationship {other}"),
         };
-        sim.world.player_relationships.insert((1, 2), rel);
-        sim.world.player_relationships.insert((2, 1), rel);
+        sim.world.set_player_relation(1, 2, rel);
+        sim.world.set_player_relation(2, 1, rel);
         sim.world.frame = frame;
         sim.world.rng.init_random_with_seed(seed);
         let mut o = [None; OBJECTS];

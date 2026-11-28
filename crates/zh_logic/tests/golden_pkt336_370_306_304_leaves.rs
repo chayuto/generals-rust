@@ -833,8 +833,8 @@ fn rules() -> RulesRegistry {
 }
 
 fn relate(sim: &mut SimContext, a: i32, b: i32, rel: Relationship) {
-    sim.world.player_relationships.insert((a, b), rel);
-    sim.world.player_relationships.insert((b, a), rel);
+    sim.world.set_player_relation(a, b, rel);
+    sim.world.set_player_relation(b, a, rel);
 }
 
 fn reset(sim: &mut SimContext) -> Shared {
@@ -852,7 +852,7 @@ fn reset(sim: &mut SimContext) -> Shared {
     for (player, team) in TEAMS.into_iter().enumerate() {
         w.team_players.insert(team, player as i32);
         w.player_default_teams.insert(player as i32, team);
-        w.player_is_human.insert(team, FALSE);
+        w.set_team_human(team, FALSE);
     }
     w.team_is_neutral.insert(TEAMS[0], TRUE);
     w.neutral_team_id = TEAMS[0];
@@ -1240,9 +1240,7 @@ fn test_pkt306_auto_find_healing_update_golden() {
         };
         let mut frame = start as u32;
         sim.world.frame = frame;
-        sim.world
-            .player_is_human
-            .insert(TEAMS[1], Bool::from(human != 0));
+        sim.world.set_team_human(TEAMS[1], Bool::from(human != 0));
         sim.world.next_object_id = base;
         sim.world.rng.init_random_with_seed(7);
         let make_seeker =
@@ -1325,9 +1323,7 @@ fn test_pkt306_auto_find_healing_update_golden() {
                     }
                 }
                 3 => {
-                    sim.world
-                        .player_is_human
-                        .insert(TEAMS[1], Bool::from(a != 0));
+                    sim.world.set_team_human(TEAMS[1], Bool::from(a != 0));
                 }
                 4 => {
                     sim.set_object_position(

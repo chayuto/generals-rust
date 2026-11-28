@@ -172,13 +172,9 @@ fn wp52_die_golden_vectors() {
     api.ctx.world.team_is_neutral.insert(team_a, TRUE);
     api.ctx.world.team_is_neutral.insert(team_b, FALSE);
     api.ctx
-        .world
-        .player_relationships
-        .insert((0, 2), Relationship::Enemies);
+        .world.set_player_relation(0, 2, Relationship::Enemies);
     api.ctx
-        .world
-        .player_relationships
-        .insert((2, 0), Relationship::Enemies);
+        .world.set_player_relation(2, 0, Relationship::Enemies);
 
     let rules_ini = "Upgrade UpgDieA\n  Type = OBJECT\n  BuildTime = 1.0\n  BuildCost = 100\nEnd\n\
          Upgrade UpgDieConflict\n  Type = PLAYER\n  BuildTime = 1.0\n  BuildCost = 100\nEnd\n\

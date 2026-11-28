@@ -16,7 +16,7 @@ use crate::spatial::partition_query::{DistanceCalculationType, QueryCenter};
 use crate::arena::ObjectSlot;
 use crate::combat::damage::{DamageInfo, HUGE_DAMAGE_AMOUNT};
 use crate::combat::locomotor::LocomotorAppearance;
-use crate::gamelogic::global_data::BodyDamageType;
+use crate::gamelogic::global_data::{BodyDamageType, PlayerType};
 use crate::modules::update::ai_update::AiUpdate;
 use crate::pathfinder::ai_pathfind::{
     AdjustUnit, Footprint, GoalMover, GoalObject, NoPathCost, PathAgent, PathUnit, PathUnits,
@@ -429,7 +429,9 @@ impl SimContext {
     /// type counts as a person's, as an object without a player does.
     pub(super) fn adjust_unit(&self, slot: ObjectSlot) -> Option<AdjustUnit> {
         let obj = self.world.objects.get(slot)?;
-        let human = self.world.player_is_human.get(&obj.team_id) != Some(&FALSE);
+        let human = self
+            .player_of_member(obj.team_id)
+            .is_none_or(|p| p.player_type == PlayerType::Human);
         Some(AdjustUnit {
             agent: self.path_agent(slot)?,
             position: *obj.thing.get_position(),

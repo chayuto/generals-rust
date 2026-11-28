@@ -227,7 +227,7 @@ fn reset_world(sim: &mut SimContext, local_player: Int) {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
 }

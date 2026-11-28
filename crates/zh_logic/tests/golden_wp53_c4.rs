@@ -346,7 +346,7 @@ fn reset_world(sim: &mut SimContext, frame: u32, seed: u32, local_player: Int) {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
     w.frame = frame;
@@ -587,7 +587,7 @@ fn run_neutron(sim: &mut SimContext, v: &Input) -> (Vec<Row>, u32) {
     let allies = *v.p.last().expect("relationship mask");
     for (bit, pair) in [(0, 1), (1, 0), (0, 2), (2, 0), (1, 2), (2, 1)].into_iter().enumerate() {
         if allies & (1 << bit) != 0 {
-            sim.world.player_relationships.insert(pair, Relationship::Allies);
+            sim.world.set_player_relation(pair.0, pair.1, Relationship::Allies);
         }
     }
 

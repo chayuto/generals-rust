@@ -166,7 +166,7 @@ impl Trial {
                 } else {
                     Relationship::Enemies
                 };
-                sim.world.player_relationships.insert((i, j), relation);
+                sim.world.set_player_relation(i, j, relation);
             }
         }
         Self {

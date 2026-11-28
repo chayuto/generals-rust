@@ -1231,7 +1231,7 @@ fn golden_special_ability_and_command_button_hunt() {
                     } else {
                         ab
                     };
-                    w.player_relationships.insert((i, j), rel);
+                    w.set_player_relation(i, j, rel);
                 }
             }
             let owner = w.team_players[&TEAMS[1]];

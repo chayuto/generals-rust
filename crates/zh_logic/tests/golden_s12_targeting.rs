@@ -376,7 +376,7 @@ fn build(sim: &mut SimContext, crowd: &J, names: &[&str]) -> Vec<ObjectSlot> {
         let team = TeamId(p as Int);
         sim.world.team_players.insert(team, p as Int);
         sim.world.player_default_teams.insert(p as Int, team);
-        sim.world.player_is_human.insert(team, flag(is_human));
+        sim.world.set_team_human(team, flag(is_human));
         for q in 0..3 {
             if p != q {
                 let r = match relations[p * 3 + q] {
@@ -385,9 +385,7 @@ fn build(sim: &mut SimContext, crowd: &J, names: &[&str]) -> Vec<ObjectSlot> {
                     2 => Relationship::Allies,
                     r => panic!("relationship {r}"),
                 };
-                sim.world
-                    .player_relationships
-                    .insert((p as Int, q as Int), r);
+                sim.world.set_player_relation(p as Int, q as Int, r);
             }
         }
     }

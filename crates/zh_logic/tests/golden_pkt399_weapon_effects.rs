@@ -161,7 +161,7 @@ fn new_world(frame: u32, seed: u32) -> SimWorld {
         (2, 0, Relationship::Neutral),
         (0, 2, Relationship::Neutral),
     ] {
-        world.player_relationships.insert((a, b), relationship);
+        world.set_player_relation(a, b, relationship);
     }
     world
 }

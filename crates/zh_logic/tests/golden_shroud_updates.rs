@@ -548,7 +548,7 @@ End
                     2 => Relationship::Allies,
                     _ => Relationship::Neutral,
                 };
-                sim.world.player_relationships.insert((i as Int, j as Int), r);
+                sim.world.set_player_relation(i as Int, j as Int, r);
             }
         }
         let extent = Region3D {

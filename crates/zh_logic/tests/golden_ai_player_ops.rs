@@ -357,12 +357,6 @@ impl PlayerWorld for TestPlayerWorld<'_> {
         self.world
             .team_is_neutral
             .insert(team, Bool::from(owner == 0));
-        self.world
-            .player_is_human
-            .insert(team, Bool::from(p.player_type == PlayerType::Human));
-        if p.ai == Some(AiKind::Skirmish) {
-            self.world.skirmish_ai_teams.insert(team);
-        }
     }
     fn notify_team_destroyed(&mut self, _team: TeamId) {}
     fn detach_member(&mut self, _object: ObjectId) {}
@@ -439,7 +433,6 @@ fn sync_all(sim: &mut SimContext, teams: &TeamFactory) {
     if let Some(team) = players.player(0).and_then(|p| p.default_team) {
         sim.world.neutral_team_id = team;
     }
-    sim.world.skirmish_ai_teams.clear();
     for index in 0..players.player_count() {
         let Some(player) = players.player(index) else {
             continue;
@@ -452,12 +445,6 @@ fn sync_all(sim: &mut SimContext, teams: &TeamFactory) {
                 sim.world
                     .team_is_neutral
                     .insert(team, Bool::from(index == 0));
-                sim.world
-                    .player_is_human
-                    .insert(team, Bool::from(player.player_type == PlayerType::Human));
-                if player.ai == Some(AiKind::Skirmish) {
-                    sim.world.skirmish_ai_teams.insert(team);
-                }
             }
             if !instances.is_empty() {
                 lists.push(instances);
@@ -582,12 +569,8 @@ fn setup_world_with_extra(skirmish: bool, extra_ini: &str) -> Fixture {
         .player_mut(2)
         .unwrap()
         .set_player_relationship(1, Relationship::Enemies);
-    sim.world
-        .player_relationships
-        .insert((1, 2), Relationship::Enemies);
-    sim.world
-        .player_relationships
-        .insert((2, 1), Relationship::Enemies);
+    sim.world.set_player_relation(1, 2, Relationship::Enemies);
+    sim.world.set_player_relation(2, 1, Relationship::Enemies);
     sync_all(&mut sim, &teams);
 
     let mut scripts = GameScripts::default();

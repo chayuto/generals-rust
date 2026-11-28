@@ -715,12 +715,8 @@ End
     let team_a = TeamId(1);
     let team_b = TeamId(2);
     let team_n = TeamId(0);
-    sim.world
-        .player_relationships
-        .insert((1, 2), zh_common::types::Relationship::Enemies);
-    sim.world
-        .player_relationships
-        .insert((2, 1), zh_common::types::Relationship::Enemies);
+    sim.world.set_player_relation(1, 2, zh_common::types::Relationship::Enemies);
+    sim.world.set_player_relation(2, 1, zh_common::types::Relationship::Enemies);
     let src = sim.spawn_object(id_of("Obj_Demoralize", &sim), team_a, Coord3D::default(), 0.0);
     // The templates carry no `OpenContain` behavior: a real container would claim
     // `contain_slot` first and hide this stand-in's occupancy of 2.
@@ -921,8 +917,8 @@ fn test_wp52_special_power_1000_golden_vectors() {
 
     let team_a = TeamId(1);
     let team_b = TeamId(2);
-    sim.world.player_relationships.insert((1, 2), zh_common::types::Relationship::Enemies);
-    sim.world.player_relationships.insert((2, 1), zh_common::types::Relationship::Enemies);
+    sim.world.set_player_relation(1, 2, zh_common::types::Relationship::Enemies);
+    sim.world.set_player_relation(2, 1, zh_common::types::Relationship::Enemies);
 
     let sp_normal_id = sim
         .rules

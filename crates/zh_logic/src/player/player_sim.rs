@@ -5,14 +5,15 @@
 //! (`tests/cpp_harness/gen_player_holdings.cpp`,
 //! `crates/zh_logic/tests/golden_player_holdings.rs`).
 
-use zh_common::types::{Bool, Int, TeamId, UnsignedInt, FALSE, TRUE};
+use zh_common::types::{Bool, Int, Relationship, TeamId, UnsignedInt, FALSE, TRUE};
 
 use crate::economy::energy::{Energy, EnergyOwnerCallbacks};
 use crate::economy::money::{MoneyCallbacks, NoopMoneyCallbacks};
+use crate::gamelogic::global_data::PlayerType;
 use crate::player::player::Player;
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::KindOfType;
-use crate::sim::{SimApi, SimContext, SimView};
+use crate::sim::{SimApi, SimContext, SimView, SimWorld};
 
 /// Holds what an [`Energy`] call reports. Every such call reports once, as its
 /// last step, so acting on it afterwards keeps the reference order.
@@ -33,6 +34,36 @@ struct Income(Option<Int>);
 impl MoneyCallbacks for Income {
     fn record_income(&mut self, player_index: Int) {
         self.0 = Some(player_index);
+    }
+}
+
+impl SimWorld {
+    /// `from`'s `m_playerRelations` entry for the player `to`.
+    pub fn player_relation(&self, from: Int, to: Int) -> Option<Relationship> {
+        self.players.player(from)?.player_relations.get(to as u32)
+    }
+
+    /// `setPlayerRelationship`. Panics without a player `from`.
+    pub fn set_player_relation(&mut self, from: Int, to: Int, relationship: Relationship) {
+        self.players
+            .player_mut(from)
+            .expect("no such player")
+            .set_player_relationship(to, relationship);
+    }
+
+    /// The controlling player of `team`. Panics when it has none.
+    pub fn team_player_mut(&mut self, team: TeamId) -> &mut Player {
+        let index = self.team_players.get(&team).copied().unwrap_or(team.0);
+        self.players.player_mut(index).expect("team without a player")
+    }
+
+    /// Makes the controlling player of `team` a human or a computer.
+    pub fn set_team_human(&mut self, team: TeamId, human: Bool) {
+        self.team_player_mut(team).player_type = if human != FALSE {
+            PlayerType::Human
+        } else {
+            PlayerType::Computer
+        };
     }
 }
 

@@ -542,10 +542,6 @@ impl ScriptWorld for LiveWorld<'_> {
         };
         if let Some(p) = self.sim.world.players.player_mut(from) {
             p.player_relations.set(to as u32, relationship);
-            self.sim
-                .world
-                .player_relationships
-                .insert((from, to), relationship);
         }
     }
 

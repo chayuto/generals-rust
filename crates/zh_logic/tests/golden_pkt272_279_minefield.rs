@@ -231,12 +231,8 @@ fn new_world(sim: &mut SimContext) {
             .player_default_teams
             .insert(player, TeamId(player));
     }
-    sim.world
-        .player_relationships
-        .insert((1, 2), Relationship::Enemies);
-    sim.world
-        .player_relationships
-        .insert((2, 1), Relationship::Enemies);
+    sim.world.set_player_relation(1, 2, Relationship::Enemies);
+    sim.world.set_player_relation(2, 1, Relationship::Enemies);
     sim.init_partition(
         20.0,
         Region3D {

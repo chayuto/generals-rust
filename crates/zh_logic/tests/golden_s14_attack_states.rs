@@ -370,8 +370,8 @@ fn world(vectors: &str, tape: &SharedTape, cells: Int, cliff: &str) -> SimContex
         w.team_players.insert(team, player as i32);
         w.player_default_teams.insert(player as i32, team);
     }
-    w.player_is_human.insert(TEAMS[1], TRUE);
-    w.player_is_human.insert(TEAMS[2], FALSE);
+    w.set_team_human(TEAMS[1], TRUE);
+    w.set_team_human(TEAMS[2], FALSE);
     w.team_is_neutral.insert(TEAMS[0], TRUE);
     w.neutral_team_id = TEAMS[0];
     w.local_player_index = 5;
@@ -384,7 +384,7 @@ fn world(vectors: &str, tape: &SharedTape, cells: Int, cliff: &str) -> SimContex
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
     sim

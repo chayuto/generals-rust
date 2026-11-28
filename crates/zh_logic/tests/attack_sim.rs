@@ -98,12 +98,10 @@ fn world() -> SimContext {
     for (player, team) in [(1, ATTACKERS), (2, DEFENDERS)] {
         sim.world.player_default_teams.insert(player, team);
         sim.world.team_players.insert(team, player);
-        sim.world.player_is_human.insert(team, TRUE);
+        sim.world.set_team_human(team, TRUE);
     }
     for pair in [(1, 2), (2, 1)] {
-        sim.world
-            .player_relationships
-            .insert(pair, Relationship::Enemies);
+        sim.world.set_player_relation(pair.0, pair.1, Relationship::Enemies);
     }
     sim.init_partition(20.0, extent());
     sim.new_pathfind_map(&extent(), 12.0);
@@ -420,7 +418,7 @@ fn the_mood_search_heeds_walls_fog_and_the_teams_target() {
     settle(&mut sim);
 
     // A computer team that is not easy keeps the target it first fires at.
-    sim.world.player_is_human.insert(ATTACKERS, FALSE);
+    sim.world.set_team_human(ATTACKERS, FALSE);
     sim.world
         .ai_players
         .insert(1, AiPlayer::new(AiKind::Skirmish, 1, 0, 1, 10));

@@ -57,10 +57,8 @@ fn world() -> SimContext {
     sim.init_partition(20.0, extent());
     sim.world.team_players.insert(TEAM, 0);
     sim.world.player_default_teams.insert(0, TEAM);
-    sim.world.player_is_human.insert(TEAM, TRUE);
-    sim.world
-        .player_relationships
-        .insert((0, 0), Relationship::Allies);
+    sim.world.set_team_human(TEAM, TRUE);
+    sim.world.set_player_relation(0, 0, Relationship::Allies);
     sim.world.frame = 100;
     sim.new_pathfind_map(&extent(), 0.0);
     sim

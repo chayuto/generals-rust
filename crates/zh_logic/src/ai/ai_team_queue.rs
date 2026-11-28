@@ -2237,8 +2237,8 @@ fn supply_center_has_supplies(
             return false;
         }
         let owner = sim.controlling_player(source_obj.team_id);
-        if owner.and_then(|o| sim.world.player_relationships.get(&(me, o)))
-            == Some(&Relationship::Enemies)
+        if owner.and_then(|o| sim.world.player_relation(me, o))
+            == Some(Relationship::Enemies)
         {
             return false;
         }

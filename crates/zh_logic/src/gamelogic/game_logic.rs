@@ -35,7 +35,6 @@ use crate::terrain::bridge_load::{
     bridge_ends, bridge_geometry, bridge_point_pairs, BridgeModels, MAX_BRIDGES,
 };
 use crate::gamelogic::game_engine::{GameDataLoader, StartupStores};
-use crate::gamelogic::global_data::PlayerType;
 use crate::modules::module::{MaxHealthChangeType, ModuleType};
 use crate::object::model_bones::ModelBoneCatalog;
 use crate::pathfinder::pathfind_constants::PathfindLayerEnum;
@@ -978,12 +977,6 @@ pub fn sync_teams(sim: &mut SimContext, teams: &TeamFactory) {
                 sim.world
                     .team_is_neutral
                     .insert(team, Bool::from(index == 0));
-                sim.world
-                    .player_is_human
-                    .insert(team, Bool::from(player.player_type == PlayerType::Human));
-                if player.ai == Some(AiKind::Skirmish) {
-                    sim.world.skirmish_ai_teams.insert(team);
-                }
             }
             if !instances.is_empty() {
                 lists.push(instances);
@@ -998,18 +991,7 @@ pub fn sync_teams(sim: &mut SimContext, teams: &TeamFactory) {
 
 /// The player state the sim keeps itself, once after `PlayerList::newGame`.
 fn sync_players(sim: &mut SimContext) {
-    let players = &sim.world.players;
-    sim.world.local_player_index = players.local_player();
-    for index in 0..players.player_count() {
-        let Some(player) = players.player(index) else {
-            continue;
-        };
-        for other in 0..players.player_count() {
-            if let Some(r) = player.player_relations.get(other as u32) {
-                sim.world.player_relationships.insert((index, other), r);
-            }
-        }
-    }
+    sim.world.local_player_index = sim.world.players.local_player();
 }
 
 /// Copies the sim's member lists into the team factory.

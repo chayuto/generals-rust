@@ -375,7 +375,7 @@ fn golden_partition_object_shroud() {
                     2 => Relationship::Allies,
                     _ => Relationship::Neutral,
                 };
-                sim.world.player_relationships.insert((i as Int, j as Int), r);
+                sim.world.set_player_relation(i as Int, j as Int, r);
             }
         }
         sim.init_partition(cur_cs, cur_extent.clone());

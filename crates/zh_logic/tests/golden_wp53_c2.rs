@@ -257,7 +257,7 @@ fn reset_world(sim: &mut SimContext, frame: u32, seed: u32) {
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
     w.frame = frame;

@@ -897,9 +897,7 @@ fn start(sim: &mut SimContext, variant: usize, frame: u32, cfg: &[u32]) -> Run {
         let vehicles = KindOfMaskType::from_single_index(KindOfType::Vehicle as i32);
         sim.add_cost_modifier(TEAM, &vehicles, CHANGE[kind]);
     }
-    sim.world
-        .player_is_human
-        .insert(TEAM, if cfg[9] != 0 { TRUE } else { FALSE });
+    sim.world.set_team_human(TEAM, if cfg[9] != 0 { TRUE } else { FALSE });
     for (name, status) in [
         ("U7", BuildableStatus::OnlyByAi),
         ("U8", BuildableStatus::IgnorePrerequisites),

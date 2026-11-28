@@ -912,8 +912,8 @@ pub(super) fn is_location_safe(
         let kind = |k| sim.object_is_kind_of(slot, k) != FALSE;
         // Enemies only, and not the player's own.
         let owner = sim.controlling_player(other.team_id);
-        let relationship = owner.and_then(|o| sim.world.player_relationships.get(&(player, o)));
-        if relationship != Some(&Relationship::Enemies) || owner == Some(player) {
+        let relationship = owner.and_then(|o| sim.world.player_relation(player, o));
+        if relationship != Some(Relationship::Enemies) || owner == Some(player) {
             return false;
         }
         if other.is_effectively_dead() != FALSE {
@@ -1163,8 +1163,8 @@ pub fn find_supply_center(order: &SupplyOrder<'_>, minimum_cash: Int) -> Option<
                 continue;
             }
             let owner = sim.controlling_player(object.team_id);
-            if owner.and_then(|o| sim.world.player_relationships.get(&(me, o)))
-                == Some(&Relationship::Enemies)
+            if owner.and_then(|o| sim.world.player_relation(me, o))
+                == Some(Relationship::Enemies)
             {
                 continue;
             }

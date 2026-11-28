@@ -164,9 +164,7 @@ fn fresh_world(sim: &mut SimContext, frame: u32) {
     sim.world = SimWorld::new();
     sim.world.frame = frame;
     for pair in [(1, 2), (2, 1)] {
-        sim.world
-            .player_relationships
-            .insert(pair, Relationship::Enemies);
+        sim.world.set_player_relation(pair.0, pair.1, Relationship::Enemies);
     }
 }
 
@@ -195,12 +193,8 @@ fn object_can_crush_matches_the_reference() {
         let (ca, va, cb, vb, team_b, ab, ba, flags) =
             (n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7]);
         fresh_world(&mut sim, 1);
-        sim.world
-            .player_relationships
-            .insert((1, 2), relationship[ab as usize]);
-        sim.world
-            .player_relationships
-            .insert((2, 1), relationship[ba as usize]);
+        sim.world.set_player_relation(1, 2, relationship[ab as usize]);
+        sim.world.set_player_relation(2, 1, relationship[ba as usize]);
         let a = spawn(&mut sim, &format!("FX_Crush{ca}{va}"), TEAM_A);
         let team = if team_b == 1 { TEAM_A } else { TEAM_B };
         let b = spawn(&mut sim, &format!("FX_Crush{cb}{vb}"), team);

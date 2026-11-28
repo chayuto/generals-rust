@@ -71,10 +71,8 @@ fn world() -> SimContext {
     sim.world.team_players.insert(TEAM, 1);
     sim.world.players.player_mut(1).expect("player").is_preorder = true;
     sim.world.player_default_teams.insert(1, TEAM);
-    sim.world.player_is_human.insert(TEAM, TRUE);
-    sim.world
-        .player_relationships
-        .insert((1, 1), zh_common::types::Relationship::Allies);
+    sim.world.set_team_human(TEAM, TRUE);
+    sim.world.set_player_relation(1, 1, zh_common::types::Relationship::Allies);
     sim
 }
 

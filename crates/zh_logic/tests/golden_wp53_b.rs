@@ -918,7 +918,7 @@ fn reset_world(sim: &mut SimContext, teams: Teams, frame: u32, logic_seed: u32) 
             } else {
                 Relationship::Enemies
             };
-            w.player_relationships.insert((i, j), rel);
+            w.set_player_relation(i, j, rel);
         }
     }
     w.frame = frame;
