@@ -3817,8 +3817,8 @@ impl SimContext {
     }
 
     /// The bit change of `Object::setStatus`. A change of `UnderConstruction`
-    /// re-files the object (it changes what the object can see). The mine
-    /// detonation the original runs there is not ported.
+    /// clears the mines under the object and re-files it (it changes what the
+    /// object can see).
     fn change_status(&mut self, owner: ObjectSlot, status: ObjectStatusType, value: Int) {
         let Some(obj) = self.world.objects.get_mut(owner) else {
             return;
@@ -3845,7 +3845,37 @@ impl SimContext {
             }
         }
         if status == ObjectStatusType::UnderConstruction && changed {
+            self.clear_mines_under(owner);
             self.world.partition.make_dirty(id);
+        }
+    }
+
+    /// The mine scan of `Object::setStatus`: enemy mines in the way detonate, all
+    /// others are removed.
+    fn clear_mines_under(&mut self, owner: ObjectSlot) {
+        let Some((pos, geometry, angle)) = self.world.objects.get(owner).map(|o| {
+            (
+                *o.thing.get_position(),
+                o.geometry.clone(),
+                o.thing.get_orientation(),
+            )
+        }) else {
+            return;
+        };
+        for them in self.find_potential_collisions(&pos, &geometry, angle, FALSE) {
+            if self.object_is_kind_of(them, KindOfType::Mine) == FALSE {
+                continue;
+            }
+            if self.player_relationship(owner, them) == Relationship::Enemies {
+                crate::modules::contain::open_contain::kill_object(
+                    self,
+                    them,
+                    DamageType::Unresistable,
+                    crate::rules::DeathType::Normal,
+                );
+            } else {
+                self.destroy_object(them);
+            }
         }
     }
 

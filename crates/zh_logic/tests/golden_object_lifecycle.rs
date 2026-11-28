@@ -16,6 +16,7 @@ use zh_logic::object::weapon::WeaponTemplate;
 use zh_logic::pathfinder::PathfindLayerEnum;
 use zh_logic::object::weapon_set::{WeaponLockType, WeaponSlotType};
 use zh_logic::rules::combat_types::{DamageType, WeaponSetType};
+use zh_logic::rules::ObjectStatusType;
 use zh_logic::sim::{SimApi, SimContext, SimView, SimWorld};
 
 const VECTORS: &str = include_str!("../../../docs/golden_vectors/PKT-390_lifecycle.txt");
@@ -312,6 +313,74 @@ impl Scene {
         self.weapons_row("-vet-hero-left", o);
     }
 
+    // ---- mines on construction
+
+    fn mine_row(&mut self, op: &str, o: ObjectSlot) {
+        let object = self.sim.world.objects.get(o).expect("object");
+        let (id, destroyed) = (object.id, object.is_destroyed());
+        let dead = object.is_effectively_dead() != FALSE;
+        let health = self.sim.object_health(o).to_bits();
+        let name = self.name_of(id);
+        self.row(format!(
+            "mine {op} {name} {} {} {health}",
+            u8::from(destroyed),
+            u8::from(dead)
+        ));
+    }
+
+    fn construction_mines(&mut self) {
+        use ObjectStatusType::UnderConstruction;
+        self.sim.world.frame = 200;
+        for round in 0..3 {
+            let x = 200.0 + 100.0 * round as Real;
+            let mines: Vec<ObjectSlot> = [
+                ("enemy", "Mine", TEAM_B, x + 5.0, 205.0),
+                ("own", "Mine", TEAM_A, x - 5.0, 205.0),
+                ("neutral", "Mine", TEAM_N, x, 195.0),
+                ("edge", "Mine", TEAM_B, x + 22.0, 200.0),
+                ("far", "Mine", TEAM_B, x + 40.0, 200.0),
+                ("rock", "Rock", TEAM_B, x, 205.0),
+            ]
+            .into_iter()
+            .map(|(name, template, team, x, y)| {
+                self.make(&format!("{name}{round}"), template, team, x, y)
+            })
+            .collect();
+            let bld = self.make(&format!("bld{round}"), "Bld", TEAM_A, x, 200.0);
+            if round == 2 {
+                for &m in &mines {
+                    self.mine_row(&format!("placed{round}"), m);
+                }
+            }
+            self.sim.update_partition();
+            self.sim.set_status(bld, UnderConstruction);
+            if round == 0 {
+                for &m in &mines {
+                    self.mine_row("set", m);
+                }
+            } else if round == 1 {
+                let late = [
+                    self.make("late-enemy", "Mine", TEAM_B, x + 8.0, 195.0),
+                    self.make("late-own", "Mine", TEAM_A, x - 8.0, 195.0),
+                ];
+                self.sim.update_partition();
+                self.sim.set_status(bld, UnderConstruction);
+                for m in late {
+                    self.mine_row("same", m);
+                }
+                self.sim.clear_status(bld, UnderConstruction);
+                for m in late {
+                    self.mine_row("cleared", m);
+                }
+            } else {
+                for &m in &mines {
+                    self.mine_row("set2", m);
+                }
+            }
+            self.sim.process_destroy_list();
+        }
+    }
+
     // ---- pathfind map
 
     fn name_of(&self, id: ObjectId) -> String {
@@ -392,6 +461,13 @@ fn pathfind_map_loses_destroyed_and_contained_units() {
     scene.pathfind();
     // Object ids differ between this scene and the reference's, names do not.
     check("cells", &scene.rows);
+}
+
+#[test]
+fn construction_clears_the_mines_under_the_object() {
+    let mut scene = Scene::new();
+    scene.construction_mines();
+    check("mine", &scene.rows);
 }
 
 #[test]
