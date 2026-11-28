@@ -258,8 +258,10 @@ End",
         sim.world.players.player_mut(p).expect("player").upgrades_completed.clear();
     }
         sim.player_of_team_mut(team_a).expect("player").is_preorder = preorder;
-        sim.world.registered_supply_centers.clear();
-        sim.world.registered_supply_warehouses.clear();
+        let player = sim.player_of_team_mut(team_a).expect("player");
+        player.has_economy_trackers = true;
+        player.supply_centers.clear();
+        player.supply_warehouses.clear();
         let sci_set = &mut sim.player_of_team_mut(team_a).expect("player").sciences;
         sci_set.clear();
         if sci_a_known {
@@ -421,16 +423,16 @@ End",
         // 5) SupplyCenterCreate & 6) SupplyWarehouseCreate
         let id_sc = sim.rules.thing_factory.find_template_id(&t_sc).unwrap();
         let o_sc = sim.spawn_object(id_sc, team_a, Coord3D::default(), 0.0);
-        let sc_pre = sim.world.registered_supply_centers.len() as i32;
+        let sc_pre = sim.player_of_team(team_a).expect("player").supply_centers.len() as i32;
         if build {
             sim.dispatch_on_build_complete(o_sc);
         }
-        let sc_post = sim.world.registered_supply_centers.len() as i32;
+        let sc_post = sim.player_of_team(team_a).expect("player").supply_centers.len() as i32;
         let (_, sc_bytes, _, sc_xcrc) = inspect_create_module(&mut sim, o_sc);
 
         let id_sw = sim.rules.thing_factory.find_template_id(&t_sw).unwrap();
         let o_sw = sim.spawn_object(id_sw, team_a, Coord3D::default(), 0.0);
-        let sw_pre = sim.world.registered_supply_warehouses.len() as i32;
+        let sw_pre = sim.player_of_team(team_a).expect("player").supply_warehouses.len() as i32;
         let (_, sw_bytes, _, sw_xcrc) = inspect_create_module(&mut sim, o_sw);
 
         assert_eq!([sc_pre, sc_post], [want_sc[0], want_sc[1]], "seed {seed} sc");

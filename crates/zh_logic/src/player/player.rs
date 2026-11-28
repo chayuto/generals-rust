@@ -21,6 +21,7 @@ use crate::economy::academy_stats::{AcademyPlayerContext, AcademyStats};
 use crate::economy::score_keeper::ScoreKeeper;
 use crate::gamelogic::global_data::PlayerType;
 use crate::modules::update::battle_plan_update::{BattlePlanBonuses, PlayerBattlePlans};
+use crate::player::player_snapshots::PlayerUpgrade;
 use crate::player::seams::{
     AiKind, PlayerEnv, PlayerIndex, PlayerPart, PlayerWorld, SkirmishScripts,
 };
@@ -78,6 +79,8 @@ pub struct Player {
     pub is_dead: bool,
     pub disable_proof_radar_count: Int,
     pub radar_disabled: bool,
+    /// `m_upgradeList`, head first.
+    pub upgrades: Vec<PlayerUpgrade>,
     pub upgrades_in_progress: UpgradeMaskType,
     pub upgrades_completed: UpgradeMaskType,
     pub energy: Energy,
@@ -88,6 +91,11 @@ pub struct Player {
     pub ai: Option<AiKind>,
     /// `m_resourceGatheringManager` and `m_tunnelSystem` exist.
     pub has_economy_trackers: bool,
+    /// `ResourceGatheringManager::m_supplyWarehouses`. Pruning of dead ones is
+    /// `findBestSupplyWarehouse`, which is not ported.
+    pub supply_warehouses: Vec<ObjectId>,
+    /// `ResourceGatheringManager::m_supplyCenters`.
+    pub supply_centers: Vec<ObjectId>,
     pub default_team: Option<TeamId>,
     pub sciences: ScienceVec,
     pub rank_level: Int,
@@ -326,6 +334,7 @@ impl Player {
             is_dead: false,
             disable_proof_radar_count: 0,
             radar_disabled: false,
+            upgrades: Vec::new(),
             upgrades_in_progress: UpgradeMaskType::default(),
             upgrades_completed: UpgradeMaskType::default(),
             energy,
@@ -333,6 +342,8 @@ impl Player {
             build_list: Vec::new(),
             ai: None,
             has_economy_trackers: false,
+            supply_warehouses: Vec::new(),
+            supply_centers: Vec::new(),
             default_team: None,
             sciences: Vec::new(),
             rank_level: 0,
@@ -379,7 +390,7 @@ impl Player {
         self.disable_proof_radar_count = 0;
         self.radar_disabled = false;
         self.battle_plans = PlayerBattlePlans::default();
-        env.world.delete_upgrades(self.index);
+        self.upgrades.clear();
         self.upgrades_in_progress.clear();
         self.upgrades_completed.clear();
         self.energy.init(Some(self.index));
@@ -680,6 +691,8 @@ impl Player {
 
     fn delete_economy_trackers(&mut self, world: &mut dyn PlayerWorld) {
         if std::mem::take(&mut self.has_economy_trackers) {
+            self.supply_warehouses.clear();
+            self.supply_centers.clear();
             world.delete_economy_trackers(self.index);
         }
     }
@@ -1010,7 +1023,7 @@ impl Player {
         let mut version: XferVersion = 8;
         xfer.xfer_version(&mut version, 8)?;
         self.money.xfer(xfer)?;
-        let mut upgrade_count = env.world.upgrade_count(self.index);
+        let mut upgrade_count = self.upgrades.len() as UnsignedShort;
         xfer.xfer_unsigned_short(&mut upgrade_count)?;
         if version >= 7 {
             flag(xfer, &mut self.is_preorder)?;
@@ -1019,13 +1032,12 @@ impl Player {
             xfer_science_vec(xfer, env, &mut self.sciences_disabled)?;
             xfer_science_vec(xfer, env, &mut self.sciences_hidden)?;
         }
-        env.world
-            .xfer_player_part(self.index, PlayerPart::Upgrades, xfer)?;
+        let upgrades = env.world.upgrade_masks();
+        self.xfer_upgrades(xfer, upgrade_count, &upgrades)?;
         xfer.xfer_int(&mut self.radar_count)?;
         flag(xfer, &mut self.is_dead)?;
         xfer.xfer_int(&mut self.disable_proof_radar_count)?;
         flag(xfer, &mut self.radar_disabled)?;
-        let upgrades = env.world.upgrade_masks();
         xfer_upgrade_mask(xfer, &upgrades, &mut self.upgrades_in_progress)?;
         xfer_upgrade_mask(xfer, &upgrades, &mut self.upgrades_completed)?;
         self.energy.xfer(xfer)?;
@@ -1068,11 +1080,18 @@ impl Player {
             env.world
                 .xfer_player_part(self.index, PlayerPart::Ai, xfer)?;
         }
-        for part in [PlayerPart::ResourceGathering, PlayerPart::TunnelTracker] {
-            xfer_presence(xfer, self.has_economy_trackers)?;
-            if self.has_economy_trackers {
-                env.world.xfer_player_part(self.index, part, xfer)?;
-            }
+        xfer_presence(xfer, self.has_economy_trackers)?;
+        if self.has_economy_trackers {
+            // `ResourceGatheringManager::xfer`; loading appends to the lists.
+            let mut version: XferVersion = 1;
+            xfer.xfer_version(&mut version, 1)?;
+            xfer.xfer_stl_object_id_vec(&mut self.supply_warehouses)?;
+            xfer.xfer_stl_object_id_vec(&mut self.supply_centers)?;
+        }
+        xfer_presence(xfer, self.has_economy_trackers)?;
+        if self.has_economy_trackers {
+            env.world
+                .xfer_player_part(self.index, PlayerPart::TunnelTracker, xfer)?;
         }
 
         let mut default_team = self.default_team.unwrap_or(TeamId::INVALID);
@@ -1127,7 +1146,9 @@ impl Player {
         xfer.xfer_user(&mut attacked)?;
         self.attacked_by = attacked.map(|b| b != 0);
         xfer.xfer_real(&mut self.cash_bounty_percent)?;
-        self.score_keeper.xfer(xfer)?;
+        let world = &*env.world;
+        self.score_keeper
+            .xfer_with_resolver(xfer, |name| world.score_template(name))?;
 
         let mut count = self.production_changes.len() as UnsignedShort;
         xfer.xfer_unsigned_short(&mut count)?;

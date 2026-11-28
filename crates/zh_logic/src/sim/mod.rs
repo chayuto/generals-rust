@@ -61,6 +61,7 @@ use crate::object::thing_template::{
 use crate::object::weapon::WeaponStore;
 use crate::player::player_list::PlayerList;
 use crate::player::player::Player;
+use crate::player::player_snapshots::UPGRADE_STATUS_COMPLETE;
 use crate::player::seams::AiKind;
 use crate::object::weapon_effects::WeaponStoreState;
 use crate::object::weapon_set::{
@@ -2461,8 +2462,6 @@ pub struct SimWorld {
     /// instances, newest first. Filled by [`SimContext::add_player_team`]; a team
     /// listed nowhere counts as a prototype of its own, after the listed ones.
     pub player_team_prototypes: BTreeMap<Int, Vec<Vec<TeamId>>>,
-    pub registered_supply_centers: Vec<ObjectId>,
-    pub registered_supply_warehouses: Vec<ObjectId>,
     pub kills_scored: Vec<(ObjectId, ObjectId)>,
     pub upgrades_recorded: Vec<(TeamId, String)>,
     pub spawned_ocls: Vec<(String, ObjectId, Coord3D, Coord3D)>,
@@ -2606,8 +2605,6 @@ impl SimWorld {
             team_players: BTreeMap::new(),
             team_members: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),
-            registered_supply_centers: Vec::new(),
-            registered_supply_warehouses: Vec::new(),
             kills_scored: Vec::new(),
             upgrades_recorded: Vec::new(),
             spawned_ocls: Vec::new(),
@@ -2867,6 +2864,17 @@ impl SimContext {
             .get(&team_id)
             .copied()
             .unwrap_or(team_id.0)
+    }
+
+    /// Every `ResourceGatheringManager`, last player first.
+    fn each_resource_manager(&mut self, mut add: impl FnMut(&mut Player)) {
+        for index in (0..MAX_PLAYER_COUNT as Int).rev() {
+            if let Some(p) = self.world.players.player_mut(index) {
+                if p.has_economy_trackers {
+                    add(p);
+                }
+            }
+        }
     }
 
     /// The player `Object::getRelationship` takes a member of `team_id` for.
@@ -3181,11 +3189,9 @@ impl SimContext {
     /// `Player::addUpgrade(.., UPGRADE_STATUS_COMPLETE)` and `Player::onUpgradeCompleted`:
     /// every object of the player rechecks its upgrade modules, even if the player
     /// already had the upgrade. The member lists are walked live (`DLINK_ITERATOR`).
-    fn complete_player_upgrade(&mut self, player_idx: Int, mask: &UpgradeMaskType) {
-        let empty = UpgradeMaskType::new();
+    fn complete_player_upgrade(&mut self, player_idx: Int, name: &str, mask: &UpgradeMaskType) {
         if let Some(player) = self.world.players.player_mut(player_idx) {
-            player.upgrades_in_progress.clear_and_set(mask, &empty);
-            player.upgrades_completed.clear_and_set(&empty, mask);
+            player.add_upgrade(name, mask, UPGRADE_STATUS_COMPLETE);
         }
         let teams: Vec<TeamId> = self
             .player_prototypes(player_idx)
@@ -4736,7 +4742,7 @@ impl SimContext {
             return;
         };
         if let Some(player_idx) = self.controlling_player(team_id) {
-            self.complete_player_upgrade(player_idx, &upgrade_mask);
+            self.complete_player_upgrade(player_idx, upgrade_name, &upgrade_mask);
         }
     }
 
@@ -7914,7 +7920,7 @@ impl SimApi for SimContext {
         let empty_mask = UpgradeMaskType::new();
         if upgrade_type == UpgradeType::Player {
             if let Some(player_idx) = self.controlling_player(team_id) {
-                self.complete_player_upgrade(player_idx, &upgrade_mask);
+                self.complete_player_upgrade(player_idx, upgrade_name, &upgrade_mask);
             }
         } else {
             if let Some(obj) = self.world.objects.get_mut(owner) {
@@ -7994,17 +8000,13 @@ impl SimApi for SimContext {
 
     fn register_supply_center(&mut self, owner: ObjectSlot) {
         if let Some(id) = self.world.objects.id_of(owner) {
-            if !self.world.registered_supply_centers.contains(&id) {
-                self.world.registered_supply_centers.push(id);
-            }
+            self.each_resource_manager(|p| p.supply_centers.push(id));
         }
     }
 
     fn register_supply_warehouse(&mut self, owner: ObjectSlot) {
         if let Some(id) = self.world.objects.id_of(owner) {
-            if !self.world.registered_supply_warehouses.contains(&id) {
-                self.world.registered_supply_warehouses.push(id);
-            }
+            self.each_resource_manager(|p| p.supply_warehouses.push(id));
         }
     }
 

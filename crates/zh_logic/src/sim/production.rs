@@ -3,6 +3,7 @@
 //! The player is reached through one of its teams.
 
 use super::{SimApi, SimContext, SimView};
+use crate::player::player_snapshots::UPGRADE_STATUS_IN_PRODUCTION;
 use crate::arena::{DeferredSelfOp, FacetMask, ModuleSlot, ObjectSlot, ThingTemplateId};
 use crate::economy::academy_stats::{academy_kind_bits, AcademyObjectInfo, AcademyStats};
 use crate::economy::handicap::{Handicap, HandicapType};
@@ -575,36 +576,33 @@ impl SimContext {
         }
     }
 
-    fn upgrade_mask_of(&self, upgrade: NameKeyType) -> Option<UpgradeMaskType> {
+    fn upgrade_name_and_mask(&self, upgrade: NameKeyType) -> Option<(String, UpgradeMaskType)> {
         self.rules
             .upgrade_center
             .find_upgrade_by_key(upgrade)
-            .map(|u| u.upgrade_mask().clone())
+            .map(|u| (u.upgrade_name().to_owned(), u.upgrade_mask().clone()))
     }
 
     /// `Player::addUpgrade(.., UPGRADE_STATUS_IN_PRODUCTION)`.
     pub(super) fn add_upgrade_in_production(&mut self, team: TeamId, upgrade: NameKeyType) {
-        if let (Some(mask), Some(player_idx)) = (
-            self.upgrade_mask_of(upgrade),
+        if let (Some((name, mask)), Some(player_idx)) = (
+            self.upgrade_name_and_mask(upgrade),
             self.controlling_player(team),
         ) {
-            let empty = UpgradeMaskType::new();
             if let Some(player) = self.world.players.player_mut(player_idx) {
-                player.upgrades_in_progress.clear_and_set(&empty, &mask);
+                player.add_upgrade(&name, &mask, UPGRADE_STATUS_IN_PRODUCTION);
             }
         }
     }
 
     /// `Player::removeUpgrade`.
     pub(super) fn remove_player_upgrade_of(&mut self, team: TeamId, upgrade: NameKeyType) {
-        if let (Some(mask), Some(player_idx)) = (
-            self.upgrade_mask_of(upgrade),
+        if let (Some((name, _)), Some(player_idx)) = (
+            self.upgrade_name_and_mask(upgrade),
             self.controlling_player(team),
         ) {
-            let empty = UpgradeMaskType::new();
             if let Some(player) = self.world.players.player_mut(player_idx) {
-                player.upgrades_in_progress.clear_and_set(&mask, &empty);
-                player.upgrades_completed.clear_and_set(&mask, &empty);
+                player.remove_upgrade(&name);
             }
         }
     }

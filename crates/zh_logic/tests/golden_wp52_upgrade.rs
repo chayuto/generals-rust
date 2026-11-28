@@ -502,7 +502,9 @@ End
     for p in 0..16 {
         sim.world.players.player_mut(p).expect("player").energy.init(Some(p));
     }
-        sim.world.registered_supply_centers.clear();
+        let player = sim.player_of_team_mut(team_a).expect("player");
+        player.has_economy_trackers = true;
+        player.supply_centers.clear();
         sim.world.spawned_ocls.clear();
         sim.world.triggered_fx_lists.clear();
 
@@ -1066,10 +1068,10 @@ End
             Coord3D::new(120.0, 240.0, 0.0),
             1.25,
         );
-        let sc_before = sim.world.registered_supply_centers.len() as i32;
+        let sc_before = sim.player_of_team(team_a).expect("player").supply_centers.len() as i32;
         sim.grant_upgrade(o_repl, "UpgA", FALSE);
         let repl_old_dest = i32::from(sim.object(o_repl).unwrap().is_destroyed());
-        let sc_after = sim.world.registered_supply_centers.len() as i32;
+        let sc_after = sim.player_of_team(team_a).expect("player").supply_centers.len() as i32;
         assert_eq!(
             [repl_old_dest, sc_before, sc_after],
             want_repl[..],

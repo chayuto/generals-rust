@@ -8,7 +8,7 @@ use zh_common::core::dict::Dict;
 use zh_common::ini::IniLoadType;
 use zh_common::math::{Coord2D, Coord3D, Matrix3D, Region3D};
 use zh_common::types::{
-    Bool, Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, UnsignedShort, FALSE, TRUE,
+    Bool, Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
@@ -339,10 +339,9 @@ impl PlayerWorld for TestPlayerWorld<'_> {
     fn academy_record_income(&mut self, _player: PlayerIndex) {}
     fn power_brownout_changed(&mut self, _player: PlayerIndex, _brownout: bool) {}
     fn science_added(&mut self, _player: PlayerIndex, _science: ScienceType) {}
-    fn upgrade_count(&self, _player: PlayerIndex) -> UnsignedShort {
-        0
+    fn score_template(&self, _name: &str) -> Option<zh_logic::economy::score_keeper::ScoreTemplateDesc> {
+        None
     }
-    fn delete_upgrades(&mut self, _player: PlayerIndex) {}
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)> {
         Vec::new()
     }
@@ -350,9 +349,9 @@ impl PlayerWorld for TestPlayerWorld<'_> {
         let Some(owner) = teams.controlling_player(team) else {
             return;
         };
-        let Some(p) = players.player(owner) else {
+        if players.player(owner).is_none() {
             return;
-        };
+        }
         self.world.team_players.insert(team, owner);
         self.world
             .team_is_neutral

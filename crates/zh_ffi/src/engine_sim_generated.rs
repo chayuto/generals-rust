@@ -54,6 +54,7 @@ use zh_logic::object::thing_template::{
 use zh_logic::object::weapon::WeaponStore;
 use zh_logic::player::player_list::PlayerList;
 use zh_logic::player::player::Player;
+use zh_logic::player::player_snapshots::UPGRADE_STATUS_COMPLETE;
 use zh_logic::player::seams::AiKind;
 use zh_logic::object::weapon_effects::WeaponStoreState;
 use zh_logic::object::weapon_set::{

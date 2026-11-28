@@ -4,6 +4,7 @@ pub mod build_assistant;
 pub mod player;
 pub mod player_list;
 pub mod player_sim;
+pub mod player_snapshots;
 pub mod radar;
 pub mod science_purchase;
 pub mod seams;

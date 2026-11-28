@@ -28,6 +28,7 @@ use super::script_engine::{
     TeamPrototypeInfo,
 };
 use super::scripts::{Condition, Parameter, ScriptAction, ScriptList};
+use crate::economy::score_keeper::ScoreTemplateDesc;
 use crate::ai::ai_player::{build_by_supplies, AiPlayer, SupplyOrder};
 use crate::ai::ai_player_ops::{
     build_ai_base_defense, build_ai_base_defense_structure, build_specific_building_nearest_team,
@@ -1359,11 +1360,9 @@ impl PlayerWorld for FramePlayers<'_> {
     }
     // `grant_science` brings the world up to date itself.
     fn science_added(&mut self, _player: PlayerIndex, _science: ScienceType) {}
-    fn upgrade_count(&self, _player: PlayerIndex) -> UnsignedShort {
-        0
-    }
-    fn delete_upgrades(&mut self, _player: PlayerIndex) {
-        self.missing("Player::deleteUpgrades");
+    // A running game loads no score keeper.
+    fn score_template(&self, _name: &str) -> Option<ScoreTemplateDesc> {
+        None
     }
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)> {
         Vec::new()

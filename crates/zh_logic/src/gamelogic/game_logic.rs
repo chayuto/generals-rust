@@ -22,10 +22,11 @@ use zh_common::io::map_object::{MapObject, FLAG_BRIDGE_FLAGS, FLAG_ROAD_FLAGS};
 use zh_common::io::recorder::{GameOptions, ReplayRules, ReplaySlot};
 use zh_common::math::{gm_sqrtf, Coord2D, Coord3D, ICoord2D, Region3D};
 use zh_common::types::{
-    Bool, Int, ObjectId, Real, TeamId, UnsignedInt, UnsignedShort, VeterancyLevel, FALSE, TRUE,
+    Bool, Int, ObjectId, Real, TeamId, UnsignedInt, VeterancyLevel, FALSE, TRUE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
+use crate::economy::score_keeper::ScoreTemplateDesc;
 use crate::ai::ai_player::{players_new_map, AiPlayer};
 use crate::arena::{FacetMask, ModuleSlot, ObjectSlot};
 use crate::combat::turret_ai::normalize_angle_cpp;
@@ -416,10 +417,10 @@ impl PlayerWorld for StartWorld<'_> {
     fn academy_record_income(&mut self, _player: PlayerIndex) {}
     fn power_brownout_changed(&mut self, _player: PlayerIndex, _brownout: bool) {}
     fn science_added(&mut self, _player: PlayerIndex, _science: ScienceType) {}
-    fn upgrade_count(&self, _player: PlayerIndex) -> UnsignedShort {
-        0
+    // A new game loads no score keeper.
+    fn score_template(&self, _name: &str) -> Option<ScoreTemplateDesc> {
+        None
     }
-    fn delete_upgrades(&mut self, _player: PlayerIndex) {}
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)> {
         self.upgrade_masks.clone()
     }

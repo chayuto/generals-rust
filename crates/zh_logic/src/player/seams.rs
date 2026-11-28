@@ -6,9 +6,10 @@
 
 use zh_common::core::name_key_generator::NameKeyGenerator;
 use zh_common::math::Coord3D;
-use zh_common::types::{Int, ObjectId, TeamId, UnsignedInt, UnsignedShort};
+use zh_common::types::{Int, ObjectId, TeamId, UnsignedInt};
 use zh_common::xfer::{Xfer, XferError};
 
+use crate::economy::score_keeper::ScoreTemplateDesc;
 use crate::player::player_list::PlayerList;
 use crate::player::team::TeamFactory;
 use crate::rules::player_template::PlayerTemplateStore;
@@ -32,10 +33,7 @@ pub enum AiKind {
 /// A sub-snapshot of `Player::xfer` owned by an unported system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerPart {
-    /// The name and snapshot of each upgrade instance.
-    Upgrades,
     Ai,
-    ResourceGathering,
     TunnelTracker,
 }
 
@@ -99,8 +97,8 @@ pub trait PlayerWorld {
     /// Special powers of the player's objects and
     /// `ScriptEngine::notifyOfAcquiredScience`.
     fn science_added(&mut self, player: PlayerIndex, science: ScienceType);
-    fn upgrade_count(&self, player: PlayerIndex) -> UnsignedShort;
-    fn delete_upgrades(&mut self, player: PlayerIndex);
+    /// `ThingFactory::findTemplate` as the score keeper counts it, when loading.
+    fn score_template(&self, name: &str) -> Option<ScoreTemplateDesc>;
     /// Names and masks in `UpgradeCenter::firstUpgradeTemplate` order.
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)>;
 

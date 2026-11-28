@@ -244,10 +244,9 @@ impl PlayerWorld for Host {
     fn science_added(&mut self, player: PlayerIndex, science: ScienceType) {
         self.events.push(format!("science {player} {science}"));
     }
-    fn upgrade_count(&self, _player: PlayerIndex) -> u16 {
-        0
+    fn score_template(&self, _name: &str) -> Option<zh_logic::economy::score_keeper::ScoreTemplateDesc> {
+        None
     }
-    fn delete_upgrades(&mut self, _player: PlayerIndex) {}
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)> {
         self.upgrades
             .iter()
@@ -330,9 +329,7 @@ impl PlayerWorld for Host {
         xfer: &mut dyn Xfer,
     ) -> Result<(), XferError> {
         let tag = match part {
-            PlayerPart::Upgrades => return Ok(()),
             PlayerPart::Ai => "ai",
-            PlayerPart::ResourceGathering => "rgm",
             PlayerPart::TunnelTracker => "tunnel",
         };
         let mut bytes = self

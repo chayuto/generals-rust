@@ -7,7 +7,7 @@ use zh_common::ini::{IniLoadType, IniReader};
 use zh_common::io::recorder::{ReplayArg, ReplayCommand};
 use zh_common::math::Coord3D;
 use zh_common::runtime::game_logic_dispatch::MSG_PURCHASE_SCIENCE;
-use zh_common::types::{Int, ObjectId, TeamId, UnsignedInt, UnsignedShort};
+use zh_common::types::{Int, ObjectId, TeamId, UnsignedInt};
 use zh_common::xfer::{Xfer, XferError};
 use zh_logic::arena::{FacetMask, ModuleSlot, ObjectSlot};
 use zh_logic::gamelogic::command_target::{dispatch_game_command, CommandGame, CommandState};
@@ -80,10 +80,9 @@ impl PlayerWorld for NullHost {
     fn academy_record_income(&mut self, _player: PlayerIndex) {}
     fn power_brownout_changed(&mut self, _player: PlayerIndex, _brownout: bool) {}
     fn science_added(&mut self, _player: PlayerIndex, _science: ScienceType) {}
-    fn upgrade_count(&self, _player: PlayerIndex) -> UnsignedShort {
-        0
+    fn score_template(&self, _name: &str) -> Option<zh_logic::economy::score_keeper::ScoreTemplateDesc> {
+        None
     }
-    fn delete_upgrades(&mut self, _player: PlayerIndex) {}
     fn upgrade_masks(&self) -> Vec<(String, UpgradeMaskType)> {
         Vec::new()
     }
