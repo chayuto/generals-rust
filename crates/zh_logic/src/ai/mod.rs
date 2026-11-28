@@ -31,6 +31,7 @@
 pub mod ai;
 pub mod ai_group;
 pub mod ai_player;
+pub mod ai_player_ops;
 pub mod ai_skirmish_player;
 pub mod ai_state_machine;
 pub mod ai_states;

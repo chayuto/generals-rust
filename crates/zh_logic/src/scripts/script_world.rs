@@ -29,6 +29,11 @@ use super::script_engine::{
 };
 use super::scripts::{Condition, Parameter, ScriptAction, ScriptList};
 use crate::ai::ai_player::{build_by_supplies, AiPlayer, SupplyOrder};
+use crate::ai::ai_player_ops::{
+    build_ai_base_defense, build_ai_base_defense_structure, build_specific_building_nearest_team,
+    build_upgrade, guard_supply_center, is_supply_source_attacked, is_supply_source_safe,
+    repair_structure, select_skillset, supply_guard_enemy_center,
+};
 use crate::ai::ai_skirmish_player::{build_specific_ai_building, get_ai_enemy, EnemyView};
 use crate::ai::ai_team_queue::{
     ai_pre_team_destroy, build_specific_ai_team_with_env, recruit_specific_ai_team_with_env,
@@ -979,6 +984,175 @@ impl ScriptWorld for LiveWorld<'_> {
             pathfind_extent,
         };
         build_by_supplies(&mut order, minimum_cash, template);
+    }
+
+    fn ai_build_building_nearest_team(
+        &mut self,
+        player: ScriptPlayer,
+        template: &str,
+        team: ScriptTeamId,
+    ) {
+        let pathfind_extent = self
+            .sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        let ai_players = self.ai_players.get_mut();
+        let (Some(ai), Some(p)) = (
+            ai_players.get_mut(&player),
+            self.game.players.player_mut(player),
+        ) else {
+            return;
+        };
+        build_specific_building_nearest_team(
+            self.sim,
+            ai,
+            p,
+            template,
+            team_id(team),
+            &pathfind_extent,
+        );
+    }
+
+    fn ai_build_upgrade(&mut self, player: ScriptPlayer, upgrade: &str) {
+        let Some(p) = self.game.players.player(player) else {
+            return;
+        };
+        if !self.ai_players.get_mut().contains_key(&player) {
+            return;
+        }
+        build_upgrade(self.sim, player, &p.build_list, upgrade);
+    }
+
+    fn ai_repair_structure(&mut self, player: ScriptPlayer, structure: ObjectId) {
+        if let Some(ai) = self.ai_players.get_mut().get_mut(&player) {
+            repair_structure(self.sim, ai, structure);
+        }
+    }
+
+    fn ai_select_skillset(&mut self, player: ScriptPlayer, skillset: Int) {
+        if let Some(ai) = self.ai_players.get_mut().get_mut(&player) {
+            select_skillset(ai, skillset);
+        }
+    }
+
+    fn ai_set_team_delay_seconds(&mut self, player: ScriptPlayer, delay: Int) {
+        if let Some(ai) = self.ai_players.get_mut().get_mut(&player) {
+            ai.team_seconds = delay;
+        }
+    }
+
+    fn ai_guard_supply_center(
+        &mut self,
+        player: ScriptPlayer,
+        team: ScriptTeamId,
+        min_supplies: Int,
+    ) {
+        if !self.ai_players.get_mut().contains_key(&player) {
+            return;
+        }
+        let enemy_center =
+            supply_guard_enemy_center(self.sim, &mut self.ai_players.borrow_mut(), self, player);
+        let pathfind_extent = self
+            .sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        let ai_players = self.ai_players.get_mut();
+        let (Some(ai), Some(p)) = (
+            ai_players.get_mut(&player),
+            self.game.players.player_mut(player),
+        ) else {
+            return;
+        };
+        guard_supply_center(
+            self.sim,
+            ai,
+            p,
+            enemy_center,
+            pathfind_extent,
+            team_id(team),
+            min_supplies,
+        );
+    }
+
+    fn ai_build_base_defense(&mut self, player: ScriptPlayer, flank: bool) {
+        let pathfind_extent = self
+            .sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        if let Some(ai) = self.ai_players.get_mut().get_mut(&player) {
+            build_ai_base_defense(
+                self.sim,
+                ai,
+                self.game.players,
+                player,
+                flank,
+                &pathfind_extent,
+            );
+        }
+    }
+
+    fn ai_build_base_defense_structure(
+        &mut self,
+        player: ScriptPlayer,
+        template: &str,
+        flank: bool,
+    ) {
+        let pathfind_extent = self
+            .sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        if let Some(ai) = self.ai_players.get_mut().get_mut(&player) {
+            build_ai_base_defense_structure(
+                self.sim,
+                ai,
+                self.game.players,
+                player,
+                template,
+                flank,
+                &pathfind_extent,
+            );
+        }
+    }
+
+    fn ai_is_supply_source_safe(&self, player: ScriptPlayer, min_supplies: Int) -> bool {
+        if !self.ai_players.borrow().contains_key(&player) {
+            return true;
+        }
+        let frame = self.sim.world.frame;
+        let enemy = get_ai_enemy(&mut self.ai_players.borrow_mut(), self, frame, player);
+        let enemy_center = enemy.map(|enemy| middle(&self.structure_positions(enemy)));
+        let pathfind_extent = self
+            .sim
+            .terrain
+            .terrain_logic()
+            .map_or_else(Default::default, |t| t.maximum_pathfind_extent());
+        let mut ai_players = self.ai_players.borrow_mut();
+        let Some(ai) = ai_players.get_mut(&player) else {
+            return true;
+        };
+        let Some(p) = self.game.players.player(player) else {
+            return true;
+        };
+        let mut player_copy = p.clone();
+        let order = SupplyOrder {
+            sim: self.sim,
+            ai,
+            player: &mut player_copy,
+            enemy_center,
+            pathfind_extent,
+        };
+        is_supply_source_safe(&order, min_supplies)
+    }
+
+    fn ai_is_supply_source_attacked(&self, player: ScriptPlayer) -> bool {
+        self.ai_players
+            .borrow_mut()
+            .get_mut(&player)
+            .is_some_and(|ai| is_supply_source_attacked(self.sim, ai))
     }
 
     fn ai_build_team(&mut self, team_name: &str) {

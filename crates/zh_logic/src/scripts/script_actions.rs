@@ -90,8 +90,18 @@ pub const PORTED_ACTIONS: &[Int] = &[
     at::QUICKVICTORY,
     at::DEFEAT,
     at::LOCALDEFEAT,
+    at::SET_BASE_CONSTRUCTION_SPEED,
     at::SKIRMISH_BUILD_BUILDING,
+    at::SKIRMISH_BUILD_BASE_DEFENSE_FRONT,
+    at::PLAYER_REPAIR_NAMED_STRUCTURE,
+    at::SKIRMISH_BUILD_BASE_DEFENSE_FLANK,
+    at::SKIRMISH_BUILD_STRUCTURE_FRONT,
+    at::SKIRMISH_BUILD_STRUCTURE_FLANK,
     at::AI_PLAYER_BUILD_SUPPLY_CENTER,
+    at::AI_PLAYER_BUILD_UPGRADE,
+    at::PLAYER_SELECT_SKILLSET,
+    at::TEAM_GUARD_SUPPLY_CENTER,
+    at::AI_PLAYER_BUILD_TYPE_NEAREST_TEAM,
     at::BUILD_TEAM,
     at::RECRUIT_TEAM,
 ];
@@ -136,9 +146,67 @@ impl ScriptEngine {
                     world.ai_build_building(p, &first);
                 }
             }
+            at::SKIRMISH_BUILD_BASE_DEFENSE_FRONT => {
+                if let Some(p) = self.current_player {
+                    world.ai_build_base_defense(p, false);
+                }
+            }
+            at::SKIRMISH_BUILD_BASE_DEFENSE_FLANK => {
+                if let Some(p) = self.current_player {
+                    world.ai_build_base_defense(p, true);
+                }
+            }
+            at::SKIRMISH_BUILD_STRUCTURE_FRONT => {
+                if let Some(p) = self.current_player {
+                    world.ai_build_base_defense_structure(p, &first, false);
+                }
+            }
+            at::SKIRMISH_BUILD_STRUCTURE_FLANK => {
+                if let Some(p) = self.current_player {
+                    world.ai_build_base_defense_structure(p, &first, true);
+                }
+            }
             at::AI_PLAYER_BUILD_SUPPLY_CENTER => {
                 if let Some(p) = self.player_from_name(world, &first) {
                     world.ai_build_by_supplies(p, third.int_val, &second.string_val);
+                }
+            }
+            at::AI_PLAYER_BUILD_UPGRADE => {
+                if let Some(p) = self.player_from_name(world, &first) {
+                    world.ai_build_upgrade(p, &second.string_val);
+                }
+            }
+            at::PLAYER_REPAIR_NAMED_STRUCTURE => {
+                if let (Some(p), Some(unit)) = (
+                    self.player_from_name(world, &first),
+                    self.unit_named(&second.string_val),
+                ) {
+                    world.ai_repair_structure(p, unit);
+                }
+            }
+            at::PLAYER_SELECT_SKILLSET => {
+                if let Some(p) = self.player_from_name(world, &first) {
+                    world.ai_select_skillset(p, second.int_val.wrapping_sub(1));
+                }
+            }
+            at::SET_BASE_CONSTRUCTION_SPEED => {
+                if let Some(p) = self.player_from_name(world, &first) {
+                    world.ai_set_team_delay_seconds(p, second.int_val);
+                }
+            }
+            at::TEAM_GUARD_SUPPLY_CENTER => {
+                if let Some(team) = self.team_named(world, &first) {
+                    if let Some(p) = world.team_controlling_player(team) {
+                        world.ai_guard_supply_center(p, team, second.int_val);
+                    }
+                }
+            }
+            at::AI_PLAYER_BUILD_TYPE_NEAREST_TEAM => {
+                if let (Some(p), Some(team)) = (
+                    self.player_from_name(world, &first),
+                    self.team_named(world, &third.string_val),
+                ) {
+                    world.ai_build_building_nearest_team(p, &second.string_val, team);
                 }
             }
             at::BUILD_TEAM => {

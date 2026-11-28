@@ -268,7 +268,7 @@ impl SimContext {
         prerequisites_met && self.can_build_more_of_type(team, tmpl, builder, own)
     }
 
-    fn command_set_of(&self, owner: ObjectSlot) -> Option<&[CommandButton]> {
+    pub(crate) fn command_set_of(&self, owner: ObjectSlot) -> Option<&[CommandButton]> {
         let obj = self.world.objects.get(owner)?;
         let name = if obj.command_set_override.is_empty() {
             self.object_template(owner)?.friend_get_command_set_string()

@@ -615,6 +615,38 @@ impl ScriptWorld for World {
     // Computer players are not part of the recording.
     fn ai_build_building(&mut self, _player: ScriptPlayer, _template: &str) {}
     fn ai_build_by_supplies(&mut self, _player: ScriptPlayer, _cash: Int, _template: &str) {}
+    fn ai_build_building_nearest_team(
+        &mut self,
+        _player: ScriptPlayer,
+        _template: &str,
+        _team: ScriptTeamId,
+    ) {
+    }
+    fn ai_build_upgrade(&mut self, _player: ScriptPlayer, _upgrade: &str) {}
+    fn ai_repair_structure(&mut self, _player: ScriptPlayer, _structure: ObjectId) {}
+    fn ai_select_skillset(&mut self, _player: ScriptPlayer, _skillset: Int) {}
+    fn ai_set_team_delay_seconds(&mut self, _player: ScriptPlayer, _delay: Int) {}
+    fn ai_guard_supply_center(
+        &mut self,
+        _player: ScriptPlayer,
+        _team: ScriptTeamId,
+        _min_supplies: Int,
+    ) {
+    }
+    fn ai_build_base_defense(&mut self, _player: ScriptPlayer, _flank: bool) {}
+    fn ai_build_base_defense_structure(
+        &mut self,
+        _player: ScriptPlayer,
+        _template: &str,
+        _flank: bool,
+    ) {
+    }
+    fn ai_is_supply_source_safe(&self, _player: ScriptPlayer, _min_supplies: Int) -> bool {
+        true
+    }
+    fn ai_is_supply_source_attacked(&self, _player: ScriptPlayer) -> bool {
+        false
+    }
     fn ai_build_team(&mut self, _team: &str) {}
     fn ai_recruit_team(&mut self, _team: &str, _recruit_radius: Real) {}
 }
@@ -996,6 +1028,8 @@ fn script_engine_matches_the_reference() {
                     ct::DEFUNCT_PLAYER_SELECTED_GENERAL
                         | ct::DEFUNCT_PLAYER_SELECTED_GENERAL_FROM_NAMED
                         | ct::MUSIC_TRACK_HAS_COMPLETED
+                        | ct::SUPPLY_SOURCE_SAFE
+                        | ct::SUPPLY_SOURCE_ATTACKED
                 ),
             "condition {c} never generated"
         );
@@ -1022,9 +1056,19 @@ fn script_engine_matches_the_reference() {
         at::AUDIO_OVERRIDE_VOLUME_TYPE,
         at::SHOW_WEATHER,
         // Orders to computer players, carried out by the host:
-        // `golden_game_frames` and `golden_ai_player_teams`.
+        // `golden_game_frames`, `golden_ai_player_teams`, and `golden_ai_player_ops`.
+        at::SET_BASE_CONSTRUCTION_SPEED,
         at::SKIRMISH_BUILD_BUILDING,
+        at::SKIRMISH_BUILD_BASE_DEFENSE_FRONT,
+        at::PLAYER_REPAIR_NAMED_STRUCTURE,
+        at::SKIRMISH_BUILD_BASE_DEFENSE_FLANK,
+        at::SKIRMISH_BUILD_STRUCTURE_FRONT,
+        at::SKIRMISH_BUILD_STRUCTURE_FLANK,
         at::AI_PLAYER_BUILD_SUPPLY_CENTER,
+        at::AI_PLAYER_BUILD_UPGRADE,
+        at::PLAYER_SELECT_SKILLSET,
+        at::TEAM_GUARD_SUPPLY_CENTER,
+        at::AI_PLAYER_BUILD_TYPE_NEAREST_TEAM,
         at::BUILD_TEAM,
         at::RECRUIT_TEAM,
     ];
@@ -1196,8 +1240,8 @@ fn every_type_is_ported_or_reaches_the_host() {
             assert_eq!(world.unported - before, 1, "action {kind}");
         }
     }
-    assert_eq!(PORTED_CONDITIONS.len(), 49);
-    assert_eq!(PORTED_ACTIONS.len(), 74);
+    assert_eq!(PORTED_CONDITIONS.len(), 51);
+    assert_eq!(PORTED_ACTIONS.len(), 84);
     let distinct: BTreeSet<Int> = PORTED_ACTIONS.iter().copied().collect();
     assert_eq!(distinct.len(), PORTED_ACTIONS.len());
     // None of the ported ones goes to the host.

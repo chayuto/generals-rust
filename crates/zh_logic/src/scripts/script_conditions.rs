@@ -67,6 +67,8 @@ pub const PORTED_CONDITIONS: &[Int] = &[
     ct::MUSIC_TRACK_HAS_COMPLETED,
     ct::DEFUNCT_PLAYER_SELECTED_GENERAL,
     ct::DEFUNCT_PLAYER_SELECTED_GENERAL_FROM_NAMED,
+    ct::SUPPLY_SOURCE_SAFE,
+    ct::SUPPLY_SOURCE_ATTACKED,
 ];
 
 #[derive(Clone, Copy)]
@@ -436,6 +438,31 @@ impl ScriptEngine {
             ct::MUSIC_TRACK_HAS_COMPLETED => {
                 world.music_track_completed(&first.string_val, parm(&c.parms, 1).int_val)
             }
+            ct::SUPPLY_SOURCE_SAFE => {
+                let frame = world.frame();
+                let any_changes = frame > c.custom_frame;
+                if !any_changes {
+                    if c.custom_data == -1 {
+                        return Some(false);
+                    }
+                    if c.custom_data == 1 {
+                        return Some(true);
+                    }
+                }
+                c.custom_frame = frame.wrapping_add(60);
+                let min_supply = parm(&c.parms, 1).int_val;
+                match self.player_from_parm(world, &mut c.parms, 0) {
+                    Some(p) => {
+                        let is_safe = world.ai_is_supply_source_safe(p, min_supply);
+                        c.custom_data = if is_safe { 1 } else { -1 };
+                        is_safe
+                    }
+                    None => false,
+                }
+            }
+            ct::SUPPLY_SOURCE_ATTACKED => self
+                .player_from_parm(world, &mut c.parms, 0)
+                .is_some_and(|p| world.ai_is_supply_source_attacked(p)),
             ct::MISSION_ATTEMPTS
             | ct::DEFUNCT_PLAYER_SELECTED_GENERAL
             | ct::DEFUNCT_PLAYER_SELECTED_GENERAL_FROM_NAMED => false,

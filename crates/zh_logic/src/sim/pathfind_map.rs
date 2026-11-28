@@ -563,7 +563,7 @@ impl SimContext {
     }
 
     /// `Pathfinder::adjustToPossibleDestination`, or `None` without a map.
-    pub(super) fn adjust_to_possible_destination_on_map(
+    pub(crate) fn adjust_to_possible_destination_on_map(
         &self,
         slot: ObjectSlot,
         dest: &mut Coord3D,

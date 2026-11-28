@@ -157,6 +157,41 @@ pub trait ScriptWorld {
     fn ai_build_building(&mut self, player: ScriptPlayer, template: &str);
     /// `Player::buildBySupplies`.
     fn ai_build_by_supplies(&mut self, player: ScriptPlayer, minimum_cash: Int, template: &str);
+    /// `Player::buildSpecificBuildingNearestTeam`.
+    fn ai_build_building_nearest_team(
+        &mut self,
+        player: ScriptPlayer,
+        template: &str,
+        team: ScriptTeamId,
+    );
+    /// `Player::buildUpgrade`.
+    fn ai_build_upgrade(&mut self, player: ScriptPlayer, upgrade: &str);
+    /// `Player::repairStructure`.
+    fn ai_repair_structure(&mut self, player: ScriptPlayer, structure: ObjectId);
+    /// `Player::selectSkillset`.
+    fn ai_select_skillset(&mut self, player: ScriptPlayer, skillset: Int);
+    /// `Player::setTeamDelaySeconds`.
+    fn ai_set_team_delay_seconds(&mut self, player: ScriptPlayer, delay: Int);
+    /// `Player::guardSupplyCenter`.
+    fn ai_guard_supply_center(
+        &mut self,
+        player: ScriptPlayer,
+        team: ScriptTeamId,
+        min_supplies: Int,
+    );
+    /// `Player::buildAIBaseDefense`.
+    fn ai_build_base_defense(&mut self, player: ScriptPlayer, flank: bool);
+    /// `Player::buildAIBaseDefenseStructure`.
+    fn ai_build_base_defense_structure(
+        &mut self,
+        player: ScriptPlayer,
+        template: &str,
+        flank: bool,
+    );
+    /// `Player::isSupplySourceSafe`.
+    fn ai_is_supply_source_safe(&self, player: ScriptPlayer, min_supplies: Int) -> bool;
+    /// `Player::isSupplySourceAttacked`.
+    fn ai_is_supply_source_attacked(&self, player: ScriptPlayer) -> bool;
     /// `ScriptActions::doBuildTeam`.
     fn ai_build_team(&mut self, team: &str);
     /// `ScriptActions::doRecruitTeam`.

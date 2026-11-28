@@ -637,6 +637,39 @@ impl TerrainLogic {
         self.waypoints.iter().rev()
     }
 
+    /// Appends a waypoint directly for synthetic test worlds (`waypoints()` yields LIFO).
+    pub fn push_waypoint_for_test(
+        &mut self,
+        id: u32,
+        name: &str,
+        location: Coord3D,
+        path_labels: [String; 3],
+    ) {
+        self.waypoints.push(Waypoint {
+            id,
+            name: name.to_owned(),
+            location,
+            path_labels,
+            bi_directional: FALSE,
+            links: Vec::new(),
+        });
+    }
+
+    /// Clears all waypoints in a synthetic test world.
+    pub fn clear_waypoints_for_test(&mut self) {
+        self.waypoints.clear();
+    }
+
+    /// Sets synthetic map dimensions (`dx`, `dy` in cells, `max_z`) for unit/oracle tests.
+    pub fn set_synthetic_bounds(&mut self, dx: Int, dy: Int, max_z: Real) {
+        self.map_dx = dx;
+        self.map_dy = dy;
+        self.boundaries = vec![ICoord2D { x: dx, y: dy }];
+        self.active_boundary = 0;
+        self.map_min_z = 0.0;
+        self.map_max_z = max_z;
+    }
+
     /// The waypoints `waypoint` links to (`getLink`).
     pub fn waypoint_links<'a>(
         &'a self,

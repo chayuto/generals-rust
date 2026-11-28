@@ -879,6 +879,42 @@ impl Pathfinder {
         first == 0 || first == second
     }
 
+    /// `findBrokenBridge`: returns the object id of the first destroyed bridge
+    /// layer connecting the effective zones of `from` and `to`.
+    pub fn find_broken_bridge(
+        &self,
+        terrain: &dyn ThingTerrainAccess,
+        surfaces: LocomotorSurfaceTypeMask,
+        from: &Coord3D,
+        to: &Coord3D,
+    ) -> Option<ObjectId> {
+        let to_layer = terrain.get_layer_for_destination(to);
+        let from_layer = terrain.get_layer_for_destination(from);
+        let (start, goal) = (
+            self.clipped_cell(from_layer, from)?,
+            self.clipped_cell(to_layer, to)?,
+        );
+        let (start, goal) = (self.cell_ref(start), self.cell_ref(goal));
+        let eff = |zone: u16| {
+            let z = self.zones.get_effective_zone(surfaces, 0, zone);
+            let z = self.zones.get_effective_terrain_zone(z);
+            Int::from(self.zones.get_effective_zone(surfaces, 0, z))
+        };
+        let (zone1, zone2) = (eff(start.zone), eff(goal.zone));
+        if zone1 == zone2 {
+            return None;
+        }
+        let last = PathfindLayerEnum::LAST.as_i32() as usize;
+        for layer in self.layers.iter().take(last + 1) {
+            if layer.is_destroyed()
+                && layer.connects_zones(&self.zones, &self.map, &self.extent, surfaces, zone1, zone2)
+            {
+                return Some(layer.bridge_id());
+            }
+        }
+        None
+    }
+
     /// `segmentIntersectsTallBuilding`: three points leading around a building
     /// in the way. `to` is moved out of a building it lies in.
     pub fn segment_intersects_tall_building(

@@ -1,12 +1,12 @@
-//! `PKT-427` (partial): `AISkirmishPlayer`: `newMap` with `adjustBuildList`,
-//! which moves the faction's build list to the player's start spot and turns it
-//! toward the middle of the map; `processBaseBuilding` and
-//! `buildSpecificAIBuilding`.
+//! `PKT-427`: `AISkirmishPlayer`: `newMap` with `adjustBuildList`, which moves
+//! the faction's build list to the player's start spot and turns it toward the
+//! middle of the map; `processBaseBuilding`, `buildSpecificAIBuilding`,
+//! `buildAIBaseDefense`, `buildAIBaseDefenseStructure`, `checkBridges`, and
+//! `computeSuperweaponTarget`.
 //!
-//! Not ported: team building (`doTeamBuilding`, `processTeamBuilding`,
-//! `startTraining`, `buildSpecificAITeam`, `recruitSpecificAITeam`),
-//! `queueDozer`'s override, base defenses, `checkBridges` and superweapon
-//! targeting.
+//! Team building (`doTeamBuilding`, `processTeamBuilding`, `startTraining`,
+//! `buildSpecificAITeam`, `recruitSpecificAITeam`) lives in `ai_team_queue.rs`.
+//! `queueDozer`'s override is counted in `BuildContext::unported`.
 //!
 //! Golden tests: `crates/zh_logic/tests/golden_ai_new_map.rs`
 //! (`docs/golden_vectors/AiNewMap.json`, recorded from the running reference engine
@@ -20,9 +20,8 @@ use zh_common::types::{Bool, Int, ObjectId, Real, UnsignedInt, FALSE, TRUE};
 use zh_common::xfer::{Xfer, XferError};
 
 use crate::ai::ai_player::{
-    ai_mut, build_initial_structures, build_structure_with_dozer,
-    compute_center_and_radius_of_base, find_dozer, is_location_safe, owner_of, queue_dozer,
-    AiPlayer,
+    build_initial_structures, build_structure_with_dozer, compute_center_and_radius_of_base,
+    find_dozer, is_location_safe, owner_of, queue_dozer, AiPlayer,
 };
 use crate::arena::{ObjectSlot, ThingTemplateId};
 use crate::modules::module::{CanMakeType, CommandSourceType};
@@ -383,14 +382,10 @@ fn tend_listed_building(
     let Some(slot) = building else {
         forget(cx);
         // A GLA rebuild hole takes the entry over.
-        let holes = cx
-            .sim
-            .world
-            .objects
-            .world_iter()
-            .any(|s| cx.sim.object_is_kind_of(s, KindOfType::RebuildHole) != FALSE);
-        if holes {
-            cx.unported("AIPlayer::processBaseBuilding with a rebuild hole");
+        if let Some(hole_id) = crate::ai::ai_player_ops::find_rebuild_hole(cx.sim, id) {
+            if let Some(e) = entry(cx, player, at) {
+                e.object_id = hole_id;
+            }
         }
         return (None, true);
     };
@@ -550,30 +545,7 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
     if let Some(e) = entry(cx, player, i) {
         e.decrement_num_rebuilds();
     }
-    let data = &cx.sim.rules.ai_data;
-    let (seconds, poor, wealthy, poor_mod, wealthy_mod) = (
-        data.structure_seconds,
-        data.resources_poor,
-        data.resources_wealthy,
-        data.structures_poor_mod,
-        data.structures_wealthy_mod,
-    );
-    let money = cx
-        .sim
-        .world
-        .player_default_teams
-        .get(&player)
-        .map_or(0, |&team| cx.sim.player_money(team));
-    if let Some(ai) = ai_mut(cx, player) {
-        ai.ready_to_build_structure = FALSE;
-        ai.structure_timer = (seconds * FRAMES_PER_SECOND as Real) as Int;
-        if money < poor as UnsignedInt {
-            ai.structure_timer = (ai.structure_timer as Real / poor_mod) as Int;
-        } else if money > wealthy as UnsignedInt {
-            ai.structure_timer = (ai.structure_timer as Real / wealthy_mod) as Int;
-        }
-        ai.frame_last_building_built = frame as Int;
-    }
+    crate::ai::ai_player_ops::reset_structure_timer(cx, player);
 }
 
 /// `AISkirmishPlayer::buildSpecificAIBuilding`: the first listed building of that

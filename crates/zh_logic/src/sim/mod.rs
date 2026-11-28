@@ -2430,6 +2430,7 @@ pub struct SimWorld {
     pub kills_scored: Vec<(ObjectId, ObjectId)>,
     pub upgrades_recorded: Vec<(TeamId, String)>,
     pub attacked_by: BTreeMap<TeamId, BTreeSet<Int>>,
+    pub player_attacked_frame: BTreeMap<Int, UnsignedInt>,
     pub spawned_ocls: Vec<(String, ObjectId, Coord3D, Coord3D)>,
     /// The module `attempt_damage_watching` waits for, and the status seen at its turn.
     pub damage_watch: Option<(ModuleSlot, Option<ObjectStatusMaskType>)>,
@@ -2612,6 +2613,7 @@ impl SimWorld {
             kills_scored: Vec::new(),
             upgrades_recorded: Vec::new(),
             attacked_by: BTreeMap::new(),
+            player_attacked_frame: BTreeMap::new(),
             spawned_ocls: Vec::new(),
             damage_watch: None,
             triggered_fx_lists: Vec::new(),
@@ -3188,7 +3190,7 @@ impl SimContext {
 
     /// Collects the objects of `player_idx` in `Player::iterateObjects` order: team
     /// prototypes, their instances, then each team's member list.
-    fn player_object_slots(&self, player_idx: Int) -> Vec<ObjectSlot> {
+    pub(crate) fn player_object_slots(&self, player_idx: Int) -> Vec<ObjectSlot> {
         self.player_prototypes(player_idx)
             .iter()
             .flatten()
@@ -7825,11 +7827,15 @@ impl SimApi for SimContext {
             return;
         };
         let atk_player = self.player_index_for_team(atk_team);
+        let victim_player = self.player_index_for_team(victim_team);
         self.world
             .attacked_by
             .entry(victim_team)
             .or_default()
             .insert(atk_player);
+        self.world
+            .player_attacked_frame
+            .insert(victim_player, self.world.frame);
     }
 
     fn notify_subdual_damage(&mut self, owner: ObjectSlot, amount: Real) {

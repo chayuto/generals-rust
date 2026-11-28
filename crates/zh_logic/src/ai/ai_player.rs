@@ -1,16 +1,17 @@
-//! `PKT-426` (partial): `AIPlayer`: the constructor's state, `newMap`,
-//! `buildStructureNow`, `xfer`, and the part of `update` the first 300 frames of a
-//! skirmish reach: the base building timers, `findDozer`, `isLocationSafe`,
-//! `buildStructureWithDozer`, `buildBySupplies` with `findSupplyCenter`, and the
-//! skill set choice of `doUpgradesAndSkills`.
+//! `PKT-426`: `AIPlayer`: the constructor's state, `newMap`,
+//! `buildStructureNow`, `xfer`, `update` (base building timers, `findDozer`,
+//! `isLocationSafe`, `buildStructureWithDozer`, non-skirmish `processBaseBuilding`,
+//! `updateBridgeRepair`, skill-set choice), `buildBySupplies`, `findSupplyCenter`,
+//! `repairStructure`, `selectSkillset`, `buildUpgrade`,
+//! `calcClosestConstructionZoneLocation`, `buildSpecificBuildingNearestTeam`,
+//! `isSupplySourceAttacked`, `isSupplySourceSafe`, `guardSupplyCenter`,
+//! `getPlayerStructureBounds`, `getPlayerSuperweaponValue`, and
+//! `computeSuperweaponTarget`.
 //!
 //! Not ported, each counted in `BuildContext::unported` where it is reached:
-//! `queueDozer`, the science purchase, `updateBridgeRepair` with a queued bridge,
-//! the base building of a non-skirmish player, and a rebuild hole. Not ported and
-//! not reached: team building (`doTeamBuilding`, `checkReadyTeams`,
-//! `checkQueuedTeams`, `queueUnits`, `selectTeamToBuild`, `startTraining`,
-//! `onUnitProduced`, so the build and ready queues stay empty), `repairStructure`,
-//! `buildUpgrade`, base defenses, guard and superweapon targeting, `crc` and
+//! `queueDozer` and science purchase. Not ported and not reached: team
+//! building queues (`doTeamBuilding`, `checkReadyTeams`, `checkQueuedTeams`,
+//! `queueUnits`, `selectTeamToBuild`, `startTraining`), `crc` and
 //! `loadPostProcess`.
 //!
 //! Golden tests: `crates/zh_logic/tests/golden_ai_new_map.rs`
@@ -671,8 +672,8 @@ pub fn on_structure_produced(cx: &mut BuildContext<'_>, player: PlayerIndex, bui
 // -----------------------------------------------------------------------------
 
 /// `LOGICFRAMES_PER_SECOND` and `PATHFIND_CELL_SIZE_F`.
-const FRAMES_PER_SECOND: Int = 30;
-const PATHFIND_CELL_SIZE_F: Real = 10.0;
+pub(super) const FRAMES_PER_SECOND: Int = 30;
+pub(super) const PATHFIND_CELL_SIZE_F: Real = 10.0;
 
 /// `Player::update`'s `m_ai->update()`: `AIPlayer::update`, with the overrides of
 /// `AISkirmishPlayer`.
@@ -779,12 +780,8 @@ fn do_base_building(cx: &mut BuildContext<'_>, player: PlayerIndex) {
     if ai.ready_to_build_structure != FALSE {
         if skirmish {
             ai_skirmish_player::process_base_building(cx, player);
-        } else if cx
-            .players
-            .player(player)
-            .is_some_and(|p| !p.build_list.is_empty())
-        {
-            cx.unported("AIPlayer::processBaseBuilding of a non-skirmish player");
+        } else {
+            crate::ai::ai_player_ops::process_base_building(cx, player);
         }
     }
     if let Some(ai) = ai_mut(cx, player) {
@@ -1089,12 +1086,9 @@ fn find_place(
     legal(&pos, NO_ENEMY_OBJECT_OVERLAP).then_some(pos)
 }
 
-/// `updateBridgeRepair` as far as an empty queue: entries are only added by
-/// `repairStructure`, which is not ported.
+/// `AIPlayer::updateBridgeRepair`.
 fn update_bridge_repair(cx: &mut BuildContext<'_>, player: PlayerIndex) {
-    if ai_mut(cx, player).is_some_and(|ai| ai.structures_in_queue != 0) {
-        cx.unported("AIPlayer::updateBridgeRepair");
-    }
+    crate::ai::ai_player_ops::update_bridge_repair(cx, player);
 }
 
 // -----------------------------------------------------------------------------
@@ -1102,7 +1096,7 @@ fn update_bridge_repair(cx: &mut BuildContext<'_>, player: PlayerIndex) {
 // -----------------------------------------------------------------------------
 
 /// `SUPPLY_CENTER_CLOSE_DIST`.
-const SUPPLY_CENTER_CLOSE_DIST: Real = 20.0 * PATHFIND_CELL_SIZE_F;
+pub(super) const SUPPLY_CENTER_CLOSE_DIST: Real = 20.0 * PATHFIND_CELL_SIZE_F;
 
 /// The computer player a script order is for.
 pub struct SupplyOrder<'a> {
