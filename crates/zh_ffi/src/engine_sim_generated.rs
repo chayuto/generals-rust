@@ -1591,6 +1591,18 @@ impl SimApi for EngineSim<'_> {
     fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real> {
         not_wired("ai_formation_speed")
     }
+    fn ai_group_speed_and_center(&mut self, owner: ObjectSlot) -> Option<(Real, Coord3D)> {
+        not_wired("ai_group_speed_and_center")
+    }
+    fn ai_team_waypoint(&mut self, owner: ObjectSlot) -> Option<UnsignedInt> {
+        not_wired("ai_team_waypoint")
+    }
+    fn ai_set_team_waypoint(&mut self, owner: ObjectSlot, waypoint: Option<UnsignedInt>) {
+        not_wired("ai_set_team_waypoint")
+    }
+    fn ai_team_as_group_center(&mut self, owner: ObjectSlot) -> (Coord3D, Int) {
+        not_wired("ai_team_as_group_center")
+    }
     fn take_pathfinder(&mut self) -> Option<Box<zh_logic::pathfinder::Pathfinder>> {
         not_wired("take_pathfinder")
     }

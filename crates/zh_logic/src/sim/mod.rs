@@ -2272,6 +2272,15 @@ pub trait SimApi: SimView {
     fn pathfinder_snap_closest_goal_position(&mut self, owner: ObjectSlot, pos: &mut Coord3D);
     /// `AIGroup::getSpeed` of the unit's group, for a unit in a formation.
     fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real>;
+    /// `AIGroup::getSpeed` and `getCenter` of the unit's group.
+    fn ai_group_speed_and_center(&mut self, owner: ObjectSlot) -> Option<(Real, Coord3D)>;
+    /// `Team::getCurrentWaypoint` of the unit's team.
+    fn ai_team_waypoint(&mut self, owner: ObjectSlot) -> Option<UnsignedInt>;
+    /// `Team::setCurrentWaypoint`.
+    fn ai_set_team_waypoint(&mut self, owner: ObjectSlot, waypoint: Option<UnsignedInt>);
+    /// `Team::getTeamAsAIGroup` into a new group, which stays, and then its
+    /// centre and size.
+    fn ai_team_as_group_center(&mut self, owner: ObjectSlot) -> (Coord3D, Int);
     /// `TheAI->pathfinder()` out of the sim, for a search that reads the rest of
     /// the world while it changes the map. Hand it back with
     /// [`SimApi::put_pathfinder`].
@@ -2460,6 +2469,9 @@ pub struct SimWorld {
     pub players: PlayerList,
     pub team_players: BTreeMap<TeamId, Int>,
     pub team_members: BTreeMap<TeamId, Vec<ObjectSlot>>,
+    /// `Team::m_currentWaypoint` of the teams on a waypoint path. The sim's
+    /// copy: the one the `TeamFactory` saves does not follow it.
+    pub team_waypoints: BTreeMap<TeamId, UnsignedInt>,
     /// `Player::m_playerTeamPrototypes` by player index: each prototype is its team
     /// instances, newest first. Filled by [`SimContext::add_player_team`]; a team
     /// listed nowhere counts as a prototype of its own, after the listed ones.
@@ -2606,6 +2618,7 @@ impl SimWorld {
             players: PlayerList::default(),
             team_players: BTreeMap::new(),
             team_members: BTreeMap::new(),
+            team_waypoints: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),
             kills_scored: Vec::new(),
             upgrades_recorded: Vec::new(),
@@ -11487,6 +11500,38 @@ impl SimApi for SimContext {
         Some(crate::ai::ai_group::speed(self, group))
     }
 
+    fn ai_group_speed_and_center(&mut self, owner: ObjectSlot) -> Option<(Real, Coord3D)> {
+        let group = self.world.objects.get(owner)?.ai_group?;
+        let speed = crate::ai::ai_group::speed(self, group);
+        Some((speed, crate::ai::ai_group::center(self, group).1))
+    }
+
+    fn ai_team_waypoint(&mut self, owner: ObjectSlot) -> Option<UnsignedInt> {
+        let team = self.world.objects.get(owner)?.team_id;
+        self.world.team_waypoints.get(&team).copied()
+    }
+
+    fn ai_set_team_waypoint(&mut self, owner: ObjectSlot, waypoint: Option<UnsignedInt>) {
+        let Some(team) = self.world.objects.get(owner).map(|o| o.team_id) else {
+            return;
+        };
+        match waypoint {
+            Some(id) => self.world.team_waypoints.insert(team, id),
+            None => self.world.team_waypoints.remove(&team),
+        };
+    }
+
+    fn ai_team_as_group_center(&mut self, owner: ObjectSlot) -> (Coord3D, Int) {
+        let team = self.world.objects.get(owner).map(|o| o.team_id);
+        let members: Vec<ObjectId> = team
+            .and_then(|team| self.world.team_members.get(&team))
+            .into_iter()
+            .flatten()
+            .filter_map(|&slot| self.world.objects.get(slot).map(|o| o.id))
+            .collect();
+        crate::ai::ai_group::team_group_center(self, &members)
+    }
+
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         match self.world.pathfinder.as_deref_mut() {
             Some(pathfinder) => Bool::from(pathfinder.queue_for_path(id)),
@@ -12664,6 +12709,22 @@ impl SimApi for MockSimApi {
     }
     fn ai_formation_speed(&mut self, owner: ObjectSlot) -> Option<Real> {
         self.ctx.ai_formation_speed(owner)
+    }
+
+    fn ai_group_speed_and_center(&mut self, owner: ObjectSlot) -> Option<(Real, Coord3D)> {
+        self.ctx.ai_group_speed_and_center(owner)
+    }
+
+    fn ai_team_waypoint(&mut self, owner: ObjectSlot) -> Option<UnsignedInt> {
+        self.ctx.ai_team_waypoint(owner)
+    }
+
+    fn ai_set_team_waypoint(&mut self, owner: ObjectSlot, waypoint: Option<UnsignedInt>) {
+        self.ctx.ai_set_team_waypoint(owner, waypoint)
+    }
+
+    fn ai_team_as_group_center(&mut self, owner: ObjectSlot) -> (Coord3D, Int) {
+        self.ctx.ai_team_as_group_center(owner)
     }
     fn queue_for_path(&mut self, id: ObjectId) -> Bool {
         self.ctx.queue_for_path(id)

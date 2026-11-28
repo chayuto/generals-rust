@@ -11,7 +11,7 @@
 
 use crate::ai::ai_states::attack::{self, AttackStates};
 use crate::ai::ai_states::movement::{self, MoveStates};
-use crate::ai::ai_states::{self, IdleState};
+use crate::ai::ai_states::{self, waypoint, IdleState};
 use crate::ai::seams::SeamsGuard;
 use crate::arena::ModuleContext;
 use crate::modules::update::ai_update::{self, ai};
@@ -289,6 +289,9 @@ impl AiStateMachine {
                     owner,
                     seams,
                 )
+            }
+            _ if waypoint::is_waypoint_state(id) && seams.replaces_state(owner, id) == FALSE => {
+                self.moves.waypoint.xfer(id, xfer)
             }
             _ if attack::is_attack_state(id) && seams.replaces_state(owner, id) == FALSE => {
                 self.attacks.main.xfer(xfer)

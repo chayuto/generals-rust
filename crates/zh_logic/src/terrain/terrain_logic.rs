@@ -655,6 +655,15 @@ impl TerrainLogic {
         });
     }
 
+    /// Links two waypoints of a synthetic test world, as `Waypoint::addLink`
+    /// does: one way, repeats kept.
+    pub fn add_waypoint_link_for_test(&mut self, from: u32, to: u32) {
+        let find = |id| self.waypoints.iter().position(|w| w.id == id);
+        if let (Some(from), Some(to)) = (find(from), find(to)) {
+            self.add_link(from, to);
+        }
+    }
+
     /// Clears all waypoints in a synthetic test world.
     pub fn clear_waypoints_for_test(&mut self) {
         self.waypoints.clear();

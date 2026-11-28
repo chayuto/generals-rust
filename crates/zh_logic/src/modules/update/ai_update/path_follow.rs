@@ -119,7 +119,7 @@ pub(super) fn is_crusher(sim: &dyn SimApi, owner: ObjectSlot) -> bool {
 
 /// `getMaximumPathfindExtent`. A terrain without a map answers with the
 /// world's extent.
-fn maximum_pathfind_extent(sim: &dyn SimApi) -> Region3D {
+pub(crate) fn maximum_pathfind_extent(sim: &dyn SimApi) -> Region3D {
     sim.terrain()
         .terrain_logic()
         .map_or_else(|| sim.terrain_extent(), |t| t.maximum_pathfind_extent())

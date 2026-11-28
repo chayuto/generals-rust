@@ -1,9 +1,11 @@
 //! `PKT-429`: `AIStates.cpp`, so far `AIIdleState`, `AIDeadState`, `AIBusyState`,
-//! the movement states ([`movement`]) and the attack states ([`attack`]). Packet
+//! the movement states ([`movement`]), the waypoint, wander, panic and repulsor
+//! states ([`waypoint`]) and the attack states ([`attack`]). Packet
 //! doc: `packets/phase6/PKT-429_AIStates.md`. Golden test:
 //! `tests/golden_s8_ai_orders.rs`.
 //!
 //! Every other state of `AIStateMachine` (the rest of the non-combat states S11,
+//! the attack-follow of a waypoint path,
 //! squad, hunt and attack area, guard S18) is answered by
 //! [`crate::ai::seams::AiSeams`].
 //! A port adds its arm to the three functions here and to
@@ -11,6 +13,7 @@
 
 pub mod attack;
 pub mod movement;
+pub mod waypoint;
 
 use crate::ai::ai_state_machine::{self as machine, state_id};
 use crate::ai::seams::ai_seams;
@@ -80,6 +83,7 @@ pub fn on_enter(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateR
         state_id::DEAD => dead_on_enter(sim, ctx),
         state_id::BUSY => StateReturnType::Continue,
         _ if is_ported_movement(sim, ctx, id) => movement::on_enter(sim, ctx, id),
+        _ if is_ported_waypoint(sim, ctx, id) => waypoint::on_enter(sim, ctx, id),
         _ if is_ported_attack(sim, ctx, id) => {
             attack::on_enter(sim, ctx, attack::Host::Main, id)
         }
@@ -93,6 +97,7 @@ pub fn update(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> StateRet
         state_id::DEAD => dead_update(sim, ctx),
         state_id::BUSY => StateReturnType::Continue,
         _ if is_ported_movement(sim, ctx, id) => movement::update(sim, ctx, id),
+        _ if is_ported_waypoint(sim, ctx, id) => waypoint::update(sim, ctx, id),
         _ if is_ported_attack(sim, ctx, id) => attack::update(sim, ctx, attack::Host::Main),
         _ => ai_seams(sim).state_update(ctx.owner_id, id),
     }
@@ -105,6 +110,7 @@ pub fn on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId, status: St
             sim.clear_model_condition_state(ctx.owner_slot, ModelConditionFlagType::Dying);
         }
         _ if is_ported_movement(sim, ctx, id) => movement::on_exit(sim, ctx, id),
+        _ if is_ported_waypoint(sim, ctx, id) => waypoint::on_exit(sim, ctx, id),
         _ if is_ported_attack(sim, ctx, id) => {
             attack::on_exit(sim, ctx, attack::Host::Main, status)
         }
@@ -115,6 +121,11 @@ pub fn on_exit(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId, status: St
 /// A movement state that the seams do not answer in its stead.
 fn is_ported_movement(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
     movement::is_movement_state(id) && ai_seams(sim).replaces_state(ctx.owner_id, id) == FALSE
+}
+
+/// A waypoint, wander or repulsor state that the seams do not answer in its stead.
+fn is_ported_waypoint(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
+    waypoint::is_waypoint_state(id) && ai_seams(sim).replaces_state(ctx.owner_id, id) == FALSE
 }
 
 /// An attack state that the seams do not answer in its stead.
@@ -172,7 +183,7 @@ fn idle_update(sim: &mut dyn SimApi, ctx: ModuleContext) -> StateReturnType {
             && ai(sim, ctx).is_idle() != FALSE
         {
             let range = sim.object_vision_range(owner);
-            let enemy = ai_seams(sim).closest_repulsor(ctx.owner_id, range);
+            let enemy = ai_update::closest_repulsor(sim, ctx, range);
             if enemy.is_some() {
                 machine::set_state(sim, ctx, state_id::MOVE_AWAY_FROM_REPULSORS);
                 return StateReturnType::Continue;

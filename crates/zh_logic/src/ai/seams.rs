@@ -263,8 +263,10 @@ pub trait AiSeams: Send {
     ) -> Option<Option<ObjectId>> {
         None
     }
-    /// `AI::findClosestRepulsor` (S12).
-    fn closest_repulsor(&mut self, _owner: ObjectId, _range: Real) -> Option<ObjectId> {
+    /// Replaces `AI::findClosestRepulsor`
+    /// (`ai_update::closest_repulsor`) with a recorded answer; `None` leaves the
+    /// question to the sim.
+    fn closest_repulsor(&mut self, _owner: ObjectId, _range: Real) -> Option<Option<ObjectId>> {
         None
     }
     /// `ActionManager` (S19).
@@ -458,7 +460,7 @@ forward! {
     state_exit(owner: ObjectId, state: StateId, status: StateExitType);
     state_xfer(owner: ObjectId, state: StateId, xfer: &mut dyn Xfer) -> Result<(), XferError>;
     next_mood_target(owner: ObjectId, called_by_ai: Bool, during_idle: Bool) -> Option<Option<ObjectId>>;
-    closest_repulsor(owner: ObjectId, range: Real) -> Option<ObjectId>;
+    closest_repulsor(owner: ObjectId, range: Real) -> Option<Option<ObjectId>>;
     can_act_on(query: AiActionQuery, owner: ObjectId, target: ObjectId, source: CommandSourceType) -> Bool;
     closest_edge_point(pos: &Coord3D) -> Coord3D;
     group_order(owner: ObjectId, parms: &AiCommandParms) -> Bool;

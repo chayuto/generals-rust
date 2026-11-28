@@ -13,6 +13,7 @@
 
 use crate::ai::ai_state_machine::state_id;
 use crate::ai::ai_states::attack::{self, AttackState, Host};
+use crate::ai::ai_states::waypoint::{self, WaypointStates};
 use crate::ai::ai_states::IdleState;
 use crate::ai::seams::{ai_seams, SeamsGuard};
 use crate::arena::{ModuleContext, ObjectSlot};
@@ -42,7 +43,7 @@ const ATTACK_RETRY_COUNT: Int = 5;
 /// `AIAttackMoveToState::ATTACK_CLOSE_ENOUGH_CELLS`.
 const ATTACK_CLOSE_ENOUGH_CELLS: Int = 8;
 /// `MAA_Action_To_AttackMove`.
-const MAA_ACTION_TO_ATTACK_MOVE: UnsignedInt = 0x04;
+pub(super) const MAA_ACTION_TO_ATTACK_MOVE: UnsignedInt = 0x04;
 
 /// Whether this module ports the state.
 pub fn is_movement_state(id: StateId) -> bool {
@@ -208,6 +209,8 @@ pub struct MoveStates {
     pub follow_path: FollowPathData,
     pub exit_path: FollowPathData,
     pub attack_move: AttackMoveData,
+    /// The state objects of [`waypoint`].
+    pub waypoint: WaypointStates,
 }
 
 impl MoveStates {
@@ -220,6 +223,7 @@ impl MoveStates {
 
     fn internal(&mut self, id: StateId) -> &mut InternalMove {
         match id {
+            _ if waypoint::is_waypoint_state(id) => self.waypoint.internal(id),
             state_id::ATTACK_MOVE_TO => &mut self.attack_move.base,
             state_id::MOVE_OUT_OF_THE_WAY => &mut self.out_of_way,
             state_id::MOVE_AND_TIGHTEN => &mut self.tighten.base,
@@ -249,6 +253,7 @@ impl MoveStates {
         seams: &mut SeamsGuard,
     ) -> Result<(), XferError> {
         match id {
+            _ if waypoint::is_waypoint_state(id) => self.waypoint.xfer(id, xfer),
             state_id::MOVE_AND_TIGHTEN => {
                 let mut version: XferVersion = 1;
                 xfer.xfer_version(&mut version, 1)?;
@@ -327,7 +332,7 @@ fn has_status(sim: &dyn SimApi, owner: ObjectSlot, status: ObjectStatusType) -> 
         .is_some_and(|o| o.status.test(status as Int) != FALSE)
 }
 
-fn position(sim: &dyn SimApi, owner: ObjectSlot) -> Coord3D {
+pub(super) fn position(sim: &dyn SimApi, owner: ObjectSlot) -> Coord3D {
     sim.object(owner)
         .map(|o| *o.thing.get_position())
         .unwrap_or_default()
@@ -373,14 +378,14 @@ fn is_ultra_accurate(sim: &mut dyn SimApi, ctx: ModuleContext) -> bool {
         .is_some_and(|l| l.is_ultra_accurate() != FALSE)
 }
 
-fn set_use_precise_z_pos(sim: &mut dyn SimApi, ctx: ModuleContext, precise: Bool) {
+pub(super) fn set_use_precise_z_pos(sim: &mut dyn SimApi, ctx: ModuleContext, precise: Bool) {
     if let Some(locomotor) = ai(sim, ctx).cur_locomotor_mut() {
         locomotor.set_use_precise_z_pos(precise);
     }
 }
 
 /// `Pathfinder::removeGoal`.
-fn remove_goal(sim: &mut dyn SimApi, ctx: ModuleContext) {
+pub(super) fn remove_goal(sim: &mut dyn SimApi, ctx: ModuleContext) {
     if sim.pathfinder().is_some() {
         sim.pathfinder_remove_goal(ctx.owner_slot);
     } else {
@@ -390,7 +395,7 @@ fn remove_goal(sim: &mut dyn SimApi, ctx: ModuleContext) {
 
 /// `adjustDestination` for the unit's own locomotors; `false` when it found
 /// no cell.
-fn adjust_destination(sim: &mut dyn SimApi, ctx: ModuleContext, goal: &mut Coord3D) -> bool {
+pub(super) fn adjust_destination(sim: &mut dyn SimApi, ctx: ModuleContext, goal: &mut Coord3D) -> bool {
     if sim.pathfinder().is_some() {
         return sim.pathfinder_adjust_destination(ctx.owner_slot, goal) != FALSE;
     }
@@ -410,7 +415,7 @@ fn take_group_speed(sim: &mut dyn SimApi, ctx: ModuleContext) {
     }
 }
 
-fn last_node(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<(Coord3D, PathfindLayerEnum)> {
+pub(super) fn last_node(sim: &mut dyn SimApi, ctx: ModuleContext) -> Option<(Coord3D, PathfindLayerEnum)> {
     let path = ai(sim, ctx).path.as_ref()?;
     let node = path.node(path.last_node()?);
     Some((*node.position(), node.layer()))
@@ -431,7 +436,7 @@ pub(super) fn is_same_position(ours: &Coord3D, previous: &Coord3D, current: &Coo
 // -----------------------------------------------------------------------------
 
 /// `getAdjustsDestination`.
-fn adjusts_destination(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
+pub(super) fn adjusts_destination(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
     if has_status(sim, ctx.owner_slot, ObjectStatusType::Parachuting) {
         return false;
     }
@@ -439,16 +444,17 @@ fn adjusts_destination(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) ->
     data(sim, ctx, id).adjust_destinations != FALSE
 }
 
-fn set_adjusts_destination(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId, adjusts: bool) {
+pub(super) fn set_adjusts_destination(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId, adjusts: bool) {
     data(sim, ctx, id).adjust_destinations = Bool::from(adjusts);
 }
 
 /// `computePath`, as each state overrides it.
-fn compute_path(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
+pub(super) fn compute_path(sim: &mut dyn SimApi, ctx: ModuleContext, id: StateId) -> bool {
     if let Some((host, state)) = attack::split_move_key(id) {
         return attack::compute_path(sim, ctx, host, state);
     }
     match id {
+        state_id::MOVE_AWAY_FROM_REPULSORS => waypoint::repulsors_compute_path(sim, ctx),
         state_id::MOVE_OUT_OF_THE_WAY => {
             data(sim, ctx, id).waiting_for_path = TRUE;
             if ai(sim, ctx).is_blocked_and_stuck != FALSE {

@@ -140,6 +140,9 @@ All slices also follow `tests/cpp_harness/README.md`: identical output at `-O0`,
 - Seams: `ai_enter`, `ai_exit` (including `instantly`), `ai_face_object`, `ai_face_position`, `is_free_to_exit`, `get_enter_target`, `ai_get_healed`, passenger exit and idle orders.
 - Risks: most state-machine PRNG draws are here (waypoint, wander, panic).
 - Seen: garrison, board, leave, patrol.
+- **Done: the walking half.** Follow waypoint path (individuals, team, both exact), wander, wander in place, panic and move away from repulsors are `ai/ai_states/waypoint.rs`; `golden_s11_waypoint_states` traces real orders on 70 scenes (state, path, position bits, save bytes, CRC, RNG seed, groups, team waypoint). `ai_update::closest_repulsor` now searches (S12) unless `AiSeams::closest_repulsor` answers. `golden_game_frames` did not move.
+- Open in that half: the attack-follow of a waypoint path (states 31 and 32) is still the seam, so an AI unit that turns its path into an attack move stops there. No script action gives these orders yet (`TEAM_FOLLOW_WAYPOINTS`, `TEAM_WANDER`, `TEAM_PANIC` and the like are not ported). A team's waypoint is `SimWorld::team_waypoints`, not `Team::current_waypoint`, which the `TeamFactory` saves. `SimWorld::ai_enable_repulsors` starts on and is not taken from `AIData`, which the search reads. Not covered by vectors: the wall layer and bridges, the real repulsor search under these states, loading a save, repeated waypoint ids.
+- Not done: dock, enter, exit, evacuate, face, wait, rappel, crate pickup.
 
 ### S12. Targeting and mood
 - C++: `AI.cpp` closest enemy, ally, repulsor and vision range (about 250), mood and target choice in `AIUpdate.cpp` (560). One worker.

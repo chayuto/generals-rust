@@ -519,6 +519,22 @@ pub fn center(sim: &SimContext, group: GroupId) -> (bool, Coord3D) {
     (count > 0, center)
 }
 
+/// `Team::getTeamAsAIGroup` into a new group, and then `getCenter` and
+/// `getCount`. With `RETAIL_COMPATIBLE_AIGROUP` nobody destroys the group.
+pub fn team_group_center(sim: &mut SimContext, members: &[ObjectId]) -> (Coord3D, Int) {
+    let group = create_group(sim);
+    for &member in members {
+        add(sim, group, member);
+    }
+    let (_, middle) = center(sim, group);
+    let count = sim
+        .world
+        .ai_groups
+        .find(group)
+        .map_or(0, |g| g.member_list_size as Int);
+    (middle, count)
+}
+
 /// `getMinMaxAndCenter`. The flag says whether the group is a formation: two or
 /// more free members with an AI, the first of which has a formation id.
 pub fn min_max_and_center(sim: &SimContext, group: GroupId) -> (bool, Coord2D, Coord2D, Coord3D) {

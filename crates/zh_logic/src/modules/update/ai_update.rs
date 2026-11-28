@@ -76,8 +76,22 @@ pub use attack_path::{
 };
 pub use crate::ai::mood::MoodMatrixAction;
 pub use mood_target::{drop_team_target, next_mood_target, offer_team_target};
-pub(crate) use path_follow::{goal_position, update_goal};
+pub(crate) use path_follow::{goal_position, maximum_pathfind_extent, update_goal};
 use path_follow::{point_on_path, set_path, with_pathfinder};
+
+/// `AI::findClosestRepulsor` for the unit of `ctx`.
+pub fn closest_repulsor(sim: &mut dyn SimApi, ctx: ModuleContext, range: Real) -> Option<ObjectId> {
+    if let Some(answer) = ai_seams(sim).closest_repulsor(ctx.owner_id, range) {
+        return answer;
+    }
+    let found = crate::ai::ai::find_closest_repulsor(
+        &*sim,
+        &sim.rules().ai_data,
+        ctx.owner_slot,
+        range,
+    )?;
+    sim.object(found).map(|o| o.id)
+}
 
 /// `FAST_AS_POSSIBLE`.
 pub const FAST_AS_POSSIBLE: Real = 999_999.0;
