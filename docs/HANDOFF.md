@@ -99,8 +99,10 @@ Open:
 - `Player::onUpgradeRemoved` and `findBestSupplyWarehouse` (which prunes the warehouse
   list) are not ported. Sim relationship queries ignore team override relations.
 - The reference build writes the general name with four bytes a character; the port
-  writes two. The score keeper maps are ordered by template pointer in the reference and
-  by template id here: they agreed in the vectors.
+  writes two (the Windows game's width; `golden_player_xfer` converts that one field).
+  Before L12, check whether any game checksum or compared save reaches a wide string, and
+  settle the width if so. The score keeper maps are ordered by template pointer in the
+  reference and by template id here: they agreed in the vectors.
 - `golden_player_xfer` has had no mutation run.
 - Unverified: academy init values and playability of a non-default team have no vectors;
   `AcademyStats::update` is not called.
