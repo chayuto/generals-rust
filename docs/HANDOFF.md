@@ -106,27 +106,28 @@ Open:
 - `golden_player_xfer` has had no mutation run.
 - Unverified: academy init values and playability of a non-default team have no vectors;
   `AcademyStats::update` is not called.
-- `set_object_team_same_player` skips the power adjustment, module science grants do not
-  notify scripts, and the `PlayerWorld` brown-out hook is a stub.
+- Module science grants do not notify scripts, and the `PlayerWorld` brown-out hook is a
+  stub.
 - Unverified: brown-out during an executing module, team handover, construction.
 - Mutation (40 of 81): four survivors not rechecked (`player.rs` `add_science` and the cost
   change match, the radar default in `sim/mod.rs`).
-- Object lifecycle gaps, started (`golden_object_lifecycle`). Done: weapon set changes on
-  flag changes (and the `WeaponSet` save bytes, which were wrong), contained units leave
-  their group and the pathfind map; destroy already freed its cells. No mutation run.
-- Not done, vectors already in `PKT-390_lifecycle.txt` (`gen_object_lifecycle`), with no
-  Rust test yet:
-  - `mine`: `setStatus` and `clearStatus` of `UNDER_CONSTRUCTION` must kill enemy mines
-    and destroy other mines under the object (`change_status` only dirties the cells).
-    The reference finds only mines the partition has already processed.
-  - `defect`: `defect_object` must also call `defect_all_parked_units`, then move the
-    mines it produced.
-  - `capture`, `dozer`: `set_object_team_same_player` skips `onCapture`, which the
-    reference runs (score count, module hooks, unsellable flag); non-retail
-    `idle_on_capture` must also cancel all dozer tasks.
-  - `plan`: bonuses apply once to a new object; the port's existing call is untested.
-- Also open in `onCapture`: a skirmish AI owner sells a captured faction structure
-  (`sellObject` is not ported).
+- Object lifecycle gaps closed against `PKT-390_lifecycle.txt` (`golden_object_lifecycle`,
+  every row): weapon set changes on flag changes (and the `WeaponSet` save bytes),
+  contained units leaving their group and the pathfind map, mines under an object whose
+  `UNDER_CONSTRUCTION` changes, produced mines (and parked units) following a defection,
+  `onCapture` between teams of one player (`set_object_team_same_player` now runs the
+  whole capture), a captured dozer or worker dropping its tasks (non-retail), and battle
+  plan bonuses on a new object.
+- Not covered by those vectors: parked units defecting through `defect_object`, an allied
+  capture keeping a dozer's tasks, a captured worker, and module `on_capture` hooks on a
+  same-player transfer. Extend `gen_object_lifecycle` for these.
+  Mutation (14 candidates: 11 caught, 1 did not build) left two survivors for the same
+  reason: no vector cancels a dozer's build task, or tells the mine scan's 3D collision
+  test from a 2D one (the port follows the reference default, 3D).
+- Still open in `setTeam` and `onCapture`: a skirmish AI owner sells a captured faction
+  structure (`sellObject` is not ported); the new team's initial attitude and attack
+  priority set are not applied; `set_object_team_same_player` does not redirect a dead
+  player's team to neutral.
 
 ## What to do next
 
