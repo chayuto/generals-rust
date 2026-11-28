@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`292` implemented, `35` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `133` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `129` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `134` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `130` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -384,6 +384,7 @@
 | `zh_logic` | `crates/zh_logic/src/ai/ai_player_ops.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/ai_states/attack.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/ai_states/movement.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/ai/ai_states/waypoint.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/ai_team_queue.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/mood.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/ai/seams.rs` | `implemented` |
@@ -516,6 +517,7 @@
 | `docs/golden_vectors/PlayersTeamsRetail.json` | - | no |
 | `docs/golden_vectors/S0_FrameDriver.json` | 3200 | no |
 | `docs/golden_vectors/S10_MovementStates.json` | 60 | no |
+| `docs/golden_vectors/S11_WaypointStates.json` | 70 | no |
 | `docs/golden_vectors/S12_Targeting.json` | - | no |
 | `docs/golden_vectors/S13_WeaponFiring.json` | 3000 | no |
 | `docs/golden_vectors/S14_AttackStates.json` | 80 | no |
@@ -656,6 +658,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_players_teams.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s0_frame_driver.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s10_movement_states.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_s11_waypoint_states.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s12_targeting.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s13_weapon_firing.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_s14_attack_states.rs` | `active` |
