@@ -3844,6 +3844,34 @@ impl SimContext {
         }
     }
 
+    /// The end of `Object::defect`: whatever is parked here defects too, and every
+    /// mine this object produced changes team, in world list order.
+    fn defect_parked_and_mines(
+        &mut self,
+        owner: ObjectSlot,
+        new_team: TeamId,
+        detection_frames: UnsignedInt,
+    ) {
+        if let Some(ps) = self.world.objects.get(owner).and_then(|o| o.parking_slot) {
+            let _ = self.dispatch_module(ps, |m, sim, ctx| {
+                if let Some(pp) = m.as_parking_place_mut() {
+                    pp.defect_all_parked_units(sim, ctx, new_team, detection_frames);
+                }
+            });
+        }
+        let Some(id) = self.world.objects.id_of(owner) else {
+            return;
+        };
+        let objects: Vec<ObjectSlot> = self.world.objects.world_iter().collect();
+        for mine in objects {
+            if self.object_is_kind_of(mine, KindOfType::Mine) != FALSE
+                && self.world.objects.get(mine).is_some_and(|o| o.producer_id == id)
+            {
+                self.set_object_team(mine, new_team);
+            }
+        }
+    }
+
     /// The mine scan of `Object::setStatus`: enemy mines in the way detonate, all
     /// others are removed.
     fn clear_mines_under(&mut self, owner: ObjectSlot) {
@@ -8275,6 +8303,7 @@ impl SimApi for SimContext {
         if kick_out {
             self.contain_remove_all(owner, TRUE);
         }
+        self.defect_parked_and_mines(owner, new_team, detection_frames);
     }
 
     fn trigger_smc_helper(&mut self, owner: ObjectSlot, when: UnsignedInt) {

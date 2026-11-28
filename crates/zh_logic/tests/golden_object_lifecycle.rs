@@ -600,6 +600,13 @@ fn capture_counts_the_building_and_stops_an_enemy_dozer() {
 }
 
 #[test]
+fn defection_takes_the_mines_the_building_made() {
+    let mut scene = Scene::new();
+    scene.defection();
+    check("defect", &scene.rows);
+}
+
+#[test]
 fn weapon_set_follows_the_flags() {
     let mut scene = Scene::new();
     scene.weapon_sets();
