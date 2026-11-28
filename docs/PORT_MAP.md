@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`292` implemented, `35` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `130` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `125` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `131` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `126` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -533,6 +533,7 @@
 | `docs/golden_vectors/SHROUD_UPDATES.json` | 300 | no |
 | `docs/golden_vectors/SciencePurchase.json` | - | no |
 | `docs/golden_vectors/StructureCollapseUpdate.json` | 240 | yes |
+| `docs/golden_vectors/TerrainLos.json` | - | no |
 | `docs/golden_vectors/WP2_1_Xfer.json` | 1000 | no |
 | `docs/golden_vectors/WP2_2a_GameMath.json` | 2000 | no |
 | `docs/golden_vectors/WP3_1_Economy.json` | 1000 | no |
@@ -669,6 +670,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_shroud_updates.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_sleepy_heap.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_structure_collapse_update.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_terrain_los.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_1_economy.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_1b_stats.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_wp3_2a_rules.rs` | `active` |
