@@ -319,6 +319,8 @@ pub enum AiCall {
     WakeUpAndAttemptToTarget,
     /// `joinTeam`.
     JoinTeam,
+    /// `DozerAIInterface::cancelAllTasks`; nothing for a unit that is no dozer.
+    CancelAllDozerTasks,
     /// `doQuickExit`.
     QuickExit(Vec<Coord3D>),
     /// `onDisabledEdge`, which only the dozer and the worker override.
@@ -2225,6 +2227,11 @@ pub fn execute(sim: &mut dyn SimApi, ctx: ModuleContext, call: &AiCall) {
             }
         }
         AiCall::JoinTeam => join_team(sim, ctx),
+        AiCall::CancelAllDozerTasks => {
+            if !matches!(self::ai(sim, ctx).derived, DerivedAi::Base) {
+                dozer_ai_update::cancel_all_tasks(sim, ctx);
+            }
+        }
         AiCall::DisabledEdge(now_disabled) => {
             if !matches!(ai(sim, ctx).derived, DerivedAi::Base) {
                 dozer_ai_update::on_disabled_edge(sim, ctx, *now_disabled);

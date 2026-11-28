@@ -15,8 +15,11 @@ use zh_logic::combat::locomotor::LocomotorTemplate;
 use zh_logic::object::weapon::WeaponTemplate;
 use zh_logic::pathfinder::PathfindLayerEnum;
 use zh_logic::object::weapon_set::{WeaponLockType, WeaponSlotType};
+use zh_logic::modules::update::ai_update::{AiUpdate, DerivedAi};
+use zh_logic::modules::update::dozer_ai_update::{is_task_pending, new_task, DOZER_TASK_REPAIR};
 use zh_logic::rules::combat_types::{DamageType, WeaponSetType};
 use zh_logic::rules::ObjectStatusType;
+use zh_logic::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use zh_logic::sim::{SimApi, SimContext, SimView, SimWorld};
 
 const VECTORS: &str = include_str!("../../../docs/golden_vectors/PKT-390_lifecycle.txt");
@@ -381,6 +384,120 @@ impl Scene {
         }
     }
 
+    // ---- defection (also what gives player 2 its first captured building)
+
+    fn player_of(&self, o: ObjectSlot) -> Int {
+        let team = self.sim.world.objects.get(o).expect("object").team_id;
+        self.sim.player_index(team)
+    }
+
+    fn defection(&mut self) {
+        self.sim.world.frame = 300;
+        let bld = self.make("dbld", "Bld", TEAM_A, 600.0, 400.0);
+        let mine1 = self.make("dmine1", "Mine", TEAM_A, 640.0, 400.0);
+        let mine2 = self.make("dmine2", "Mine", TEAM_A, 660.0, 400.0);
+        let rock = self.make("drock", "Rock", TEAM_A, 680.0, 400.0);
+        let producer = self.sim.world.objects.id_of(bld).expect("id");
+        for o in [mine1, rock] {
+            self.sim.world.objects.get_mut(o).expect("object").producer_id = producer;
+        }
+        for (op, team) in [("same", TEAM_A), ("enemy", TEAM_B)] {
+            self.sim.defect_object(bld, team, 0, FALSE);
+            let text = format!(
+                "defect {op} {} {} {} {}",
+                self.player_of(bld),
+                self.player_of(mine1),
+                self.player_of(mine2),
+                self.player_of(rock)
+            );
+            self.row(text);
+        }
+    }
+
+    // ---- capture
+
+    fn captured(&self, player: Int) -> Int {
+        self.sim
+            .world
+            .players
+            .player(player)
+            .map_or(0, |p| p.score_keeper.total_tech_buildings_captured)
+    }
+
+    fn unsellable(&mut self, o: ObjectSlot) {
+        let object = self.sim.world.objects.get_mut(o).expect("object");
+        object.script_status |= OBJECT_STATUS_SCRIPT_UNSELLABLE;
+    }
+
+    fn capture_row(&mut self, op: &str, o: ObjectSlot) {
+        let object = self.sim.world.objects.get(o).expect("object");
+        let bit = object.script_status & OBJECT_STATUS_SCRIPT_UNSELLABLE != 0;
+        let text = format!(
+            "capture {op} {} {} {} {}",
+            self.player_of(o),
+            self.captured(1),
+            self.captured(2),
+            u8::from(bit)
+        );
+        self.row(text);
+    }
+
+    fn dozer_row(&mut self, op: &str, dozer: ObjectSlot) {
+        let player = self.player_of(dozer);
+        let ms = self.sim.world.objects.get(dozer).and_then(|o| o.ai_slot);
+        let ai = self
+            .sim
+            .resident_state_mut(ms.expect("AI"))
+            .and_then(|a| a.downcast_mut::<AiUpdate>())
+            .expect("AI module");
+        let DerivedAi::Dozer(d) = &ai.derived else {
+            panic!("no dozer");
+        };
+        let task = DOZER_TASK_REPAIR as usize;
+        let (current, target) = (d.brain.current_task, d.brain.tasks[task].target);
+        let pending = is_task_pending(&d.brain, DOZER_TASK_REPAIR);
+        let text = format!(
+            "dozer {op} {player} {current} {} {}",
+            u8::from(pending),
+            self.name_of(target)
+        );
+        self.row(text);
+    }
+
+    fn captures(&mut self) {
+        self.sim.world.frame = 400;
+        let team_a2 = TeamId(4);
+        self.sim.add_player_team(team_a2, 1);
+
+        let tech = self.make("tech", "Tech", TEAM_B, 700.0, 500.0);
+        self.unsellable(tech);
+        self.capture_row("start", tech);
+        self.sim.set_object_team(tech, TEAM_A);
+        self.capture_row("to-a", tech);
+        self.unsellable(tech);
+        self.sim.set_object_team_same_player(tech, team_a2);
+        self.capture_row("to-a2", tech);
+        self.sim.set_object_team(tech, team_a2);
+        self.capture_row("again", tech);
+
+        let hurt = self.make("hurt", "Tech", TEAM_A, 750.0, 500.0);
+        let mut damage = DamageInfo::default();
+        damage.input.damage_type = DamageType::Unresistable;
+        damage.input.amount = 100.0;
+        self.sim.attempt_damage(hurt, &mut damage);
+        let dozer = self.make("dozer", "Dozer", TEAM_A, 760.0, 520.0);
+        let ms = self.sim.world.objects.get(dozer).and_then(|o| o.ai_slot);
+        let ms = ms.expect("AI");
+        let ctx = self.sim.world.modules.meta(ms).context(ms);
+        new_task(&mut self.sim, ctx, DOZER_TASK_REPAIR, hurt);
+        self.dozer_row("tasked", dozer);
+        // The same player, through the other way in.
+        self.sim.set_object_team(dozer, team_a2);
+        self.dozer_row("same-player", dozer);
+        self.sim.set_object_team(dozer, TEAM_B);
+        self.dozer_row("enemy", dozer);
+    }
+
     // ---- pathfind map
 
     fn name_of(&self, id: ObjectId) -> String {
@@ -468,6 +585,18 @@ fn construction_clears_the_mines_under_the_object() {
     let mut scene = Scene::new();
     scene.construction_mines();
     check("mine", &scene.rows);
+}
+
+#[test]
+fn capture_counts_the_building_and_stops_an_enemy_dozer() {
+    let mut scene = Scene::new();
+    scene.defection();
+    scene.captures();
+    check("capture", &scene.rows);
+    // Retail keeps the tasks of a captured dozer.
+    if cfg!(not(feature = "retail-crc")) {
+        check("dozer", &scene.rows);
+    }
 }
 
 #[test]

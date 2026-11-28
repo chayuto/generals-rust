@@ -14,8 +14,7 @@
 //! The order to start building (`DozerAIInterface::construct`) is not here: its
 //! caller creates the building and hands it to [`new_task`].
 //!
-//! Not here: `cancelAllTasks`, which only unported callers use; the repair of
-//! bridges (`canRepairObject` refuses a bridge and its
+//! Not here: the repair of bridges (`canRepairObject` refuses a bridge and its
 //! towers), loading a save, building sounds, the idle worker list, messages,
 //! radar events, `AcademyStats::recordProduction`, and the computer player's
 //! `onStructureProduced`.
@@ -537,6 +536,15 @@ pub fn cancel_task(sim: &mut dyn SimApi, ctx: ModuleContext, task: Int, remember
         state.previous_task_info = state.tasks[task as usize];
     }
     internal_cancel_task(sim, ctx, task);
+    reset_machine(sim, ctx);
+}
+
+/// `cancelAllTasks`: every task slot is cancelled, pending or not.
+pub fn cancel_all_tasks(sim: &mut dyn SimApi, ctx: ModuleContext) {
+    clear_previous_task(brain(sim, ctx));
+    for task in 0..DOZER_NUM_TASKS as Int {
+        internal_cancel_task(sim, ctx, task);
+    }
     reset_machine(sim, ctx);
 }
 

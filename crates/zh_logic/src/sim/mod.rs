@@ -2913,28 +2913,22 @@ impl SimContext {
         let _ = self.deliver_ai_command(owner, parms);
     }
 
-    /// Transfers `owner` between two teams belonging to the SAME controlling player,
-    /// without firing `onCapture`, `idle_on_capture`, power adjust, or capture score.
+    /// `Object::setTeam` between two teams of the SAME controlling player. All of it
+    /// runs, `onCapture` included: only the orders `onCapture` gives a unit are for a
+    /// change of player.
     pub fn set_object_team_same_player(&mut self, owner: ObjectSlot, new_team: TeamId) {
-        let Some((old_team, obj_id)) = self.world.objects.get_mut(owner).and_then(|obj| {
-            if obj.team_id == new_team {
-                return None;
-            }
-            let old = obj.team_id;
-            obj.team_id = new_team;
-            Some((old, obj.id))
-        }) else {
+        let Some((old_team, obj_id)) = self.world.objects.get(owner).map(|o| (o.team_id, o.id))
+        else {
             return;
         };
-        if old_team != TeamId::INVALID {
-            self.world.team_member_remove(old_team, owner);
+        if old_team == new_team {
+            return;
         }
-        if new_team != TeamId::INVALID {
-            self.world.team_member_prepend(new_team, owner);
-        }
+        // Queued before the capture, so that moves its modules make come after.
         self.world
             .pending_team_member_moves
             .push((obj_id, old_team, new_team));
+        SimApi::capture_object(self, owner, new_team);
     }
 
     /// Delivers `call` to the owner's AI if that is a resident module with a
@@ -3893,6 +3887,8 @@ impl SimContext {
             return;
         }
         self.ai_idle(owner, CommandSourceType::FromAi);
+        #[cfg(not(feature = "retail-crc"))]
+        self.call_ai(owner, &AiCall::CancelAllDozerTasks);
     }
 
     fn clear_unsellable(&mut self, owner: ObjectSlot) {
