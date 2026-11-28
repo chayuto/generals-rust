@@ -61,7 +61,7 @@ parity test. It needs the retail game, so CI skips it. How many games agree for 
 
 Done: the `ObjectCreationList` runtime (`PKT-391`), the model bone catalog (barrels,
 launch and turret bones, dock and spawn bones) and obstacle line of sight for special
-ability range. `golden_game_frames` did not move. L4 has not been started. The sections
+ability range. `golden_game_frames` did not move. L4 comes next. The sections
 below predate L1 to L3; check `git log` before taking an item from them.
 
 Open from L3:
@@ -149,8 +149,8 @@ Merging a worker's commits:
 4. `lint_determinism.py`, `port_map.py --check`, `gen_engine_sim.py --check`,
    `cargo check -p zh_logic --features retail-crc` and `retail-xfer-save`, every
    `scripts/test_*.py`, `validate_manifest.py`, `check_vendor.py`.
-5. Push once per batch and check CI (about 5 minutes of a 10 minute limit). It is the only
-   x86 run, so the batch is not done until it is green.
+5. Push once per batch. Do not wait for CI: it is advisory (`AGENTS.md` §4.4). Read the
+   previous run before the next push and fix real failures.
 6. Remove the worktree: delete its `vendor` symlink first, then `git worktree remove`.
 
 ## Pitfalls
