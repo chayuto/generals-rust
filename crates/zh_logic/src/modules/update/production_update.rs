@@ -292,7 +292,7 @@ impl ProductionUpdate {
             return FALSE;
         };
         let cost = sim.unit_cost_to_build(team, tmpl);
-        sim.deposit_player_money(team, cost as UnsignedInt);
+        sim.deposit_player_money(team, cost as UnsignedInt, FALSE);
         self.remove_from_queue(sim, ctx, index);
         TRUE
     }
@@ -318,7 +318,7 @@ impl ProductionUpdate {
         {
             return FALSE;
         }
-        sim.deposit_player_money(team, cost as UnsignedInt);
+        sim.deposit_player_money(team, cost as UnsignedInt, FALSE);
         self.remove_from_queue(sim, ctx, index);
         if upgrade_type == UpgradeType::Player {
             sim.player_remove_upgrade(team, key);

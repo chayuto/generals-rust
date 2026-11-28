@@ -570,20 +570,6 @@ impl SimContext {
         );
     }
 
-    /// `Money::deposit`: the balance and the academy income record.
-    pub(super) fn deposit_money(&mut self, team: TeamId, amount: UnsignedInt) {
-        if amount == 0 {
-            return;
-        }
-        let Some(player_idx) = self.controlling_player(team) else {
-            return;
-        };
-        let money = self.world.player_money.entry(player_idx).or_insert(0);
-        *money = money.wrapping_add(amount);
-        let frame = self.world.frame;
-        self.academy(team).record_income(frame);
-    }
-
     fn upgrade_mask_of(&self, upgrade: NameKeyType) -> Option<UpgradeMaskType> {
         self.rules
             .upgrade_center

@@ -5,9 +5,10 @@
 //! (`tests/cpp_harness/gen_player_holdings.cpp`,
 //! `crates/zh_logic/tests/golden_player_holdings.rs`).
 
-use zh_common::types::{Bool, Int, TeamId, UnsignedInt, FALSE};
+use zh_common::types::{Bool, Int, TeamId, UnsignedInt, FALSE, TRUE};
 
 use crate::economy::energy::{Energy, EnergyOwnerCallbacks};
+use crate::economy::money::{MoneyCallbacks, NoopMoneyCallbacks};
 use crate::player::player::Player;
 use crate::rules::disabled_types::DisabledType;
 use crate::rules::kind_of::KindOfType;
@@ -24,7 +25,58 @@ impl EnergyOwnerCallbacks for BrownOut {
     }
 }
 
+/// Holds `Money::deposit`'s income record, its last step. The sounds it also
+/// asks for are client side.
+#[derive(Default)]
+struct Income(Option<Int>);
+
+impl MoneyCallbacks for Income {
+    fn record_income(&mut self, player_index: Int) {
+        self.0 = Some(player_index);
+    }
+}
+
 impl SimContext {
+    /// `getMoney()->countMoney()`; 0 without a player.
+    pub fn money_of(&self, player: Int) -> UnsignedInt {
+        self.world
+            .players
+            .player(player)
+            .map_or(0, |p| p.money.count_money())
+    }
+
+    /// `Money::setStartingCash`: a balance with no income behind it.
+    pub fn set_player_cash(&mut self, player: Int, amount: UnsignedInt) {
+        if let Some(p) = self.world.players.player_mut(player) {
+            p.money.set_starting_cash(amount);
+        }
+    }
+
+    /// `Money::deposit`.
+    pub fn deposit_to_player(&mut self, player: Int, amount: UnsignedInt, track_income: Bool) {
+        let mut income = Income::default();
+        let Some(p) = self.world.players.player_mut(player) else {
+            return;
+        };
+        p.money.deposit(amount, TRUE, track_income, &mut income);
+        // The academy of the player the money names, which need not be its owner.
+        if let Some(index) = income.0 {
+            let frame = self.world.frame;
+            self.world
+                .player_academy
+                .entry(index)
+                .or_default()
+                .record_income(frame);
+        }
+    }
+
+    /// `Money::withdraw`: what was taken.
+    pub fn withdraw_from_player(&mut self, player: Int, amount: UnsignedInt) -> UnsignedInt {
+        self.world.players.player_mut(player).map_or(0, |p| {
+            p.money.withdraw(amount, TRUE, &mut NoopMoneyCallbacks)
+        })
+    }
+
     /// The controlling player of a member of `team_id`; a null `Team*` has none.
     pub fn player_of_team(&self, team_id: TeamId) -> Option<&Player> {
         self.controlling_player(team_id)
@@ -34,6 +86,14 @@ impl SimContext {
     pub fn player_of_team_mut(&mut self, team_id: TeamId) -> Option<&mut Player> {
         let player = self.controlling_player(team_id)?;
         self.world.players.player_mut(player)
+    }
+
+    /// The money part of `Player::update`.
+    pub fn update_player_money(&mut self, player: Int) {
+        let frame = self.world.frame;
+        if let Some(p) = self.world.players.player_mut(player) {
+            p.money.update_income_bucket(frame);
+        }
     }
 
     /// A call on a player's `Energy`, with the `onPowerBrownOutChange` it makes.

@@ -1019,8 +1019,8 @@ fn test_wp52_special_power_1000_golden_vectors() {
             player.special_power_timers.clear();
         }
         let (player_a, player_b) = (sim.player_index(team_a), sim.player_index(team_b));
-        sim.world.player_money.insert(player_a, money_a);
-        sim.world.player_money.insert(player_b, money_b);
+        sim.set_player_cash(player_a, money_a);
+        sim.set_player_cash(player_b, money_b);
         sim.player_of_team_mut(team_a)
             .expect("player")
             .express_special_power_ready_frame(sp_shared_id, frame0);

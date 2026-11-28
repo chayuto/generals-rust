@@ -477,12 +477,7 @@ pub fn build_upgrade(
         else {
             return;
         };
-        let money = sim
-            .world
-            .player_money
-            .get(&player)
-            .copied()
-            .unwrap_or(0);
+        let money = sim.money_of(player);
         let access = UpgradeMoneyView(money);
         (
             tmpl.upgrade_type(),

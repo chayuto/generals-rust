@@ -1698,7 +1698,7 @@ pub trait SimApi: SimView {
     fn dispatch_on_die(&mut self, owner: ObjectSlot, dmg: &DamageInfo);
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot);
     /// `Money::deposit` without income tracking.
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt);
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt, track_income: Bool);
     /// `Player::addUpgrade` with `UPGRADE_STATUS_IN_PRODUCTION`.
     fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType);
     /// `Player::removeUpgrade`.
@@ -2473,8 +2473,6 @@ pub struct SimWorld {
     pub damage_watch: Option<(ModuleSlot, Option<ObjectStatusMaskType>)>,
     pub triggered_fx_lists: Vec<(String, Coord3D)>,
     pub triggered_damage_fx: Vec<(String, DamageType, Real, ObjectId, ObjectId)>,
-    /// `Player::m_money` by player index.
-    pub player_money: BTreeMap<Int, UnsignedInt>,
     pub player_is_human: BTreeMap<TeamId, Bool>,
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
     /// `Player::m_energy` by player index.
@@ -2641,7 +2639,6 @@ impl SimWorld {
             damage_watch: None,
             triggered_fx_lists: Vec::new(),
             triggered_damage_fx: Vec::new(),
-            player_money: BTreeMap::new(),
             player_is_human: BTreeMap::new(),
             team_is_neutral: BTreeMap::new(),
             player_energy: BTreeMap::new(),
@@ -5517,8 +5514,7 @@ impl SimView for SimContext {
 
     fn player_money(&self, team_id: TeamId) -> UnsignedInt {
         self.controlling_player(team_id)
-            .and_then(|p| self.world.player_money.get(&p).copied())
-            .unwrap_or(0)
+            .map_or(0, |p| self.money_of(p))
     }
 
     fn player_is_human(&self, team_id: TeamId) -> Bool {
@@ -7744,8 +7740,10 @@ impl SimApi for SimContext {
         self.handle_partition_cell_maintenance(owner);
     }
 
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
-        self.deposit_money(team_id, amount);
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt, track_income: Bool) {
+        if let Some(player) = self.controlling_player(team_id) {
+            self.deposit_to_player(player, amount, track_income);
+        }
     }
 
     fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType) {
@@ -8432,7 +8430,7 @@ impl SimApi for SimContext {
 
     fn add_player_money(&mut self, team_id: TeamId, amount: Int) -> Int {
         // The same `Money::deposit`; a negative amount converts as in C++.
-        self.deposit_money(team_id, amount as UnsignedInt);
+        self.deposit_player_money(team_id, amount as UnsignedInt, TRUE);
         amount
     }
 
@@ -8440,10 +8438,7 @@ impl SimApi for SimContext {
         let Some(player_idx) = self.controlling_player(team_id) else {
             return 0;
         };
-        let entry = self.world.player_money.entry(player_idx).or_insert(0);
-        let withdrawn = (*entry).min(amount);
-        *entry -= withdrawn;
-        withdrawn
+        self.withdraw_from_player(player_idx, amount)
     }
 
     fn grant_player_science(&mut self, team_id: TeamId, science: ScienceType) -> Bool {
@@ -13047,8 +13042,8 @@ impl SimApi for MockSimApi {
         self.ctx.dispatch_on_die(owner, dmg);
     }
 
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
-        self.ctx.deposit_player_money(team_id, amount);
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt, track_income: Bool) {
+        self.ctx.deposit_player_money(team_id, amount, track_income);
     }
 
     fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType) {

@@ -627,7 +627,7 @@ fn row(sim: &mut SimContext, s: &mut Scene, ret: &[u32], d: i64) -> String {
     for team in TEAMS {
         // Each team here is its own player.
         let player = sim.world.team_players.get(&team).copied().unwrap_or(team.0);
-        v.push(sim.world.player_money.get(&player).copied().unwrap_or(0));
+        v.push(sim.money_of(player));
         v.push(
             sim.world
                 .score_keepers

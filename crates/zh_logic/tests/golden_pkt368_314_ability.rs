@@ -1240,9 +1240,8 @@ fn golden_special_ability_and_command_button_hunt() {
             }
             let owner = w.team_players[&TEAMS[1]];
             w.players.player_mut(owner).expect("player").push_science(have);
-            w.player_money.insert(w.team_players[&TEAMS[1]], 100);
-            w.player_money
-                .insert(w.team_players[&TEAMS[2]], get("money") as UnsignedInt);
+            w.players.player_mut(w.team_players[&TEAMS[1]]).expect("player").money.set_starting_cash(100);
+            w.players.player_mut(w.team_players[&TEAMS[2]]).expect("player").money.set_starting_cash(get("money") as UnsignedInt);
             w.frame = get("frame") as u32;
             w.rng.init_random_with_seed(get("seed") as u32);
         }

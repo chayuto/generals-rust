@@ -237,6 +237,7 @@ impl Trial {
             7 => {
                 for player in 0..3 {
                     self.sim.expire_power_sabotage(player);
+                    self.sim.update_player_money(player);
                 }
             }
             8 => {
@@ -341,6 +342,10 @@ impl Trial {
                 let id = self.power_id(b);
                 ret = self.sim.shared_special_power_ready_frame(team, id);
             }
+            26 => self
+                .sim
+                .deposit_player_money(team, b as u32, u8::from(c != 0)),
+            27 => ret = self.sim.withdraw_player_money(team, b as u32),
             other => panic!("unknown op {other}"),
         }
         ret
@@ -402,6 +407,15 @@ impl Trial {
             out.push(if *by { '1' } else { '0' });
         }
         let _ = write!(out, ",{}", player.attacked_frame);
+        let academy = self.sim.world.player_academy.get(&index);
+        let _ = write!(
+            out,
+            " m{},{},{},{}",
+            player.money.count_money(),
+            player.money.get_cash_per_minute(),
+            academy.map_or(0, |a| a.last_income_frame),
+            academy.map_or(0, |a| a.max_frames_between_income),
+        );
     }
 
     fn row(&mut self) -> String {

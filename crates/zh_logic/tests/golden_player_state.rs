@@ -195,7 +195,7 @@ impl Trial<'_> {
 
     fn player_row(&mut self, player: i32) -> String {
         let w = &self.sim.world;
-        let money = w.player_money.get(&player).copied().unwrap_or(0);
+        let money = w.players.player(player).map_or(0, |p| p.money.count_money());
         let mut energy = w.player_energy.get(&player).cloned().unwrap_or_else(|| {
             let mut fresh = Energy::new();
             fresh.init(Some(player));
@@ -244,7 +244,7 @@ impl Trial<'_> {
             let team = team_id(label);
             let player = self.sim.player_index(team);
             let w = &self.sim.world;
-            let money = w.player_money.get(&player).copied().unwrap_or(0);
+            let money = w.players.player(player).map_or(0, |p| p.money.count_money());
             let production = w
                 .player_energy
                 .get(&player)
@@ -540,7 +540,7 @@ fn player_state_matches_reference() {
 fn no_team_means_no_player_state() {
     let fixture = Fixture::load();
     let mut sim = new_sim(&fixture, vector_lines().next().expect("a vector"));
-    sim.world.player_money.insert(0, 100);
+    sim.set_player_cash(0, 100);
     let none = TeamId::INVALID;
     let key = sim.rules.name_keys.name_to_key("PU_Ord0");
     sim.grant_player_upgrade(none, "PU_Ord0");
@@ -549,7 +549,7 @@ fn no_team_means_no_player_state() {
     sim.sabotage_power(none, 5);
     assert_eq!(sim.withdraw_player_money(none, 50), 0);
     assert_eq!(sim.player_money(none), 0);
-    assert_eq!(sim.world.player_money.get(&0), Some(&100));
+    assert_eq!(sim.money_of(0), 100);
     assert!(sim.world.player_upgrades.is_empty());
     assert!(sim.world.player_upgrades_in_progress.is_empty());
     assert!(sim.world.player_energy.is_empty());

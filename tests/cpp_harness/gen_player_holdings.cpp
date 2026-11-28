@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Golden vectors for the state `Player` holds that its teams share (sciences,
 // radar, handicap, build bans, cost and time changes, bounty, attacked-by, shared
-// special power timers) and for `Player::onPowerBrownOutChange` with the callers
+// special power timers, money and its income records) and for `Player::onPowerBrownOutChange` with the callers
 // it has here (energy changes, sabotage and its expiry), run on the unmodified
 // reference in a small real world. Each vector is one script of operations on two
 // players with two teams each.
@@ -14,8 +14,10 @@
 
 #include "oracle_wp51_world.h"
 
+#include "Common/AcademyStats.h"
 #include "Common/Energy.h"
 #include "Common/Handicap.h"
+#include "Common/Money.h"
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "Common/Science.h"
@@ -54,6 +56,14 @@ PEEK(HAttackedFrameTag, UnsignedInt, m_attackedFrame)
 PEEK(HBountyTag, Real, m_cashBountyPercent)
 PEEK(HCostTag, ProductionChangeMap, m_productionCostChanges)
 PEEK(HTimeTag, ProductionChangeMap, m_productionTimeChanges)
+
+#define PEEK_ACADEMY(Tag, member)                                       \
+    struct Tag { using type = UnsignedInt AcademyStats::*; };           \
+    template struct MemberAccess<Tag, &AcademyStats::member>;           \
+    inline UnsignedInt AcademyStats::* access_member(Tag);
+
+PEEK_ACADEMY(HIncomeFrameTag, m_lastIncomeFrame)
+PEEK_ACADEMY(HIncomeGapTag, m_maxFramesBetweenIncome)
 
 static uint32_t g_state = 0x5ca1ab1eu;
 static uint32_t pick(uint32_t n) {
@@ -227,6 +237,11 @@ static std::string player_row(int p) {
         << (player->*access_member(HBansBaseTag()) ? 1 : 0) << ' ';
     for (int i = 0; i < 3; ++i) out << (player->getAttackedBy(i) ? '1' : '0');
     out << ',' << player->*access_member(HAttackedFrameTag());
+    AcademyStats* academy = player->getAcademyStats();
+    out << " m" << player->getMoney()->countMoney() << ','
+        << player->getMoney()->getCashPerMinute() << ','
+        << academy->*access_member(HIncomeFrameTag()) << ','
+        << academy->*access_member(HIncomeGapTag());
     return out.str();
 }
 
@@ -280,6 +295,9 @@ static void reset_players() {
         for (int i = 0; i < MAX_PLAYER_COUNT; ++i) (player->*access_member(HAttackedTag()))[i] = FALSE;
         player->*access_member(HAttackedFrameTag()) = 0;
         player->getHandicap()->init();
+        player->getMoney()->init();
+        player->getAcademyStats()->*access_member(HIncomeFrameTag()) = 0;
+        player->getAcademyStats()->*access_member(HIncomeGapTag()) = 0;
         (player->*access_member(HCostTag())).clear();
         (player->*access_member(HTimeTag())).clear();
     }
@@ -360,11 +378,12 @@ int main(int argc, char** argv) {
             // change, 14 grant science, 15 bounty, 16 attacked, 17 is ready,
             // 18 ready frame, 19 percent ready, 20 recharge, 21 power creation,
             // 22 pause, 23 express a player timer, 24 reset a player timer,
-            // 25 read a player timer.
+            // 25 read a player timer, 26 deposit (tracked or not), 27 withdraw.
             static const int kWeights[] = {0,  0,  0,  0,  0,  1,  2,  2,  3,  3,  4,  5,
                                            6,  6,  7,  7,  7,  8,  8,  9,  9,  10, 11, 12,
                                            13, 14, 14, 15, 16, 17, 17, 17, 18, 18, 19, 19,
-                                           20, 20, 21, 22, 22, 23, 24, 24, 25};
+                                           20, 20, 21, 22, 22, 23, 24, 24, 25, 26,
+                                           26, 26, 27, 27};
             int code = kWeights[pick(sizeof(kWeights) / sizeof(kWeights[0]))];
             if (k < 6) code = 0;
             std::vector<int> alive, powered;
@@ -503,6 +522,15 @@ int main(int argc, char** argv) {
                     c = static_cast<int>(pick(2));
                     sp->pauseCountdown(c != 0);
                 }
+            } else if (code == 26) {
+                a = team;
+                b = pick(8) == 0 ? 0 : static_cast<int>(pick(5000));
+                c = static_cast<int>(pick(2));
+                s.player(a)->getMoney()->deposit(b, TRUE, c != 0);
+            } else if (code == 27) {
+                a = team;
+                b = pick(8) == 0 ? 0 : static_cast<int>(pick(5000));
+                ret = s.player(a)->getMoney()->withdraw(b);
             } else {
                 a = team;
                 b = static_cast<int>(pick(kPowers));

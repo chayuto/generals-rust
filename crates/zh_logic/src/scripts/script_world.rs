@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 
 use zh_common::math::{Coord2D, Coord3D};
 use zh_common::types::{
-    Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, UnsignedShort, FALSE,
+    Bool, Int, ObjectId, Real, Relationship, TeamId, UnsignedInt, UnsignedShort, FALSE,
 };
 use zh_common::xfer::{Xfer, XferError};
 
@@ -418,7 +418,7 @@ impl ScriptWorld for LiveWorld<'_> {
     }
 
     fn player_money(&self, player: ScriptPlayer) -> UnsignedInt {
-        self.sim.world.player_money.get(&player).copied().unwrap_or(0)
+        self.sim.money_of(player)
     }
 
     fn player_power(&self, player: ScriptPlayer) -> PowerReading {
@@ -508,10 +508,7 @@ impl ScriptWorld for LiveWorld<'_> {
     }
 
     fn money_withdraw(&mut self, player: ScriptPlayer, amount: UnsignedInt) {
-        let Some(team) = self.default_team(player) else {
-            return;
-        };
-        self.sim.withdraw_player_money(team, amount);
+        self.sim.withdraw_from_player(player, amount);
     }
 
     fn money_deposit(
@@ -521,14 +518,8 @@ impl ScriptWorld for LiveWorld<'_> {
         _play_sound: bool,
         count_in_score: bool,
     ) {
-        if count_in_score {
-            if let Some(team) = self.default_team(player) {
-                self.sim.deposit_player_money(team, amount);
-            }
-        } else if amount != 0 {
-            let money = self.sim.world.player_money.entry(player).or_insert(0);
-            *money = money.wrapping_add(amount);
-        }
+        self.sim
+            .deposit_to_player(player, amount, Bool::from(count_in_score));
     }
 
     fn set_can_build_units(&mut self, player: ScriptPlayer, can: bool) {

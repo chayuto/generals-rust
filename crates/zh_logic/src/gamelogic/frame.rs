@@ -128,6 +128,7 @@ fn update_players(sim: &mut SimContext, seams: &mut dyn FrameSeams) {
             seams.power_brown_out_change(sim, player);
         }
         seams.player_upkeep(sim, player);
+        sim.update_player_money(player);
     }
 }
 

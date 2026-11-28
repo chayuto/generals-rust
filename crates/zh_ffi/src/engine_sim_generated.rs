@@ -906,7 +906,7 @@ impl SimApi for EngineSim<'_> {
     fn dispatch_on_build_complete(&mut self, owner: ObjectSlot) {
         not_wired("dispatch_on_build_complete")
     }
-    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt) {
+    fn deposit_player_money(&mut self, team_id: TeamId, amount: UnsignedInt, track_income: Bool) {
         not_wired("deposit_player_money")
     }
     fn player_add_upgrade_in_production(&mut self, team_id: TeamId, upgrade: NameKeyType) {

@@ -638,7 +638,7 @@ fn deposit_team(code: u32) -> TeamId {
 
 fn run_deposit(sim: &mut SimContext, v: &Vector<'_>) -> usize {
     for (player, key) in ["m0", "m1", "m2"].into_iter().enumerate() {
-        sim.world.player_money.insert(player as i32, v.num(key));
+        sim.set_player_cash(player as i32, v.num(key));
     }
     let o = spawn(
         sim,

@@ -213,7 +213,7 @@ pub fn dump(sim: &SimContext, players: &PlayerList, teams: &TeamFactory) -> Vec<
             "player\t{i}\t{}\t{}\t{}\t{}\t{enemies:04x}\t{allies:04x}",
             sim.rules.name_keys.key_to_name(p.name_key),
             p.side,
-            sim.world.player_money.get(&i).copied().unwrap_or(0),
+            sim.money_of(i),
             p.default_team.map_or(0, |t| t.0),
         ));
         for &prototype in &p.team_prototypes {

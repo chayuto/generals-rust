@@ -387,7 +387,7 @@ fn world(sim: &mut SimContext) {
     for (player, team) in TEAMS.into_iter().enumerate() {
         w.team_players.insert(team, player as i32);
         w.player_default_teams.insert(player as i32, team);
-        w.player_money.insert(player as i32, 5000);
+        w.players.player_mut(player as i32).expect("player").money.set_starting_cash(5000);
         w.player_is_human.insert(team, FALSE);
     }
     w.team_is_neutral.insert(TEAMS[0], TRUE);
@@ -772,7 +772,7 @@ fn apply(sim: &mut SimContext, op: [u32; 4]) -> i32 {
         }
         3 => {
             let player = sim.player_index(TEAMS[a as usize]);
-            sim.world.player_money.insert(player, b);
+            sim.set_player_cash(player, b);
             0
         }
         4 => {

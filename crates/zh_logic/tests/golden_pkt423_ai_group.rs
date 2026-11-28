@@ -1138,10 +1138,10 @@ fn upgrades_and_special_powers_reach_the_members() {
         .with(ReplayArg::object_id(l.0 as u32))
         .with(ReplayArg::integer(key.0));
 
-    sim.world.player_money.insert(1, 499);
+    sim.set_player_cash(1, 499);
     dispatch_command(&mut sim, &mut commands, &upgrade);
     assert_eq!(queued(&sim), 0);
-    sim.world.player_money.insert(1, 500);
+    sim.set_player_cash(1, 500);
     dispatch_command(&mut sim, &mut commands, &upgrade);
     assert_eq!(queued(&sim), 1);
 

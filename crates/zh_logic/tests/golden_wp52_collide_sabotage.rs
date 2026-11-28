@@ -950,8 +950,8 @@ fn wp52_collide_sabotage_golden_vectors() {
         assert_eq!(sw_xfer, get_str(line, "sw_xfer").unwrap(), "seed {seed} sw_xfer");
 
         // 7. SabotageSupplyCenterCrateCollide
-        api.ctx.world.player_money.insert(player_b, pb_money0);
-        api.ctx.world.player_money.insert(player_c, pc_money0);
+        api.ctx.set_player_cash(player_b, pb_money0);
+        api.ctx.set_player_cash(player_c, pc_money0);
         let (s_sup, m_sup) = spawn_sab_unit(
             &mut api,
             &t_sup_name,
@@ -984,8 +984,8 @@ fn wp52_collide_sabotage_golden_vectors() {
         assert_eq!(sup_xfer, get_str(line, "sup_xfer").unwrap(), "seed {seed} sup_xfer");
 
         // 8. SabotageSupplyDropzoneCrateCollide
-        api.ctx.world.player_money.insert(player_b, pb_money0);
-        api.ctx.world.player_money.insert(player_c, pc_money0);
+        api.ctx.set_player_cash(player_b, pb_money0);
+        api.ctx.set_player_cash(player_c, pc_money0);
         api.ctx.world.supply_dropzone_resets.clear();
         let (s_drop, m_drop) = spawn_sab_unit(
             &mut api,

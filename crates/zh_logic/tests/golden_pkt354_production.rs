@@ -699,7 +699,7 @@ impl Run {
             }),
             11 => {
                 let player = sim.player_index(TEAM);
-                sim.world.player_money.insert(player, a);
+                sim.set_player_cash(player, a);
             }
             12 => {
                 let (prod, cons) = ENERGY[x];
@@ -914,7 +914,7 @@ fn start(sim: &mut SimContext, variant: usize, frame: u32, cfg: &[u32]) -> Run {
             .insert(name.to_owned(), status);
     }
     let player = sim.player_index(TEAM);
-    sim.world.player_money.insert(player, cfg[10]);
+    sim.set_player_cash(player, cfg[10]);
     // A player without any power entry stands for zero production and consumption.
     let (prod, cons) = ENERGY[c[11]];
     if (prod, cons) != (0, 0) {

@@ -114,7 +114,7 @@ impl AutoDepositFacet for AutoDepositUpdate {
         else {
             return;
         };
-        sim.deposit_player_money(team, bonus as UnsignedInt);
+        sim.deposit_player_money(team, bonus as UnsignedInt, TRUE);
         sim.add_money_earned(team, bonus);
         pos.z += 10.0;
         sim.add_floating_money_text(ctx.owner_slot, &pos, bonus);
@@ -149,7 +149,7 @@ impl UpdateFacet for AutoDepositUpdate {
         if self.data.is_actual_money != FALSE {
             // A negative sum wraps, as through `Money::deposit(UnsignedInt)`. The
             // score counts the base amount only.
-            sim.deposit_player_money(team, money as UnsignedInt);
+            sim.deposit_player_money(team, money as UnsignedInt, TRUE);
             sim.add_money_earned(team, self.data.deposit_amount);
         }
         if money > 0 && sim.object_is_logically_visible(owner) != FALSE {

@@ -138,7 +138,7 @@ fn world(money: UnsignedInt) -> World {
     w.player_is_human.insert(TEAM, Bool::from(true));
     w.team_is_neutral.insert(TeamId(1), TRUE);
     w.neutral_team_id = TeamId(1);
-    w.player_money.insert(PLAYER, money);
+    w.players.player_mut(PLAYER).expect("player").money.set_starting_cash(money);
     w.player_relationships
         .insert((PLAYER, PLAYER), zh_common::types::Relationship::Allies);
     let id = sim
@@ -172,7 +172,7 @@ impl World {
     }
 
     fn money(&self) -> UnsignedInt {
-        self.sim.world.player_money[&PLAYER]
+        self.sim.money_of(PLAYER)
     }
 
     fn construct(&mut self, template: i32) -> Option<ObjectSlot> {

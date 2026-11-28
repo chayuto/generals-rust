@@ -464,9 +464,6 @@ fn sync_all(sim: &mut SimContext, teams: &TeamFactory) {
         let Some(player) = players.player(index) else {
             continue;
         };
-        sim.world
-            .player_money
-            .insert(index, player.money.count_money());
         let mut lists = Vec::new();
         for &proto in &player.team_prototypes {
             let instances = teams.instance_ids(proto);
@@ -854,7 +851,7 @@ fn set_money(f: &mut Fixture, player: PlayerIndex, amount: UnsignedInt) {
             p.money.deposit(amount, FALSE, FALSE, &mut cb);
         }
     }
-    f.sim.world.player_money.insert(player, amount);
+    f.sim.set_player_cash(player, amount);
 }
 
 fn make_tiq(teams: &TeamFactory, team_id: TeamId) -> TeamInQueue {

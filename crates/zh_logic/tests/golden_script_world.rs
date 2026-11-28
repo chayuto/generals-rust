@@ -352,7 +352,7 @@ fn queries(game: &mut GameStart, human: Int, computer: Int, home: TeamId, home_n
         .iter()
         .filter_map(|&s| game.sim.world.objects.id_of(s))
         .collect();
-    let money = game.sim.world.player_money[&human];
+    let money = game.sim.money_of(human);
     let at = *game
         .sim
         .world
@@ -544,15 +544,15 @@ fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
 fn actions(game: &mut GameStart, human: Int, computer: Int, home_name: &str) {
     let name = word("player0");
     run(game, at::PLAYER_SET_MONEY, vec![name.clone(), number(500)]);
-    assert_eq!(game.sim.world.player_money[&human], 500);
+    assert_eq!(game.sim.money_of(human), 500);
     run(game, at::PLAYER_GIVE_MONEY, vec![name.clone(), number(70)]);
-    assert_eq!(game.sim.world.player_money[&human], 570);
+    assert_eq!(game.sim.money_of(human), 570);
     run(
         game,
         at::PLAYER_GIVE_MONEY,
         vec![name.clone(), number(-600)],
     );
-    assert_eq!(game.sim.world.player_money[&human], 0);
+    assert_eq!(game.sim.money_of(human), 0);
 
     with(game, |_, world| {
         world.set_player_relationship(human, computer, Relationship::Allies as Int);
@@ -646,7 +646,7 @@ fn updates(game: &mut GameStart, human: Int, computer: Int) {
         at::PLAYER_GIVE_MONEY,
         vec![word("<This Player>"), number(3)],
     )]));
-    let money = |game: &GameStart, p: Int| game.sim.world.player_money[&p];
+    let money = |game: &GameStart, p: Int| game.sim.money_of(p);
     let before = (money(game, human), money(game, computer));
     game.sim.world.frame = 1;
     update(game);

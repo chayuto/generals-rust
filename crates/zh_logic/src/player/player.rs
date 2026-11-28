@@ -282,8 +282,9 @@ impl Player {
 
     /// The members before `init`.
     pub fn blank(index: PlayerIndex) -> Self {
-        let mut money = Money::new();
-        money.set_player_index(index);
+        // `Money()` is player 0's until `init` copies a template's balance, so
+        // the income of a player without a template counts for player 0.
+        let money = Money::new();
         Self {
             index,
             template_name_key: None,

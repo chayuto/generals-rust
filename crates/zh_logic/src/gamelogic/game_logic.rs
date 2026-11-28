@@ -1008,9 +1008,6 @@ fn sync_players(sim: &mut SimContext, stores: &StartupStores) {
             continue;
         };
         sim.world
-            .player_money
-            .insert(index, player.money.count_money());
-        sim.world
             .player_upgrades
             .insert(index, player.upgrades_completed.clone());
         for other in 0..players.player_count() {
