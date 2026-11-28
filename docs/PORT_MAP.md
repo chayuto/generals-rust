@@ -5,7 +5,7 @@
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`292` implemented, `35` data only, `0` seeded skeletons, `136` unported)
 - **Golden Vector Oracles:** `133` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `128` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Test Suites:** `129` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -608,6 +608,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_logic_module_data.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_model_bones.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_name_keys.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_object_lifecycle.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_ocl_runtime.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_collide.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |
