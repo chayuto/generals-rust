@@ -1,4 +1,5 @@
 pub mod experience_tracker;
+pub mod model_draw;
 pub mod object_creation_list;
 pub mod ocl_runtime;
 pub mod object_script_status_bits;

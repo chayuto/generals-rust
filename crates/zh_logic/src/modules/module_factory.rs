@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::arena::{FacetMask, ModuleContext, ModuleDataId, ThingTemplateId};
 use crate::combat::armor::ArmorStore;
 use crate::modules::module::{BehaviorModule, ModuleData, ModuleType, StubModuleData};
+use crate::object::model_draw::{ModelDrawModuleData, ModelDrawSpec, MODEL_DRAW_MODULES};
 use crate::object::thing_template::ModuleMaskLookup;
 use crate::object::weapon::WeaponStore;
 use crate::rules::science::ScienceStore;
@@ -669,19 +670,29 @@ impl ModuleRegistry {
                 return Ok(store.insert_for_template(template_id, tag_key, data));
             }
             // A draw module's data interns its bone and transition names, and the
-            // reference interns the tag after the data.
+            // reference interns the tag after the data. The bone data is read from a
+            // copy, which interns nothing.
             let draw = (mod_type == ModuleType::Draw).then_some(&mut *parse_ctx.name_keys);
+            let spec = if draw.is_some() && MODEL_DRAW_MODULES.contains(&desc.name.as_str()) {
+                Some(ModelDrawSpec::parse(&mut ini.clone())?)
+            } else {
+                None
+            };
             skip_module_block(ini, draw)?;
             let tag_key = parse_ctx.name_keys.name_to_key(tag);
-            let stub = Box::new(StubModuleData {
+            let stub = StubModuleData {
                 module_name: desc.name.clone(),
                 tag_key,
                 module_name_key: mod_name_key,
                 facet_mask: desc.facet_mask,
                 update_phase: desc.update_phase,
                 is_ai_module: desc.is_ai_module,
-            });
-            return Ok(store.insert_for_template(template_id, tag_key, stub));
+            };
+            let data: Box<dyn ModuleData> = match spec {
+                Some(spec) => Box::new(ModelDrawModuleData { base: stub, spec }),
+                None => Box::new(stub),
+            };
+            return Ok(store.insert_for_template(template_id, tag_key, data));
         }
 
         skip_module_block(ini, None)?;
