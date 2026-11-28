@@ -51,18 +51,18 @@ jobs:
           done
 
   # ---------------------------------------------------------------------------
-  # TIER 2: Native Windows & macOS Parity Gate (Manual Release Check Only)
-  # Disabled on automatic push/PR to prevent 10x macOS and 2x Windows runner
-  # credit drain; trigger manually via workflow_dispatch when needed.
+  # TIER 2: Native Windows & macOS Parity Gate
+  # Runs after the Linux gate on pushes to main, PRs and manual dispatch. Standard
+  # runners are free for public repositories; worker branches skip these jobs.
   # ---------------------------------------------------------------------------
   cross-os-parity:
     name: "Native OS Parity V&V (${{ matrix.os }})"
     needs: fast-linux-gate
-    if: github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 20
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         os: [macos-15, windows-latest]
     steps:

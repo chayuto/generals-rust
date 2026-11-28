@@ -119,7 +119,7 @@ class TestBuildOracle(unittest.TestCase):
                 wanted, Path(tmp) / "build", work, "arm64"
             )
             self.assertEqual(extract[:2], ["ar", "x"])
-            self.assertTrue(extract[2].endswith("build/lib/libx.a"))
+            self.assertTrue(Path(extract[2]).as_posix().endswith("build/lib/libx.a"))
             self.assertEqual(wrapped, work.resolve() / "A.cpp.o.wrapped.o")
             joined = " ".join(relink)
             self.assertIn("-alias __Zfoo _oracle_real__Zfoo -unexported_symbol __Zfoo", joined)
