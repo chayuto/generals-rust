@@ -804,6 +804,23 @@ fn run(vectors: &str, scene: &str, frames: &[&str], names: &[&str], cells: Int) 
         ids.push(sim.object(slot).expect("spawned").id);
     }
     check_tape(&tape, &format!("scene {index} spawns"));
+    let slots: Vec<ObjectSlot> = ids
+        .iter()
+        .map(|&id| sim.world.objects.slot_by_id(id).expect("spawned"))
+        .collect();
+    let mut sight = String::new();
+    for &a in &slots {
+        for &b in &slots {
+            if a != b {
+                sight.push(if ai_update::line_of_sight_filter(&sim, a, b) {
+                    '1'
+                } else {
+                    '0'
+                });
+            }
+        }
+    }
+    assert_eq!(sight, get_str(scene, "sight").expect("sight"), "scene {index}");
 
     let mut seen = vec![String::new(); ids.len()];
     for row in frames {

@@ -391,3 +391,21 @@ pub(super) fn compute_attack_path(
     state.is_blocked_and_stuck = FALSE;
     state.path.is_some()
 }
+
+/// `Pathfinder::isViewBlockedByObstacle`. Flying objects are not checked.
+pub fn is_view_blocked_by_obstacle(sim: &dyn SimView, me: ObjectSlot, other: ObjectSlot) -> bool {
+    if sim.object_is_significantly_above_terrain(other) != FALSE {
+        return false;
+    }
+    let position = |slot| sim.object(slot).map(|o| *o.thing.get_position());
+    let (Some(from), Some(to)) = (position(me), position(other)) else {
+        return false;
+    };
+    sim.attack_view_blocked(me, &from, Some(other), &to)
+}
+
+/// `PartitionFilterLineOfSight::allow`: the terrain between the tops of the two,
+/// then obstacles.
+pub fn line_of_sight_filter(sim: &dyn SimView, me: ObjectSlot, other: ObjectSlot) -> bool {
+    sim.is_clear_line_of_sight(me, other) != FALSE && !is_view_blocked_by_obstacle(sim, me, other)
+}

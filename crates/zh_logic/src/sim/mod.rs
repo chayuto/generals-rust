@@ -1152,7 +1152,8 @@ pub trait SimView {
     fn special_power_module_ready(&self, owner: ObjectSlot, template_id: UnsignedInt) -> Option<(Bool, UnsignedInt)>;
     /// An `ActionManager::can...` answer. The action manager is unported; the world holds them.
     fn action_manager_allows(&self, actor: ObjectSlot, target: ObjectSlot, query: ActionQuery) -> Bool;
-    /// `PartitionFilterLineOfSight`: terrain only, the pathfinder's view blocking is unported.
+    /// The terrain half of `PartitionFilterLineOfSight`; the whole filter is
+    /// `ai_update::line_of_sight_filter`.
     fn is_clear_line_of_sight(&self, owner: ObjectSlot, other: ObjectSlot) -> Bool;
     /// Whether `iterateObjectsInRange(owner, radius, FROM_BOUNDINGSPHERE_2D)` yields `target`.
     fn is_in_range_bounding_2d(&self, owner: ObjectSlot, target: ObjectSlot, radius: Real) -> Bool;

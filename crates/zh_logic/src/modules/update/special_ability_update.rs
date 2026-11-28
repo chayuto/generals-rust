@@ -793,7 +793,7 @@ impl SpecialAbilityUpdate {
             }
             return target.is_some_and(|t| {
                 sim.is_in_range_bounding_2d(owner, t, range) != FALSE
-                    && sim.is_clear_line_of_sight(owner, t) != FALSE
+                    && crate::modules::update::ai_update::line_of_sight_filter(sim, owner, t)
             });
         }
         false

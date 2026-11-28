@@ -71,7 +71,9 @@ pub use path_follow::{
     locomotor_distance_to_goal, request_approach_path, request_attack_path, request_path,
     request_safe_path,
 };
-pub use attack_path::is_attack_view_blocked_by_obstacle;
+pub use attack_path::{
+    is_attack_view_blocked_by_obstacle, is_view_blocked_by_obstacle, line_of_sight_filter,
+};
 pub use crate::ai::mood::MoodMatrixAction;
 pub use mood_target::{drop_team_target, next_mood_target, offer_team_target};
 pub(crate) use path_follow::{goal_position, update_goal};

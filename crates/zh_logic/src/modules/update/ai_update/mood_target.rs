@@ -90,15 +90,7 @@ impl TargetingSeams for SimTargeting {
         me: ObjectSlot,
         other: ObjectSlot,
     ) -> Bool {
-        // No line of sight check to flying objects.
-        if sim.object_is_significantly_above_terrain(other) != FALSE {
-            return FALSE;
-        }
-        let position = |slot| sim.object(slot).map(|o| *o.thing.get_position());
-        let (Some(from), Some(to)) = (position(me), position(other)) else {
-            return FALSE;
-        };
-        Bool::from(sim.attack_view_blocked(me, &from, Some(other), &to))
+        Bool::from(super::attack_path::is_view_blocked_by_obstacle(sim, me, other))
     }
 
     fn is_clear_of_fog(&mut self, sim: &dyn SimView, other: ObjectSlot, player_index: Int) -> Bool {

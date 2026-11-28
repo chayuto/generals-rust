@@ -1013,9 +1013,20 @@ int main(int argc, char** argv) {
         }
         const int units = static_cast<int>(g_ids.size());
 
-        std::fprintf(out, "%s{\"s\":%d,\"frame\":%u,\"seed\":%u,\"spawns\":\"%s\",\"cliff\":\"%s\",\"tape\":\"%s\"}",
+        // `PartitionFilterLineOfSight`, the terrain and obstacle test, over every pair.
+        // It is asked after the spawn tape is taken and leaves the scene as it was.
+        std::string sight;
+        const std::string spawn_tape = g_tape;
+        for (ObjectID a : g_ids) {
+            PartitionFilterLineOfSight filter(TheGameLogic->findObjectByID(a));
+            for (ObjectID b : g_ids)
+                if (a != b) sight += filter.allow(TheGameLogic->findObjectByID(b)) ? '1' : '0';
+        }
+        g_tape = spawn_tape;
+
+        std::fprintf(out, "%s{\"s\":%d,\"frame\":%u,\"seed\":%u,\"spawns\":\"%s\",\"cliff\":\"%s\",\"tape\":\"%s\",\"sight\":\"%s\"}",
                      first_row ? "" : ",\n", scenario, static_cast<unsigned>(frame), static_cast<unsigned>(seed),
-                     spawn_text.str().c_str(), cliff.c_str(), g_tape.c_str());
+                     spawn_text.str().c_str(), cliff.c_str(), g_tape.c_str(), sight.c_str());
         first_row = false;
 
         std::vector<std::string> last(units);
