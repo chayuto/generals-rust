@@ -359,11 +359,7 @@ impl Trial {
         let player = self.sim.world.players.player(index).expect("player");
         let energy = self
             .sim
-            .world
-            .player_energy
-            .get(&index)
-            .cloned()
-            .unwrap_or_default();
+            .world.players.player(index).map(|p| p.energy.clone()).unwrap_or_default();
         let _ = write!(
             out,
             "{},{},{},{} {},{},{},{} t",

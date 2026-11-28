@@ -426,9 +426,9 @@ impl ScriptWorld for LiveWorld<'_> {
         let energy = self
             .sim
             .world
-            .player_energy
-            .get(&player)
-            .cloned()
+            .players
+            .player(player)
+            .map(|p| p.energy.clone())
             .unwrap_or_default();
         PowerReading {
             production: energy.get_production(frame),

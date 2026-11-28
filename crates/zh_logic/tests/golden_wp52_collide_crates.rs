@@ -819,7 +819,9 @@ fn wp52_collide_crates_golden_vectors() {
         let rel_bc = rel_from_i32(get_i32(line, "rel_bc").expect("rel_bc"));
         api.ctx.world.player_relationships.insert((1, 2), rel_bc);
         api.ctx.world.player_relationships.insert((2, 1), rel_bc);
-        api.ctx.world.player_upgrades.clear();
+    for p in 0..16 {
+        api.ctx.world.players.player_mut(p).expect("player").upgrades_completed.clear();
+    }
 
         let cb_sel = get_u32(line, "cb_sel").expect("cb_sel");
         let cb_goal = get_i32(line, "cb_goal").expect("cb_goal") != 0;
@@ -1367,10 +1369,7 @@ fn wp52_collide_crates_golden_vectors() {
         api.ctx.set_player_cash(player_c, mn_m0);
         if mn_upg {
             api.ctx
-                .world
-                .player_upgrades
-                .entry(player_c)
-                .or_default()
+                .world.players.player_mut(player_c).expect("player").upgrades_completed
                 .set_flags(&upg_mask);
         }
         let mn_pos = Coord3D { x: 50.0, y: 10.0, z: 0.0 };

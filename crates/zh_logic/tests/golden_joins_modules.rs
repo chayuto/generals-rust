@@ -564,7 +564,7 @@ fn players_row(sim: &SimContext) -> String {
     for (p, team) in TEAMS.into_iter().enumerate() {
         let p = p as i32;
         let frame = sim.world.frame;
-        let energy = sim.world.player_energy.get(&p);
+        let energy = sim.world.players.player(p).map(|p| &p.energy);
         let (prod, cons) =
             energy.map_or((0, 0), |e| (e.get_production(frame), e.get_consumption()));
         let sk = sim.world.players.player(p).map(|p| p.score_keeper.clone()).unwrap_or_else(|| zh_logic::player::player::Player::blank(-1).score_keeper);

@@ -102,7 +102,10 @@ impl SimContext {
     ) {
         let frame = self.world.frame;
         let mut told = BrownOut::default();
-        change(self.energy_of(player), frame, &mut told);
+        let Some(p) = self.world.players.player_mut(player) else {
+            return;
+        };
+        change(&mut p.energy, frame, &mut told);
         if let Some(brownout) = told.0 {
             self.on_power_brown_out_change(player, brownout);
         }
@@ -112,7 +115,7 @@ impl SimContext {
     /// power state is brought up to date. `true` when it did.
     pub fn expire_power_sabotage(&mut self, player: Int) -> bool {
         let now = self.world.frame;
-        let Some(energy) = self.world.player_energy.get_mut(&player) else {
+        let Some(energy) = self.world.players.player_mut(player).map(|p| &mut p.energy) else {
             return false;
         };
         let till = energy.get_power_sabotaged_till_frame();

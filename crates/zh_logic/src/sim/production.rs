@@ -118,8 +118,8 @@ impl ThingTemplatePlayerView for PlayerView<'_> {
         let energy = self
             .ctx
             .controlling_player(self.team)
-            .and_then(|p| self.ctx.world.player_energy.get(&p));
-        energy.map_or(0.0, |e| e.get_energy_supply_ratio(self.ctx.world.frame))
+            .and_then(|p| self.ctx.world.players.player(p));
+        energy.map_or(0.0, |p| p.energy.get_energy_supply_ratio(self.ctx.world.frame))
     }
 
     fn count_objects_by_template_ref(&self, tmpl: ThingTemplateRef) -> Int {
@@ -406,8 +406,8 @@ impl SimContext {
         let empty = UpgradeMaskType::new();
         let mut mask = self
             .controlling_player(obj.team_id)
-            .and_then(|p| self.world.player_upgrades.get(&p))
-            .cloned()
+            .and_then(|p| self.world.players.player(p))
+            .map(|p| p.upgrades_completed.clone())
             .unwrap_or_default();
         mask.clear_and_set(&empty, &obj.upgrades_completed);
         mask.clear_and_set(&empty, template.upgrade_mask());
@@ -589,11 +589,9 @@ impl SimContext {
             self.controlling_player(team),
         ) {
             let empty = UpgradeMaskType::new();
-            self.world
-                .player_upgrades_in_progress
-                .entry(player_idx)
-                .or_default()
-                .clear_and_set(&empty, &mask);
+            if let Some(player) = self.world.players.player_mut(player_idx) {
+                player.upgrades_in_progress.clear_and_set(&empty, &mask);
+            }
         }
     }
 
@@ -604,13 +602,9 @@ impl SimContext {
             self.controlling_player(team),
         ) {
             let empty = UpgradeMaskType::new();
-            for masks in [
-                &mut self.world.player_upgrades_in_progress,
-                &mut self.world.player_upgrades,
-            ] {
-                if let Some(owned) = masks.get_mut(&player_idx) {
-                    owned.clear_and_set(&mask, &empty);
-                }
+            if let Some(player) = self.world.players.player_mut(player_idx) {
+                player.upgrades_in_progress.clear_and_set(&mask, &empty);
+                player.upgrades_completed.clear_and_set(&mask, &empty);
             }
         }
     }

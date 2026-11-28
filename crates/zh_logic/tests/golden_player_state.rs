@@ -196,7 +196,7 @@ impl Trial<'_> {
     fn player_row(&mut self, player: i32) -> String {
         let w = &self.sim.world;
         let money = w.players.player(player).map_or(0, |p| p.money.count_money());
-        let mut energy = w.player_energy.get(&player).cloned().unwrap_or_else(|| {
+        let mut energy = w.players.player(player).map(|p| &p.energy).cloned().unwrap_or_else(|| {
             let mut fresh = Energy::new();
             fresh.init(Some(player));
             fresh
@@ -205,12 +205,8 @@ impl Trial<'_> {
         let mut xs = XferSave::new();
         energy.xfer(&mut xs).expect("energy save");
         let save: String = xs.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
-        let done = w.player_upgrades.get(&player).cloned().unwrap_or_default();
-        let pending = w
-            .player_upgrades_in_progress
-            .get(&player)
-            .cloned()
-            .unwrap_or_default();
+        let done = w.players.player(player).map(|p| p.upgrades_completed.clone()).unwrap_or_default();
+        let pending = w.players.player(player).map(|p| p.upgrades_in_progress.clone()).unwrap_or_default();
         let score = w.players.player(player).map(|p| &p.score_keeper);
         let (earned, spent) = score.map_or((0, 0), |s| (s.total_money_earned, s.total_money_spent));
         let production = energy.get_production(frame);
@@ -245,16 +241,10 @@ impl Trial<'_> {
             let player = self.sim.player_index(team);
             let w = &self.sim.world;
             let money = w.players.player(player).map_or(0, |p| p.money.count_money());
-            let production = w
-                .player_energy
-                .get(&player)
+            let production = w.players.player(player).map(|p| &p.energy)
                 .map_or(0, |e| e.get_production(w.frame));
-            let done = w.player_upgrades.get(&player).cloned().unwrap_or_default();
-            let pending = w
-                .player_upgrades_in_progress
-                .get(&player)
-                .cloned()
-                .unwrap_or_default();
+            let done = w.players.player(player).map(|p| p.upgrades_completed.clone()).unwrap_or_default();
+            let pending = w.players.player(player).map(|p| p.upgrades_in_progress.clone()).unwrap_or_default();
             assert_eq!(
                 self.sim.player_money(team),
                 money,
@@ -550,7 +540,11 @@ fn no_team_means_no_player_state() {
     assert_eq!(sim.withdraw_player_money(none, 50), 0);
     assert_eq!(sim.player_money(none), 0);
     assert_eq!(sim.money_of(0), 100);
-    assert!(sim.world.player_upgrades.is_empty());
-    assert!(sim.world.player_upgrades_in_progress.is_empty());
-    assert!(sim.world.player_energy.is_empty());
+    for index in 0..16 {
+        let player = sim.world.players.player(index).expect("player");
+        assert_eq!(player.upgrades_completed, Default::default());
+        assert_eq!(player.upgrades_in_progress, Default::default());
+        assert_eq!(player.energy.get_power_sabotaged_till_frame(), 0);
+        assert_eq!(player.energy.get_production(sim.world.frame), 0);
+    }
 }

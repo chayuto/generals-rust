@@ -746,10 +746,7 @@ fn wp52_collide_sabotage_golden_vectors() {
         let player_b = api.ctx.player_index(team_b);
         let player_c = api.ctx.player_index(team_c);
         api.ctx
-            .world
-            .player_energy
-            .entry(player_c)
-            .or_default()
+            .world.players.player_mut(player_c).expect("player").energy
             .set_power_sabotaged_till_frame(0);
 
         // 1. SabotageCommandCenterCrateCollide
@@ -905,9 +902,7 @@ fn wp52_collide_sabotage_golden_vectors() {
         let pow_dest = is_destroyed_i32(&api, s_pow);
         let pow_until = api
             .ctx
-            .world
-            .player_energy
-            .get(&player_c)
+            .world.players.player(player_c).map(|p| &p.energy)
             .map_or(0, |e| e.get_power_sabotaged_till_frame());
         let (pow_crc, pow_xfer) = snapshot_mod(&mut api, m_pow);
         assert_eq!(

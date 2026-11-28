@@ -364,7 +364,9 @@ fn wp52_die_golden_vectors() {
         let frame0 = get_u32(line, "frame").expect("frame");
         api.ctx.world.frame = frame0;
 
-        api.ctx.world.player_upgrades.clear();
+    for p in 0..16 {
+        api.ctx.world.players.player_mut(p).expect("player").upgrades_completed.clear();
+    }
         for p in 0..16 {
             let player = api.ctx.world.players.player_mut(p).expect("player");
             player.sciences.clear();
@@ -503,10 +505,7 @@ fn wp52_die_golden_vectors() {
         if fx_conf_ply {
             let player_b = api.ctx.player_index(team_b);
             api.ctx
-                .world
-                .player_upgrades
-                .entry(player_b)
-                .or_default()
+                .world.players.player_mut(player_b).expect("player").upgrades_completed
                 .set_flags(&upg_conf_mask);
         }
         api.ctx.world.triggered_fx_lists.clear();

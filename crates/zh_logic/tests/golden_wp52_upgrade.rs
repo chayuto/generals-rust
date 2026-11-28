@@ -202,7 +202,9 @@ End
     assert_eq!(sim.player_energy_production(team), 17);
 
     // Clear player_energy and verify load_post_process restores the bonus when enabled.
-    sim.world.player_energy.clear();
+    for p in 0..16 {
+        sim.world.players.player_mut(p).expect("player").energy.init(Some(p));
+    }
     let pp_slot = find_upgrade_module(&sim, o, 0);
     sim.dispatch_module(pp_slot, |m, sim_a, ctx| {
         m.load_post_process(sim_a, ctx);
@@ -486,7 +488,9 @@ End
         let want_ws = get_i32(line, "ws").unwrap();
 
         sim.world.frame = frame0;
-        sim.world.player_upgrades.clear();
+    for p in 0..16 {
+        sim.world.players.player_mut(p).expect("player").upgrades_completed.clear();
+    }
         for p in 0..16 {
             let player = sim.world.players.player_mut(p).expect("player");
             player.sciences.clear();
@@ -495,7 +499,9 @@ End
             player.radar_disabled = false;
             player.production_changes.clear();
         }
-        sim.world.player_energy.clear();
+    for p in 0..16 {
+        sim.world.players.player_mut(p).expect("player").energy.init(Some(p));
+    }
         sim.world.registered_supply_centers.clear();
         sim.world.spawned_ocls.clear();
         sim.world.triggered_fx_lists.clear();

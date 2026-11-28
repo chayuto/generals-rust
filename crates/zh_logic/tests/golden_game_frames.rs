@@ -167,7 +167,7 @@ fn frame_rows(game: &GameStart, tags: &mut BTreeMap<i32, String>) -> Vec<String>
         *row = format!("{head}\t{members}");
     }
     for i in 0..game.sim.world.players.player_count() {
-        let (production, consumption) = sim.world.player_energy.get(&i).map_or((0, 0), |energy| {
+        let (production, consumption) = sim.world.players.player(i).map(|p| &p.energy).map_or((0, 0), |energy| {
             (
                 energy.get_production(sim.world.frame),
                 energy.get_consumption(),

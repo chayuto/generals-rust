@@ -679,7 +679,7 @@ fn run_deposit(sim: &mut SimContext, v: &Vector<'_>) -> usize {
                     .clone();
                 let none = Default::default();
                 // The reference gives the player the upgrade without refreshing modules.
-                let owned = sim.world.player_upgrades.entry(op[1] as i32).or_default();
+                let owned = &mut sim.world.players.player_mut(op[1] as i32).expect("player").upgrades_completed;
                 if op[3] != 0 {
                     owned.clear_and_set(&none, &mask);
                 } else {

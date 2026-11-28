@@ -1006,9 +1006,6 @@ fn sync_players(sim: &mut SimContext, stores: &StartupStores) {
         let Some(player) = players.player(index) else {
             continue;
         };
-        sim.world
-            .player_upgrades
-            .insert(index, player.upgrades_completed.clone());
         for other in 0..players.player_count() {
             if let Some(r) = player.player_relations.get(other as u32) {
                 sim.world.player_relationships.insert((index, other), r);

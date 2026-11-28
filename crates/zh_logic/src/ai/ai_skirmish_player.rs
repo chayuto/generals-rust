@@ -459,9 +459,9 @@ pub(super) fn process_base_building(cx: &mut BuildContext<'_>, player: PlayerInd
     let under_powered = cx
         .sim
         .world
-        .player_energy
-        .get(&player)
-        .is_some_and(|e| e.has_sufficient_power(frame) == FALSE);
+        .players
+        .player(player)
+        .is_some_and(|p| p.energy.has_sufficient_power(frame) == FALSE);
     let mut power_under_construction = false;
     let mut at = 0;
     while let Some(name) = entry(cx, player, at).map(|e| e.template_name.clone()) {

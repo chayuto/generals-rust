@@ -1048,7 +1048,9 @@ fn golden_wp53_a_all_1000_seeds() {
 
         destroy_and_flush_all(&mut sim);
         sim.world.next_object_id = 1;
-        sim.world.player_upgrades.clear();
+    for p in 0..16 {
+        sim.world.players.player_mut(p).expect("player").upgrades_completed.clear();
+    }
 
         let frame0 = inp.get("frame").as_u32();
         let logic_seed = inp.get("logic_seed").as_u32();
@@ -1677,10 +1679,7 @@ fn golden_wp53_a_all_1000_seeds() {
                 .clone();
             let empty = UpgradeMaskType::new();
             let player_a = sim.player_index(TEAM_A);
-            sim.world
-                .player_upgrades
-                .entry(player_a)
-                .or_default()
+            sim.world.players.player_mut(player_a).expect("player").upgrades_completed
                 .clear_and_set(&empty, &mask);
         }
         let f2_crc = crc_module(&mut sim, f2_slot);

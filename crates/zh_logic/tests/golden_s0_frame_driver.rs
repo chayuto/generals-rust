@@ -501,9 +501,7 @@ fn observe(watch: &mut Watch, tape: &TapeLock, sim: &mut SimContext, hook: &str,
         (t.head, t.tail)
     };
     let sabotage = |team: TeamId| {
-        sim.world
-            .player_energy
-            .get(&sim.player_index(team))
+        sim.world.players.player(sim.player_index(team)).map(|p| &p.energy)
             .map_or(0, |e| e.get_power_sabotaged_till_frame())
     };
     let global = format!(
@@ -732,9 +730,7 @@ fn served(line_out: &str, head: &mut u32) -> u32 {
 /// The sabotage end of the two watched players.
 fn sabotage(sim: &SimContext) -> [u32; 2] {
     [TEAMS[0], TEAMS[1]].map(|team| {
-        sim.world
-            .player_energy
-            .get(&sim.player_index(team))
+        sim.world.players.player(sim.player_index(team)).map(|p| &p.energy)
             .map_or(0, |e| e.get_power_sabotaged_till_frame())
     })
 }

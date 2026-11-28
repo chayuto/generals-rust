@@ -254,7 +254,9 @@ End",
 
         // Sync world clock & player state matching C++ seed setup.
         sim.world.frame = frame;
-        sim.world.player_upgrades.clear();
+    for p in 0..16 {
+        sim.world.players.player_mut(p).expect("player").upgrades_completed.clear();
+    }
         sim.player_of_team_mut(team_a).expect("player").is_preorder = preorder;
         sim.world.registered_supply_centers.clear();
         sim.world.registered_supply_warehouses.clear();

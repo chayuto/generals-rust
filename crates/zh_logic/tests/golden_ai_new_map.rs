@@ -280,7 +280,7 @@ fn rows(sim: &SimContext, players: &PlayerList) -> Vec<String> {
             score.map_or(0, |s| s.total_units_built),
             score.map_or(0, |s| s.total_buildings_built),
         ));
-        let energy = sim.world.player_energy.get(&i);
+        let energy = sim.world.players.player(i).map(|p| &p.energy);
         out.push(format!(
             "energy\t{i}\t{}\t{}",
             energy.map_or(0, |e| e.get_production(sim.world.frame)),

@@ -299,6 +299,9 @@ impl Player {
         let money = Money::new();
         let mut score_keeper = ScoreKeeper::new();
         score_keeper.reset(index);
+        // `Player::init` makes every player the owner of its pool.
+        let mut energy = Energy::new();
+        energy.init(Some(index));
         Self {
             index,
             template_name_key: None,
@@ -325,7 +328,7 @@ impl Player {
             radar_disabled: false,
             upgrades_in_progress: UpgradeMaskType::default(),
             upgrades_completed: UpgradeMaskType::default(),
-            energy: Energy::new(),
+            energy,
             team_prototypes: Vec::new(),
             build_list: Vec::new(),
             ai: None,

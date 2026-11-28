@@ -462,7 +462,7 @@ fn more_queries(game: &mut GameStart, human: Int, computer: Int) {
         .collect();
     let start_index = game.sim.world.players.player(computer).unwrap().mp_start_index;
     let frame = game.sim.world.frame;
-    let energy = game.sim.world.player_energy[&human].clone();
+    let energy = game.sim.world.players.player(human).expect("player").energy.clone();
     let (id, slot) = objects_of(game, human)
         .into_iter()
         .find(|&(_, s)| !is_kind(game, s, KindOfType::Structure))

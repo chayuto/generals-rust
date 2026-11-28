@@ -26,7 +26,7 @@ use crate::combat::damage::{DamageInfo, PlayerMaskType, PLAYERMASK_ALL};
 use crate::combat::damage_fx::DamageFXStore;
 use crate::combat::locomotor::{Locomotor, LocomotorStore};
 use crate::combat::locomotor_set::LocomotorSetType;
-use crate::economy::energy::{Energy, EnergyObjectInfo};
+use crate::economy::energy::EnergyObjectInfo;
 use crate::object::object_script_status_bits::OBJECT_STATUS_SCRIPT_UNSELLABLE;
 use crate::economy::MAX_PLAYER_COUNT;
 use crate::gamelogic::global_data::{BodyDamageType, GlobalData, WeaponBonusConditionType};
@@ -2459,8 +2459,6 @@ pub struct SimWorld {
     /// listed nowhere counts as a prototype of its own, after the listed ones.
     pub player_team_prototypes: BTreeMap<Int, Vec<Vec<TeamId>>>,
     pub player_relationships: BTreeMap<(Int, Int), Relationship>,
-    /// `Player::m_upgradesCompleted` by player index.
-    pub player_upgrades: BTreeMap<Int, UpgradeMaskType>,
     pub registered_supply_centers: Vec<ObjectId>,
     pub registered_supply_warehouses: Vec<ObjectId>,
     pub kills_scored: Vec<(ObjectId, ObjectId)>,
@@ -2474,8 +2472,6 @@ pub struct SimWorld {
     pub triggered_damage_fx: Vec<(String, DamageType, Real, ObjectId, ObjectId)>,
     pub player_is_human: BTreeMap<TeamId, Bool>,
     pub team_is_neutral: BTreeMap<TeamId, Bool>,
-    /// `Player::m_energy` by player index.
-    pub player_energy: BTreeMap<Int, Energy>,
     /// `Player::m_ai` of every computer player, by player index.
     pub ai_players: BTreeMap<Int, crate::ai::ai_player::AiPlayer>,
     pub player_captured_objects: BTreeMap<TeamId, Int>,
@@ -2575,8 +2571,6 @@ pub struct SimWorld {
     pub control_bar_overrides: BTreeMap<ControlBarOverrideKey, Option<CommandButtonId>>,
     /// Skill points awarded by modules, by player index.
     pub skill_points_awarded: BTreeMap<Int, Int>,
-    /// `Player::m_upgradesInProgress` by player index.
-    pub player_upgrades_in_progress: BTreeMap<Int, UpgradeMaskType>,
     /// `GameLogic::m_thingTemplateBuildableOverrides` by template name.
     pub buildable_overrides: BTreeMap<String, crate::object::thing_template::BuildableStatus>,
     /// `GameLogic::getSuperweaponRestriction`.
@@ -2623,7 +2617,6 @@ impl SimWorld {
             team_members: BTreeMap::new(),
             player_team_prototypes: BTreeMap::new(),
             player_relationships: BTreeMap::new(),
-            player_upgrades: BTreeMap::new(),
             registered_supply_centers: Vec::new(),
             registered_supply_warehouses: Vec::new(),
             kills_scored: Vec::new(),
@@ -2636,7 +2629,6 @@ impl SimWorld {
             triggered_damage_fx: Vec::new(),
             player_is_human: BTreeMap::new(),
             team_is_neutral: BTreeMap::new(),
-            player_energy: BTreeMap::new(),
             ai_players: BTreeMap::new(),
             player_captured_objects: BTreeMap::new(),
             special_power_uses_delay: TRUE,
@@ -2710,7 +2702,6 @@ impl SimWorld {
             action_permissions: BTreeSet::new(),
             control_bar_overrides: BTreeMap::new(),
             skill_points_awarded: BTreeMap::new(),
-            player_upgrades_in_progress: BTreeMap::new(),
             buildable_overrides: BTreeMap::new(),
             superweapon_restriction: 0,
             scoring_enabled: TRUE,
@@ -3090,18 +3081,6 @@ impl SimContext {
         (team_id != TeamId::INVALID).then(|| self.player_index_for_team(team_id))
     }
 
-    /// `Player::getEnergy`. `Player::init` makes every player the owner of its pool.
-    pub(crate) fn energy_of(&mut self, player_idx: Int) -> &mut Energy {
-        self.world
-            .player_energy
-            .entry(player_idx)
-            .or_insert_with(|| {
-                let mut energy = Energy::new();
-                energy.init(Some(player_idx));
-                energy
-            })
-    }
-
     /// Records the player of a team, and with it `Object::isNeutralControlled`.
     fn assign_team_player(&mut self, team_id: TeamId, player_idx: Int) {
         let neutral = self.player_index_for_team(self.world.neutral_team_id);
@@ -3217,14 +3196,10 @@ impl SimContext {
     /// already had the upgrade. The member lists are walked live (`DLINK_ITERATOR`).
     fn complete_player_upgrade(&mut self, player_idx: Int, mask: &UpgradeMaskType) {
         let empty = UpgradeMaskType::new();
-        if let Some(pending) = self.world.player_upgrades_in_progress.get_mut(&player_idx) {
-            pending.clear_and_set(mask, &empty);
+        if let Some(player) = self.world.players.player_mut(player_idx) {
+            player.upgrades_in_progress.clear_and_set(mask, &empty);
+            player.upgrades_completed.clear_and_set(&empty, mask);
         }
-        self.world
-            .player_upgrades
-            .entry(player_idx)
-            .or_default()
-            .clear_and_set(&empty, mask);
         let teams: Vec<TeamId> = self
             .player_prototypes(player_idx)
             .into_iter()
@@ -5426,8 +5401,8 @@ impl SimView for SimContext {
     fn player_has_upgrade(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
         if self
             .controlling_player(team_id)
-            .and_then(|p| self.world.player_upgrades.get(&p))
-            .is_some_and(|owned| owned.test_for_any(mask) != FALSE)
+            .and_then(|p| self.world.players.player(p))
+            .is_some_and(|p| p.upgrades_completed.test_for_any(mask) != FALSE)
         {
             TRUE
         } else {
@@ -5898,8 +5873,8 @@ impl SimView for SimContext {
 
     fn player_energy_production(&self, team_id: TeamId) -> Int {
         self.controlling_player(team_id)
-            .and_then(|p| self.world.player_energy.get(&p))
-            .map_or(0, |e| e.get_production(self.world.frame))
+            .and_then(|p| self.world.players.player(p))
+            .map_or(0, |p| p.energy.get_production(self.world.frame))
     }
 
     fn player_radar_counts(&self, team_id: TeamId) -> (Int, Int) {
@@ -6243,8 +6218,8 @@ impl SimView for SimContext {
     fn player_has_upgrade_in_production(&self, team_id: TeamId, mask: &UpgradeMaskType) -> Bool {
         Bool::from(
             self.controlling_player(team_id)
-                .and_then(|p| self.world.player_upgrades_in_progress.get(&p))
-                .is_some_and(|owned| owned.test_for_all(mask) != FALSE),
+                .and_then(|p| self.world.players.player(p))
+                .is_some_and(|p| p.upgrades_in_progress.test_for_all(mask) != FALSE),
         )
     }
 
@@ -9055,7 +9030,9 @@ impl SimApi for SimContext {
     fn sabotage_power(&mut self, team_id: TeamId, frames: UnsignedInt) {
         let until = self.world.frame.wrapping_add(frames);
         if let Some(p) = self.controlling_player(team_id) {
-            self.energy_of(p).set_power_sabotaged_till_frame(until);
+            if let Some(player) = self.world.players.player_mut(p) {
+                player.energy.set_power_sabotaged_till_frame(until);
+            }
             // `SabotagePowerPlantCrateCollide::executeCrateBehavior`.
             self.on_power_brown_out_change(p, TRUE);
         }
@@ -9748,9 +9725,9 @@ impl SimApi for SimContext {
         let empty_mask = UpgradeMaskType::new();
         let mut mask_to_check = self
             .world
-            .player_upgrades
-            .get(&player_idx)
-            .cloned()
+            .players
+            .player(player_idx)
+            .map(|p| p.upgrades_completed.clone())
             .unwrap_or_default();
         mask_to_check.clear_and_set(&empty_mask, &obj_mask);
         self.dispatch_attempt_upgrade(owner, &mask_to_check);

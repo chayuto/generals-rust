@@ -655,7 +655,7 @@ fn players_text(sim: &SimContext) -> String {
         let built = sim
             .world.players.player(player).map(|p| &p.score_keeper)
             .map_or(0, |s| s.total_buildings_built);
-        let (production, consumption) = sim.world.player_energy.get(&player).map_or((0, 0), |e| {
+        let (production, consumption) = sim.world.players.player(player).map(|p| &p.energy).map_or((0, 0), |e| {
             (e.get_production(sim.world.frame), e.get_consumption())
         });
         let _ = write!(text, "{built},{production},{consumption};");

@@ -1097,7 +1097,7 @@ fn set_upgrade(sim: &mut SimContext, which: i64, on: bool) {
         .clone();
     let team = TEAMS[if which < 2 { 1 } else { 2 }];
     let player = sim.player_index(team);
-    let owned = sim.world.player_upgrades.entry(player).or_default();
+    let owned = &mut sim.world.players.player_mut(player).expect("player").upgrades_completed;
     if on {
         owned.set_flags(&mask);
     } else {

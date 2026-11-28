@@ -702,7 +702,7 @@ impl Run {
                 let until = if y == 0 { 0 } else { sim.world.frame + y };
                 let energy = Energy::from_parts(prod, cons, until, Some(1));
                 let player = sim.player_index(TEAM);
-                sim.world.player_energy.insert(player, energy);
+                sim.world.players.player_mut(player).expect("player").energy = energy;
             }
             13 => {
                 if a != 0 {
@@ -915,7 +915,7 @@ fn start(sim: &mut SimContext, variant: usize, frame: u32, cfg: &[u32]) -> Run {
     let (prod, cons) = ENERGY[c[11]];
     if (prod, cons) != (0, 0) {
         let energy = Energy::from_parts(prod, cons, 0, Some(1));
-        sim.world.player_energy.insert(player, energy);
+        sim.world.players.player_mut(player).expect("player").energy = energy;
     }
     let factory = spawn_on(sim, &format!("F{variant}"), TEAM);
     clear_log();
