@@ -57,6 +57,25 @@ parity test. It needs the retail game, so CI skips it. How many games agree for 
 | human positions | 21 / 24 | 172 to 270 |
 | human AI state | 22 / 24 | 185 to 223 |
 
+## Slice L3 (2026-11-28, after the rest of this note)
+
+Done: the `ObjectCreationList` runtime (`PKT-391`), the model bone catalog (barrels,
+launch and turret bones, dock and spawn bones) and obstacle line of sight for special
+ability range. `golden_game_frames` did not move. L4 has not been started. The sections
+below predate L1 to L3; check `git log` before taking an item from them.
+
+Open from L3:
+
+- Model bones, not ported: transition states, map time of day and weather, disguises,
+  bones from `map.ini`, `MinLODRequired`, runtime name-key interning, INI validation
+  errors, and other users of bones (garrison, contain exits, ropes).
+- Model bones mutation: 60 of 102 mutants tried. Unguarded survivors: the spawn point
+  start index, aggregate sub-model loading, and the filter for non-model draw modules.
+- `ObjectCreationList`: payload delivery is only recorded (`DeliverPayloadAIUpdate`, L8).
+  No mutation result was recorded for the slice.
+- `golden_game_frames` and the other retail-data suites now run on `arm64` only: CI has
+  no game data.
+
 ## What to do next
 
 In order of what the comparison shows. Rerun it after each merge; the list moves.
@@ -75,7 +94,7 @@ In order of what the comparison shows. Rerun it after each merge; the list moves
 4. Small causes: `StructureCollapseUpdate`; `RailroadBehavior` (extends
    `PhysicsBehavior`, replacing its update, collision and save; `createCarriages` and
    train movement are behind a locomotive flag); the random draws of `BoneFXUpdate`
-   creation lists (`spawn_ocl` only records them); one car in `tournament_city` with
+   creation lists (not rechecked since `spawn_ocl` began creating them); one car in `tournament_city` with
    angle -pi against +pi at frame 2.
 5. Script actions and conditions still counted as unported (`GameScripts::unported`,
    printed with `GAME_FRAMES_DUMP`), among them `BUILD_TEAM`,
@@ -85,9 +104,8 @@ In order of what the comparison shows. Rerun it after each merge; the list moves
    Worker's supply half is missing); S17 aircraft and missiles (**missiles never
    detonate**); S18 guard states; S19; S20. Also squad, hunt and attack-area states and
    turret `transferAttack`. Check `AI_PORT_PLAN.md` "Done" notes before starting.
-7. **Terrain never blocks sight** in the sim.
-8. **A game loop.** The frame hookup (`FrameSeams`) lives in the test; nothing owns it.
-9. **A game-wide CRC.** Stage 1 is done only when a Rust headless replay matches the C++
+7. **A game loop.** The frame hookup (`FrameSeams`) lives in the test; nothing owns it.
+8. **A game-wide CRC.** Stage 1 is done only when a Rust headless replay matches the C++
    CRC at every checkpoint.
 
 Asset readers (stage 2) touch separate code and can run beside the simulation.
