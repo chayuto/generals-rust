@@ -2326,6 +2326,8 @@ pub trait SimApi: SimView {
     );
     /// `Pathfinder::removeObjectFromPathfindMap`.
     fn pathfinder_remove_object(&mut self, owner: ObjectSlot);
+    /// `Object::leaveGroup`.
+    fn leave_ai_group(&mut self, owner: ObjectSlot);
     /// `BoneFXUpdate::stopAllBoneFX`; the call is also recorded.
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot);
     /// `InGameUI::addFloatingText` of an "add cash" message.
@@ -4491,25 +4493,24 @@ impl SimContext {
         });
     }
 
-    /// Spawns an object from `tmpl` with explicit `initial_status` flags matching
-    /// `ThingFactory::newObject(tmpl, team, statusBits)`.
-    fn build_first_weapon_set(&mut self, owner: ObjectSlot) {
+    /// `m_weaponSet.updateWeaponSet(this)`.
+    fn update_weapon_set(&mut self, owner: ObjectSlot) {
         let frame = self.world.frame;
         let Some(obj) = self.world.objects.get_mut(owner) else {
             return;
         };
-        if obj.weapon_set.cur_weapon_template_set.is_some() {
-            return;
-        }
         let set = obj
             .thing
             .template_override()
             .get_final(&self.rules.thing_factory)
             .and_then(|t| t.find_weapon_template_set(&obj.weapon_set_flags));
         if let Some(set) = set {
-            obj.weapon_set.init_from_template_set(set, frame);
+            obj.weapon_set.update_weapon_set(set, frame);
         }
     }
+
+    /// Spawns an object from `tmpl` with explicit `initial_status` flags matching
+    /// `ThingFactory::newObject(tmpl, team, statusBits)`.
 
     pub fn spawn_object_with_status(
         &mut self,
@@ -4534,16 +4535,13 @@ impl SimContext {
                     t.get_template_geometry_info().clone(),
                     t.is_trainable(),
                     t.get_behavior_module_info().nuggets().to_vec(),
-                    t.find_weapon_template_set(&crate::rules::combat_types::WeaponSetFlags::new())
-                        .cloned(),
                     vision_range,
                     shroud_clearing_range,
                 )
             });
-        let (geom, trainable, nuggets, wts, vision_range, shroud_clearing_range) = match tmpl_data
-        {
-            Some((g, tr, n, w, vr, scr)) => (g, tr, n, w, vr, scr),
-            None => (GeometryInfo::default(), FALSE, Vec::new(), None, 0.0, 0.0),
+        let (geom, trainable, nuggets, vision_range, shroud_clearing_range) = match tmpl_data {
+            Some(data) => data,
+            None => (GeometryInfo::default(), FALSE, Vec::new(), 0.0, 0.0),
         };
 
         let mut record = ObjectRecord::new(id, tmpl, team, geom);
@@ -4704,15 +4702,7 @@ impl SimContext {
 
         // C++ builds the weapon set last (`updateWeaponSet` closes `initObject`), so module
         // constructors neither see its weapons nor share a reload with them.
-        if let Some(ref set) = wts {
-            let frame = self.world.frame;
-            if let Some(o) = self.world.objects.get_mut(slot) {
-                // A weapon set flag set while the object was being made built it already.
-                if o.weapon_set.cur_weapon_template_set.is_none() {
-                    o.weapon_set.init_from_template_set(set, frame);
-                }
-            }
-        }
+        self.update_weapon_set(slot);
 
         // The original creates the object at the origin and positions it afterwards, so
         // `OFF_MAP` is only evaluated for a position that differs from the origin.
@@ -8536,11 +8526,7 @@ impl SimApi for SimContext {
                 }
             }
         }
-        // `updateWeaponSet` builds the weapons at the first flag, also from a module's
-        // `onObjectCreated`. Later changes of set are not modelled.
-        if !has_drawable {
-            self.build_first_weapon_set(owner);
-        }
+        self.update_weapon_set(owner);
     }
 
     fn set_max_health(
@@ -11642,6 +11628,12 @@ impl SimApi for SimContext {
         self.classify_on_pathfind_map(owner, false);
     }
 
+    fn leave_ai_group(&mut self, owner: ObjectSlot) {
+        if let Some(id) = self.world.objects.id_of(owner) {
+            crate::ai::ai_group::leave_group(self, id);
+        }
+    }
+
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
         let key = self.rules.name_keys.name_to_key("BoneFXUpdate");
         let has_module = self.has_module_by_name_key(owner, key);
@@ -14186,6 +14178,10 @@ impl SimApi for MockSimApi {
 
     fn pathfinder_remove_object(&mut self, owner: ObjectSlot) {
         self.ctx.pathfinder_remove_object(owner);
+    }
+
+    fn leave_ai_group(&mut self, owner: ObjectSlot) {
+        self.ctx.leave_ai_group(owner);
     }
 
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {

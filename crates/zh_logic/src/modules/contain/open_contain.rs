@@ -708,10 +708,17 @@ fn sync_contain_sidecar<C: ContainBehavior + ?Sized>(
     );
 }
 
-/// The partition half of `OpenContain::addOrRemoveObjFromWorld`. Riders that `obj`
+/// `OpenContain::addOrRemoveObjFromWorld` without the drawable. Riders that `obj`
 /// holds without enclosing them come and go with it.
 pub(crate) fn add_or_remove_obj_from_world(sim: &mut dyn SimApi, obj: ObjectSlot, add: Bool) {
-    sim.set_in_partition(obj, add);
+    if add != FALSE {
+        sim.set_in_partition(obj, TRUE);
+        sim.pathfinder_add_object(obj);
+    } else {
+        sim.leave_ai_group(obj);
+        sim.set_in_partition(obj, FALSE);
+        sim.pathfinder_remove_object(obj);
+    }
     for id in sim.contain_items(obj) {
         if let Some(rider) = sim.find_object(id) {
             if sim.contain_is_enclosing_container_for(obj, rider) == FALSE {

@@ -351,6 +351,22 @@ impl WeaponSet {
         self.cur_weapon_locked_status = WeaponLockType::NotLocked;
         self.rebuild_masks();
     }
+    /// `WeaponSet::updateWeaponSet` once the template set for the owner's flags is
+    /// found. The set already in use is left alone; a new one starts with full clips.
+    pub fn update_weapon_set(&mut self, set: &WeaponTemplateSet, now: UnsignedInt) {
+        if self.cur_weapon_template_set.as_ref().is_some_and(|cur| {
+            cur.types == set.types && cur.thing_template_name == set.thing_template_name
+        }) {
+            return;
+        }
+        let kept = (set.is_weapon_lock_shared_across_sets() != FALSE)
+            .then_some((self.cur_weapon, self.cur_weapon_locked_status));
+        self.init_from_template_set(set, now);
+        if let Some((cur, lock)) = kept {
+            self.cur_weapon = cur;
+            self.cur_weapon_locked_status = lock;
+        }
+    }
     /// `clearLeechRangeModeForAllWeapons`.
     pub fn clear_leech_range_mode_for_all_weapons(&mut self) {
         for w in self.weapons.iter_mut().flatten() {
@@ -910,9 +926,7 @@ impl Snapshot for WeaponSet {
             let mut tt_name = String::new();
             let mut ws_flags = WeaponSetFlags::new();
             xfer.xfer_ascii_string(&mut tt_name)?;
-            let mut ws_bits = ws_flags.to_unsigned_int();
-            xfer.xfer_unsigned_int(&mut ws_bits)?;
-            ws_flags = WeaponSetFlags::from_unsigned_int(ws_bits);
+            ws_flags.xfer_named(xfer, &WEAPON_SET_NAMES)?;
             if !tt_name.is_empty() {
                 if let Some(t) = self.cur_weapon_template_set.as_mut() { t.thing_template_name = tt_name; t.types = ws_flags; }
             } else {
@@ -921,10 +935,9 @@ impl Snapshot for WeaponSet {
         } else {
             let mut tt_name = self.cur_weapon_template_set.as_ref().map_or(String::new(), |t| t.thing_template_name.clone());
             if tt_name.is_empty() && self.cur_weapon_template_set.is_some() { tt_name = "DummyThing".to_string(); }
-            let ws_flags = self.cur_weapon_template_set.as_ref().map_or_else(WeaponSetFlags::new, |t| t.types.clone());
+            let mut ws_flags = self.cur_weapon_template_set.as_ref().map_or_else(WeaponSetFlags::new, |t| t.types.clone());
             xfer.xfer_ascii_string(&mut tt_name)?;
-            let mut ws_bits = ws_flags.to_unsigned_int();
-            xfer.xfer_unsigned_int(&mut ws_bits)?;
+            ws_flags.xfer_named(xfer, &WEAPON_SET_NAMES)?;
         }
 
         for i in 0..WEAPONSLOT_COUNT {
@@ -936,10 +949,7 @@ impl Snapshot for WeaponSet {
                     if let Some(template) = template { self.weapons[i] = Some(Weapon::new(template, WeaponSlotType::from_i32(i as i32).unwrap_or(WeaponSlotType::Primary), 0)); }
                 }
                 if let Some(w) = self.weapons[i].as_mut() {
-                    let size = xfer.begin_block()?;
-                    let _ = size;
                     xfer.xfer_snapshot(w)?;
-                    xfer.end_block()?;
                 }
             }
         }
@@ -959,11 +969,8 @@ impl Snapshot for WeaponSet {
             xfer.xfer_bool(&mut self.has_damage_weapon)?;
             xfer.xfer_bool(&mut self.has_damage_weapon)?;
         }
-        let mut damage_bits = self.total_damage_type_mask.to_unsigned_int();
-        xfer.xfer_unsigned_int(&mut damage_bits)?;
-        if xfer.mode() == XferMode::Load {
-            self.total_damage_type_mask = DamageTypeFlags::from_unsigned_int(damage_bits);
-        }
+        self.total_damage_type_mask
+            .xfer_named(xfer, &zh_common::ini::DAMAGE_TYPE_NAMES)?;
         Ok(())
     }
 }

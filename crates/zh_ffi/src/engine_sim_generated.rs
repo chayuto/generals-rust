@@ -1645,6 +1645,9 @@ impl SimApi for EngineSim<'_> {
     fn pathfinder_remove_object(&mut self, owner: ObjectSlot) {
         not_wired("pathfinder_remove_object")
     }
+    fn leave_ai_group(&mut self, owner: ObjectSlot) {
+        not_wired("leave_ai_group")
+    }
     fn stop_all_bone_fx(&mut self, owner: ObjectSlot) {
         not_wired("stop_all_bone_fx")
     }
