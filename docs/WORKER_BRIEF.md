@@ -25,6 +25,9 @@ quirks and bugs included.
   plain, separate commands run from your worktree.
 - That check also reads a `Source/` path in a shell command as the `source` builtin. Read
   such files with your file reading tool. Never glob or respell the name to get past it.
+- To **search** that C++, use the committed packet documents: `packets/phase<N>/<PKT>_*.md`
+  carry the stripped source in their "Reference C++ Source" section, and `grep` and `sed`
+  work on them. Check the reference file with the reading tool where the packet is unclear.
 - Retail data (`~/Games/generalszh`) is read in place. Never commit game data or anything
   that reproduces its content; digests and counts are fine.
 - No GUI windows, no `open`. Always `-headless` with `SDL_VIDEODRIVER=dummy` and
