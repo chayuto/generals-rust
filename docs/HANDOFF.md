@@ -82,11 +82,17 @@ Part 1 done: the player list is `SimWorld::players`; sciences, radar, handicap, 
 and time changes, bounty, attacked-by, preorder and shared power timers live in `Player`;
 the power brown-out change is wired (`golden_player_holdings`).
 
+Part 2 done: money, upgrade masks, energy, score keeper, academy statistics, battle plans,
+side, colour and playability are `Player` members; the maps are gone, as is the captured
+count the reference does not have. Income buckets now rotate in the frame, and `Money`
+names player 0 until a template sets it up (harness worlds without templates set it).
+
 Open:
 
-- Still outside `Player`: money, upgrades, energy, score keeper, academy, battle plans (the
-  copies in `Player` are stale), and human, AI, side, colour, playable, captured count and
-  relations. These must move before `Player::xfer`/`crc`.
+- Still outside `Player`: relations, human (`player_is_human`) and skirmish AI
+  (`skirmish_ai_teams`). These must move before `Player::xfer`/`crc`.
+- Unverified: academy init values and playability of a non-default team have no vectors;
+  `AcademyStats::update` is not called.
 - `set_object_team_same_player` skips the power adjustment, module science grants do not
   notify scripts, and the `PlayerWorld` brown-out hook is a stub.
 - Unverified: brown-out during an executing module, team handover, construction.
