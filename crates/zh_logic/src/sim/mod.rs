@@ -548,6 +548,8 @@ pub struct RulesRegistry {
     pub particle_system_names: BTreeSet<String>,
     /// `TheControlBar`'s buttons and sets.
     pub command_store: CommandStore,
+    /// The bones of the models, for games started with them.
+    pub model_bones: Option<std::sync::Arc<crate::object::model_bones::ModelBoneCatalog>>,
 }
 
 impl Default for RulesRegistry {
@@ -625,6 +627,7 @@ impl RulesRegistry {
             ocl_names: BTreeSet::new(),
             particle_system_names: BTreeSet::new(),
             command_store: CommandStore::default(),
+            model_bones: None,
         }
     }
 

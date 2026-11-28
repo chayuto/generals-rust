@@ -1,8 +1,14 @@
 //! The draw module bone data and queries against the reference
 //! (`tests/cpp_harness/gen_model_bones.cpp`). Rows carry their own INI.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use zh_common::golden_json::{decode_hex_bytes, get_str};
 use zh_common::ini::{IniLoadType, IniReader};
+use zh_common::math::{Coord3D, Matrix3D};
+use zh_logic::combat::turret_ai::WhichTurretType;
+use zh_logic::object::model_bones::{AttachBoneOffsets, DrawableBones, ModelBoneCatalog};
 use zh_logic::object::model_draw::{ModelDrawModuleData, ModelDrawSpec};
 use zh_logic::rules::model_state::ModelConditionFlags;
 use zh_logic::sim::RulesRegistry;
@@ -55,6 +61,39 @@ fn bits_text(flags: &ModelConditionFlags) -> String {
         .map(|i| i.to_string())
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn flags_of(bits: &str) -> ModelConditionFlags {
+    let mut flags = ModelConditionFlags::default();
+    for bit in bits.split_terminator('.') {
+        flags.set(bit.parse().unwrap(), 1); // determinism-ok: oracle row
+    }
+    flags
+}
+
+fn number(text: &str) -> i32 {
+    text.parse().unwrap() // determinism-ok: oracle row
+}
+
+fn words(text: &str) -> Vec<f32> {
+    (0..text.len() / 8)
+        .map(|i| f32::from_bits(u32::from_str_radix(&text[i * 8..i * 8 + 8], 16).unwrap()))
+        .collect()
+}
+
+fn matrix_text(m: &Matrix3D) -> String {
+    m.rows
+        .iter()
+        .flatten()
+        .map(|v| format!("{:08x}", v.to_bits()))
+        .collect()
+}
+
+fn pos_text(p: &Coord3D) -> String {
+    [p.x, p.y, p.z]
+        .iter()
+        .map(|v| format!("{:08x}", v.to_bits()))
+        .collect()
 }
 
 fn list_text(list: &[String]) -> String {
@@ -114,10 +153,7 @@ fn draw_module_data_and_best_states_match_the_reference() {
         let mut count = 0;
         for query in get_str(queries, "queries").unwrap().split_terminator(';') {
             let (bits, index) = query.split_once('=').unwrap();
-            let mut flags = ModelConditionFlags::default();
-            for bit in bits.split_terminator('.') {
-                flags.set(bit.parse().unwrap(), 1); // determinism-ok: oracle row
-            }
+            let flags = flags_of(bits);
             let found = spec.find_best_info(&flags).map_or(-1, |i| i as i32);
             let index: i32 = index.parse().unwrap(); // determinism-ok: oracle row
             assert_eq!(found, index, "{name} {bits}");
@@ -125,4 +161,103 @@ fn draw_module_data_and_best_states_match_the_reference() {
         }
         assert_eq!(count, 48);
     }
+}
+
+/// The generated objects and files, with the catalog the port builds from them.
+struct Objects {
+    rules: RulesRegistry,
+    /// `(name, approach positions, position and angle)`.
+    objects: Vec<(&'static str, i32, Vec<f32>)>,
+}
+
+fn objects() -> Objects {
+    let files: BTreeMap<&str, Vec<u8>> = rows("file")
+        .into_iter()
+        .map(|l| {
+            let name = get_str(l, "name").unwrap();
+            (name, decode_hex_bytes(get_str(l, "hex").unwrap()).unwrap())
+        })
+        .collect();
+    let mut rules = new_rules();
+    let standard = rows("standard");
+    rules.global_data.standard_public_bones = get_str(standard[0], "names")
+        .unwrap()
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    let mut objects = Vec::new();
+    for line in rows("object") {
+        let ini = decode_hex_bytes(get_str(line, "ini").unwrap()).unwrap();
+        load_objects(&mut rules, &ini);
+        objects.push((
+            get_str(line, "name").unwrap(),
+            number(get_str(line, "approach").unwrap()),
+            words(get_str(line, "at").unwrap()),
+        ));
+    }
+    assert_eq!(objects.len(), 60);
+    rules.thing_factory.post_process_load();
+    let catalog = ModelBoneCatalog::load(&rules, |path| {
+        let name = path.strip_prefix("Art\\W3D\\")?.to_ascii_lowercase();
+        files.get(name.as_str()).cloned()
+    });
+    rules.model_bones = Some(Arc::new(catalog));
+    Objects { rules, objects }
+}
+
+#[test]
+fn drawable_bone_queries_match_the_reference() {
+    let o = objects();
+    let queries = rows("query");
+    assert_eq!(queries.len(), 360);
+    let mut checked = 0;
+    let mut attach_offsets = AttachBoneOffsets::default();
+    for (n, line) in queries.iter().enumerate() {
+        let name = get_str(line, "name").unwrap();
+        let (object, _, _) = &o.objects[n / 6];
+        assert_eq!(*object, name);
+        let template = o.rules.thing_factory.find_template(name).unwrap();
+        let conditions = flags_of(get_str(line, "conditions").unwrap());
+        let bones = DrawableBones::new(&o.rules, template, conditions).unwrap();
+        for query in get_str(line, "results").unwrap().split_terminator(';') {
+            let (head, expected) = query.split_once('=').unwrap();
+            let head: Vec<&str> = head.split(':').collect();
+            let actual = match head[0] {
+                "P" => {
+                    let found = bones.pristine_bone_transforms(
+                        head[1],
+                        number(head[2]),
+                        number(head[3]) as usize,
+                    );
+                    let matrices: String = found.iter().map(matrix_text).collect();
+                    format!("{}:{matrices}", found.len())
+                }
+                "B" => bones.barrel_count(number(head[1]) as usize).to_string(),
+                "L" => {
+                    let turret = match number(head[3]) {
+                        0 => WhichTurretType::Main,
+                        1 => WhichTurretType::Alt,
+                        _ => WhichTurretType::Invalid,
+                    };
+                    let out = bones.projectile_launch_offset(
+                        number(head[1]) as usize,
+                        number(head[2]),
+                        turret,
+                        &mut attach_offsets,
+                    );
+                    format!(
+                        "{}:{}:{}{}",
+                        u32::from(out.launch.is_some()),
+                        out.launch.as_ref().map_or_else(String::new, matrix_text),
+                        pos_text(&out.turret_rot_pos),
+                        pos_text(&out.turret_pitch_pos)
+                    )
+                }
+                _ => continue,
+            };
+            assert_eq!(actual, expected, "{name} row {n} {head:?}");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 360 * 35);
 }

@@ -1,17 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Golden vectors for the draw module bone queries logic makes, run on the
 // unmodified reference. "spec" rows parse generated `W3DModelDraw` module data and
-// dump the condition states; "best" rows run `findBestInfo`.
+// dump the condition states; "best" rows run `findBestInfo`. The other rows make
+// objects with real drawables over W3D files built here and ask what logic asks:
+// `Drawable::getPristineBonePositions`, `getBarrelCount`,
+// `getProjectileLaunchOffset`, `Weapon::calcProjectileLaunchPosition` and
+// `DockUpdate::loadDockPositions`.
 //
 //   python3 scripts/build_oracle.py tests/cpp_harness/gen_model_bones.cpp -o /tmp/gen
 //   (also with --opt O0 and with --opt O2 --sanitize)
 //   /tmp/gen docs/golden_vectors/ModelBones.json
 //
-// Not covered: transition states (logic reads `findBestInfo`).
+// Not covered: transition states (logic reads `findBestInfo`), turreted launchers
+// in `calcProjectileLaunchPosition` (no AI here), compressed animations and
+// aggregates (see `gen_ast_assets.cpp`).
+
+#include "oracle_common.h"
+
+#define private public
+#define protected public
+#include "GameLogic/Module/DockUpdate.h"
+#undef private
+#undef protected
 
 #include "oracle_wp51_world.h"
 
 #include <algorithm>
+#include <map>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -19,14 +34,31 @@
 #include "Common/INIException.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
+#include "GameClient/Drawable.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/Weapon.h"
+#include "WWLib/ffactory.h"
+#include "WWLib/ramfile.h"
+#include "WWMath/wwmath.h"
+
+#include "WWLib/hashtemplate.h"
+#include "WWLib/wwstring.h"
+
+struct SDL_Window;
 
 #define private public
 #define protected public
 #include "../../vendor/GeneralsX/Core/GameEngineDevice/Include/W3DDevice/GameClient/Module/W3DModelDraw.h"
 #include "../../vendor/GeneralsX/Core/GameEngineDevice/Include/W3DDevice/Common/W3DModuleFactory.h"
+#include "../../vendor/GeneralsX/GeneralsMD/Code/GameEngineDevice/Include/W3DDevice/GameClient/W3DAssetManager.h"
 #undef private
 #undef protected
+
+// The one member of `W3DDisplay` used here; its header does not stand alone.
+class W3DDisplay {
+public:
+    static W3DAssetManager* m_assetManager;
+};
 
 static uint32_t g_state = 0x0b0e5a11u;
 static uint32_t pick(uint32_t n) {
@@ -252,12 +284,321 @@ static void spec_cases(oracle_wp51::World& w) {
     }
 }
 
+// ---- generated models --------------------------------------------------------
+
+typedef std::vector<uint8_t> Bytes;
+static std::map<std::string, Bytes> g_files;   // lower-case name -> content
+
+static std::string lower(std::string s) {
+    for (char& c : s) c = (char)tolower((unsigned char)c);
+    return s;
+}
+
+struct MemFactory : FileFactoryClass {
+    FileClass* Get_File(const char* name) override {
+        auto it = g_files.find(lower(name));
+        if (it == g_files.end()) return new RAMFileClass((void*)nullptr, 0);
+        return new RAMFileClass(it->second.data(), (int)it->second.size());
+    }
+    void Return_File(FileClass* f) override { delete f; }
+};
+
+struct W {
+    Bytes b;
+    W& u8(uint32_t v) { b.push_back((uint8_t)v); return *this; }
+    W& u16(uint32_t v) { u8(v); return u8(v >> 8); }
+    W& u32(uint32_t v) { u16(v); return u16(v >> 16); }
+    W& f(float v) { uint32_t u; memcpy(&u, &v, 4); return u32(u); }
+    W& name(const std::string& s, size_t w) { for (size_t i = 0; i < w; ++i) u8(i < s.size() ? s[i] : 0); return *this; }
+    W& raw(const Bytes& x) { b.insert(b.end(), x.begin(), x.end()); return *this; }
+    W& chunk(uint32_t id, const W& body, bool sub = false) {
+        u32(id); u32((uint32_t)body.b.size() | (sub ? 0x80000000u : 0)); return raw(body.b);
+    }
+};
+
+static float frand() { return (float)((int)pick(4001) - 2000) / 512.0f; }
+
+static const char* const kPivots[] = {"MUZZLE01", "MUZZLE02", "FIREPOINT01", "FIREPOINT02", "FIREPOINT03",
+    "WEAPONA01", "WEAPONA02", "LAUNCH01", "LAUNCH02", "FX01", "FX02", "RECOIL01", "DOCKSTART", "DOCKACTION",
+    "DOCKEND", "DOCKWAITING01", "DOCKWAITING02", "DOCKWAITING03", "TURRET", "TURRETEL", "TURRET01", "MOUNT01",
+    "STANDARD", "Muzzle"};
+static const char* const kSubs[] = {"GUN01", "GUN02", "MUZZLEFX01", "LAUNCH", "FIREPOINT01", "BARREL"};
+
+static const int kFrames = 4;
+
+// "m<tag>.w3d": a hierarchy (or "sk<tag>.w3d" of its own), boxes and an HLOD.
+static void model_files(const std::string& tag) {
+    const std::string skel = "SK" + tag;
+    const int pivots = 10 + pick(16);
+    W header, body;
+    header.u32(0x00040001).name(skel, 16).u32(pivots).f(0).f(0).f(0);
+    for (int i = 0; i < pivots; ++i) {
+        float q[4] = {frand(), frand(), frand(), frand()};
+        const float len = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+        if (len > 0.0f) for (float& v : q) v /= len;
+        body.name(i == 0 ? "ROOTTRANSFORM" : kPivots[pick(24)], 16);
+        body.u32((uint32_t)(i == 0 ? -1 : (int)pick(i))).f(frand() * 7).f(frand() * 7).f(frand() * 7);
+        body.f(0).f(0).f(0).f(q[0]).f(q[1]).f(q[2]).f(q[3]);
+    }
+    W hierarchy, h;
+    h.chunk(0x101, header).chunk(0x102, body);
+    hierarchy.chunk(0x100, h, true);
+
+    W file;
+    if (chance(20)) g_files[lower(skel) + ".w3d"] = hierarchy.b;
+    else file.raw(hierarchy.b);
+
+    std::vector<std::string> subs;
+    for (int s = pick(4); s > 0; --s) subs.push_back(kSubs[pick(6)]);
+    std::vector<std::string> boxed;
+    for (const std::string& s : subs) {
+        if (std::find(boxed.begin(), boxed.end(), s) != boxed.end()) continue;
+        boxed.push_back(s);
+        if (chance(10)) continue;  // sometimes missing
+        W box;
+        box.u32(0x00010000).u32(0).name("M" + tag + "." + s, 32).u32(0).f(0).f(0).f(0).f(1).f(1).f(1);
+        file.chunk(0x740, box);
+    }
+    W lh;
+    lh.u32(0x00010000).u32(1).name("M" + tag, 16).name(skel, 16);
+    W hl, arr, ah;
+    hl.chunk(0x701, lh);
+    ah.u32((uint32_t)subs.size()).f(0.0f);
+    arr.chunk(0x703, ah);
+    for (const std::string& s : subs) {
+        W so;
+        so.u32(pick(pivots)).name("M" + tag + "." + s, 32);
+        arr.chunk(0x704, so);
+    }
+    hl.chunk(0x702, arr, true);
+    file.chunk(0x700, hl, true);
+    g_files["m" + lower(tag) + ".w3d"] = file.b;
+}
+
+// "<anim>.w3d": a raw animation "SK<tag>.<anim>".
+static void anim_file(const std::string& tag, const std::string& anim) {
+    W ah;
+    ah.u32(0x00040001).name(anim, 16).name("SK" + tag, 16).u32(kFrames).u32(15);
+    W a;
+    a.chunk(0x201, ah);
+    for (int c = 6 + pick(20); c > 0; --c) {
+        const int kind = pick(8) < 3 ? 6 : (int)pick(3);
+        const int len = kind == 6 ? 4 : 1;
+        W ch;
+        ch.u16(0).u16(kFrames - 1).u16(len).u16(kind).u16(pick(20)).u16(0);
+        for (int i = 0; i < kFrames * len; ++i) ch.f(kind == 6 ? frand() / 4.0f : frand() * 3);
+        ch.u32(0);  // exporter padding
+        a.chunk(0x202, ch);
+    }
+    W file;
+    file.chunk(0x200, a, true);
+    g_files[lower(anim) + ".w3d"] = file.b;
+}
+
+static const char* const kWeaponBoneNames[] = {"Muzzle", "WeaponA", "Launch", "FX", "Recoil", "MuzzleFX",
+    "Gun", "Barrel", "Launch01", "NONE", "FirePoint"};
+
+// A state of an object's draw module: `tags` name the models it may use.
+static std::string object_state(const std::vector<std::string>& tags, const std::string& anim_tag,
+                                bool has_model) {
+    std::string out;
+    if (!has_model && chance(35)) {
+        const int m = pick((uint32_t)tags.size() + 1);
+        out += "      Model = " + (m < (int)tags.size() ? "M" + tags[m] : std::string("NONE")) + "\n";
+    }
+    for (int slot = 0; slot < 3; ++slot) {
+        if (!chance(slot == 0 ? 80 : 35)) continue;
+        for (int field = 0; field < 4; ++field) {
+            if (!chance(55)) continue;
+            out += std::string("      ") + kWeaponFields[field] + " = " + kSlots[slot] + " "
+                + kWeaponBoneNames[pick(11)] + "\n";
+        }
+    }
+    if (chance(45)) out += "      Turret = Turret\n";
+    if (chance(35)) out += "      TurretPitch = TurretEL\n";
+    if (chance(15)) out += "      AltTurret = Mount01\n";
+    if (chance(15)) out += "      AltTurretPitch = Missing\n";
+    if (chance(40)) out += "      TurretArtAngle = " + std::to_string((int)pick(361) - 180) + "\n";
+    if (chance(30)) out += "      TurretArtPitch = " + std::to_string((int)pick(91) - 45) + "\n";
+    if (chance(15)) out += "      AltTurretArtAngle = " + std::to_string((int)pick(361) - 180) + "\n";
+    if (chance(30)) {
+        const char* kind = chance(80) ? "A" : "B";  // B is sometimes missing
+        out += "      Animation = SK" + anim_tag + "." + kind + anim_tag + "\n";
+    }
+    if (chance(25)) out += "      Flags = PRISTINE_BONE_POS_IN_FINAL_FRAME\n";
+    return out;
+}
+
+static std::string draw_module(const std::vector<std::string>& tags, const std::string& anim_tag,
+                               int index, bool attach) {
+    std::string d = std::string("  Draw = ") + (index ? "W3DTankDraw" : "W3DModelDraw") + " ModuleTag_Draw"
+        + std::to_string(index) + "\n";
+    if (chance(70)) d += "    ExtraPublicBone = DockStart DockAction DockEnd DockWaiting\n";
+    if (chance(80)) d += "    ExtraPublicBone = FirePoint Mount Gun MuzzleFX Barrel\n";
+    if (attach) d += "    AttachToBoneInAnotherModule = " + std::string(chance(80) ? "Muzzle01" : "Missing") + "\n";
+    d += "    DefaultConditionState\n      Model = M" + tags[0] + "\n"
+        + object_state(tags, anim_tag, true) + "    End\n";
+    if (chance(70)) d += "    ConditionState = DAMAGED\n" + object_state(tags, anim_tag, false) + "    End\n";
+    if (chance(60)) d += "    ConditionState = REALLYDAMAGED\n" + object_state(tags, anim_tag, false) + "    End\n";
+    if (chance(40)) d += "    ConditionState = MOVING DAMAGED\n" + object_state(tags, anim_tag, false) + "    End\n";
+    d += "  End\n";
+    return d;
+}
+
+// ---- queries -----------------------------------------------------------------
+
+static const char* const kQueries[] = {"Muzzle", "FirePoint", "WeaponA", "Launch", "FX", "Recoil", "DockStart",
+    "DockAction", "DockEnd", "DockWaiting", "Turret", "TurretEL", "Mount", "Gun", "MuzzleFX", "Barrel",
+    "none", "Standard", "muzzle01", "Missing"};
+
+static std::string mtx_text(const Matrix3D& m) {
+    std::string out;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) out += flt(m[r][c]);
+    return out;
+}
+static std::string pos_text(const Coord3D& p) { return flt(p.x) + flt(p.y) + flt(p.z); }
+
+static std::string pristine_query(const Drawable* draw) {
+    const char* name = kQueries[pick(20)];
+    const Int start = pick(3);
+    const int maxes[] = {1, 2, 3, 10, 70};
+    const Int most = maxes[pick(5)];
+    static Matrix3D transforms[160];
+    const Int count = draw->getPristineBonePositions(name, start, nullptr, transforms, most);
+    std::string out = std::string("P:") + name + ":" + std::to_string(start) + ":" + std::to_string(most) + "=";
+    out += std::to_string(count) + ":";
+    for (int i = 0; i < count; ++i) out += mtx_text(transforms[i]);
+    return out;
+}
+
+static void object_cases(oracle_wp51::World& w) {
+    g_rows.push_back("{\"case\":\"standard\",\"names\":\"Standard,Muzzle\"}");
+    for (int i = 0; i < 60; ++i) {
+        const std::string n = std::to_string(i);
+        const std::vector<std::string> tags = {"O" + n, "P" + n};
+        for (const std::string& t : tags) model_files(t);
+        anim_file("O" + n, "AO" + n);
+        if (chance(50)) anim_file("O" + n, "BO" + n);
+
+        const std::string name = "BoneO" + n;
+        std::string ini = "Object " + name + "\n";
+        if (chance(15)) ini += "  KindOf = IGNORE_DOCKING_BONES\n";
+        const char* scales[] = {"1.0", "1.005", "0.75", "1.6", "1.0"};
+        const std::string scale = scales[pick(5)];
+        ini += "  Scale = " + scale + "\n";  // without one the scale is 0
+        const bool two = chance(45);
+        ini += draw_module(tags, "O" + n, 0, !two && chance(15));
+        if (two) ini += draw_module({"P" + n, "O" + n}, "O" + n, 1, chance(50));
+        const int approach = chance(20) ? -1 : (int)pick(11);
+        ini += "  Behavior = RepairDockUpdate ModuleTag_Dock\n    NumberApproachPositions = "
+            + std::to_string(approach) + "\n  End\n";
+        ini += "End\n";
+        try {
+            w.load_ini(ini);
+        } catch (const INIException& e) {
+            fprintf(stderr, "%s\n%s", e.mFailureMessage ? e.mFailureMessage : "INI error", ini.c_str());
+            exit(4);
+        }
+        TheThingFactory->postProcessLoad();
+
+        const Coord3D at = {(Real)(10 + pick(500)), (Real)(10 + pick(500)), (Real)pick(20)};
+        const Real angle = frand();
+        Object* obj = w.spawn_object(name.c_str(), w.team_a, at, angle);
+        if (!obj || !obj->getDrawable()) exit(5);
+        const Drawable* draw = obj->getDrawable();
+        g_rows.push_back("{\"case\":\"object\",\"name\":\"" + name + "\",\"approach\":\""
+            + std::to_string(approach) + "\",\"at\":\"" + pos_text(at) + flt(angle) + "\",\"ini\":\""
+            + hex_text(ini) + "\"}");
+
+        DockUpdate* update = nullptr;
+        for (BehaviorModule** b = obj->getBehaviorModules(); *b; ++b)
+            if (!update) update = dynamic_cast<DockUpdate*>(*b);
+        if (!update) exit(6);
+
+        for (int c = 0; c < 6; ++c) {
+            ModelConditionFlags set, clear;
+            const char* bits[] = {"DAMAGED", "REALLYDAMAGED", "MOVING", "ATTACKING"};
+            for (int b = 0; b < 4; ++b) {
+                const int bit = ModelConditionFlags::getSingleBitFromName(bits[b]);
+                clear.set(bit);
+                if (c && chance(35)) set.set(bit);
+            }
+            obj->clearAndSetModelConditionFlags(clear, set);
+
+            std::string out;
+            for (int q = 0; q < 24; ++q) out += pristine_query(draw) + ";";
+            for (int slot = 0; slot < 3; ++slot) {
+                out += "B:" + std::to_string(slot) + "="
+                    + std::to_string(draw->getBarrelCount((WeaponSlotType)slot)) + ";";
+            }
+            for (int q = 0; q < 8; ++q) {
+                const int slot = q < 3 ? q : (int)pick(3);
+                const int barrel = (int)pick(5);
+                const int tur = (int)pick(3) - 1;
+                Matrix3D launch(true);
+                Coord3D rot = {7, 7, 7}, pitch = {7, 7, 7};
+                const Bool ok = draw->getProjectileLaunchOffset((WeaponSlotType)slot, barrel, &launch,
+                    (WhichTurretType)tur, &rot, &pitch);
+                out += "L:" + std::to_string(slot) + ":" + std::to_string(barrel) + ":" + std::to_string(tur)
+                    + "=" + std::to_string(ok ? 1 : 0) + ":" + (ok ? mtx_text(launch) : std::string()) + ":"
+                    + pos_text(rot) + pos_text(pitch) + ";";
+            }
+            for (int q = 0; q < 4; ++q) {
+                const int slot = q < 2 ? 0 : (int)pick(3);
+                const int barrel = (int)pick(3);
+                Matrix3D world(true);
+                Coord3D where;
+                Weapon::calcProjectileLaunchPosition(obj, (WeaponSlotType)slot, barrel, world, where);
+                out += "W:" + std::to_string(slot) + ":" + std::to_string(barrel) + "=" + mtx_text(world) + ";";
+            }
+            {
+                update->m_enterPosition.zero();
+                update->m_dockPosition.zero();
+                update->m_exitPosition.zero();
+                for (Coord3D& p : update->m_approachPositions) p.zero();
+                update->m_numberApproachPositionBones = -1;
+                update->loadDockPositions();
+                out += "D=" + pos_text(update->m_enterPosition) + pos_text(update->m_dockPosition)
+                    + pos_text(update->m_exitPosition) + ":"
+                    + std::to_string(update->m_numberApproachPositionBones) + ":";
+                for (const Coord3D& p : update->m_approachPositions) out += pos_text(p);
+                out += ";";
+            }
+            g_rows.push_back("{\"case\":\"query\",\"name\":\"" + name + "\",\"conditions\":\""
+                + bits_text(draw->getModelConditionFlags()) + "\",\"results\":\"" + out + "\"}");
+        }
+        TheGameLogic->destroyObject(obj);
+        w.flush_destroy_list();
+    }
+    for (const auto& file : g_files) {
+        g_rows.push_back("{\"case\":\"file\",\"name\":\"" + file.first + "\",\"hex\":\""
+            + hex_text(std::string(file.second.begin(), file.second.end())) + "\"}");
+    }
+}
+
+struct InUpdateTag { using type = Bool GameLogic::*; };
+template struct MemberAccess<InUpdateTag, &GameLogic::m_isInUpdate>;
+inline Bool GameLogic::*access_member(InUpdateTag);
+
 int main(int argc, char** argv) {
     if (argc < 2) return 2;
     oracle_wp51::World w;
     TheModuleFactory = NEW W3DModuleFactory;
     TheModuleFactory->init();
     spec_cases(w);
+
+    // The models: files from memory, loaded on demand as the game loads them.
+    static MemFactory factory;
+    _TheFileFactory = &factory;
+    WWMath::Init();
+    W3DDisplay::m_assetManager = new W3DAssetManager;
+    W3DDisplay::m_assetManager->Set_WW3D_Load_On_Demand(true);
+    TheWritableGlobalData->m_standardPublicBones.push_back("Standard");
+    TheWritableGlobalData->m_standardPublicBones.push_back("Muzzle");
+    // Bones are only validated inside a logic update.
+    TheGameLogic->*access_member(InUpdateTag()) = TRUE;
+    object_cases(w);
 
     const std::string tmp = std::string(argv[1]) + ".tmp";
     FILE* f = fopen(tmp.c_str(), "wb");
