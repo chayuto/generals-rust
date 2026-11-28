@@ -125,11 +125,11 @@ impl DieBehaviorImpl for CreateObjectDie {
             return;
         }
         if let Some(ref ocl_name) = self.ocl_name {
-            let pos = sim
-                .object(ctx.owner_slot)
-                .map(|o| *o.thing.get_position())
-                .unwrap_or_default();
-            sim.spawn_ocl(ocl_name, ctx.owner_slot, &pos, &pos);
+            let damage_dealer = sim.find_object(dmg.input.source_id);
+            sim.create_ocl(
+                ocl_name,
+                crate::object::ocl_runtime::OclCreateArgs::object(ctx.owner_slot, damage_dealer),
+            );
         }
     }
 }

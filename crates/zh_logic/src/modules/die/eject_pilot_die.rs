@@ -115,18 +115,22 @@ impl EjectPilotDie {
         })
     }
 
-    fn eject_pilot(&self, sim: &mut dyn SimApi, ctx: ModuleContext) {
+    fn eject_pilot(
+        &self,
+        sim: &mut dyn SimApi,
+        ctx: ModuleContext,
+        damage_dealer: Option<crate::arena::ObjectSlot>,
+    ) {
         let ocl = if sim.object_is_significantly_above_terrain(ctx.owner_slot) != FALSE {
             self.ocl_in_air.as_deref()
         } else {
             self.ocl_on_ground.as_deref()
         };
         if let Some(ocl_name) = ocl {
-            let pos = sim
-                .object(ctx.owner_slot)
-                .map(|o| *o.thing.get_position())
-                .unwrap_or_default();
-            sim.spawn_ocl(ocl_name, ctx.owner_slot, &pos, &pos);
+            sim.create_ocl(
+                ocl_name,
+                crate::object::ocl_runtime::OclCreateArgs::object(ctx.owner_slot, damage_dealer),
+            );
         }
     }
 }
@@ -158,7 +162,8 @@ impl DieFacet for EjectPilotDie {
         if self.base.is_die_applicable(sim, ctx, dmg) == FALSE {
             return;
         }
-        self.eject_pilot(sim, ctx);
+        let damage_dealer = sim.find_object(dmg.input.source_id);
+        self.eject_pilot(sim, ctx, damage_dealer);
     }
 
     fn is_die_applicable(
@@ -171,6 +176,6 @@ impl DieFacet for EjectPilotDie {
     }
 
     fn eject_pilot_dying(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
-        self.eject_pilot(sim, ctx);
+        self.eject_pilot(sim, ctx, None);
     }
 }

@@ -305,12 +305,22 @@ impl HelicopterSlowDeathBehavior {
             sim.trigger_fx_list(fx, &blade_pos);
         }
         if let Some(ocl) = &self.data.ocl_blade {
-            sim.spawn_ocl(ocl, us, &blade_pos, &blade_pos);
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                    us,
+                    blade_pos,
+                    None,
+                    crate::object::ocl_runtime::INVALID_ANGLE,
+                ),
+            );
         }
         if let Some(ocl) = &self.data.ocl_eject_pilot {
             if sim.object_veterancy_level(us) > VeterancyLevel::Regular {
-                let pos = position_of(sim, us);
-                sim.spawn_ocl(ocl, us, &pos, &pos);
+                sim.create_ocl(
+                    ocl,
+                    crate::object::ocl_runtime::OclCreateArgs::object(us, None),
+                );
             }
         }
     }
@@ -326,7 +336,10 @@ impl HelicopterSlowDeathBehavior {
             sim.trigger_fx_list(fx, &pos);
         }
         if let Some(ocl) = ocl {
-            sim.spawn_ocl(ocl, ctx.owner_slot, &pos, &pos);
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::object(ctx.owner_slot, None),
+            );
         }
     }
 

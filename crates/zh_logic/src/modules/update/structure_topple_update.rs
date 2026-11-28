@@ -254,7 +254,15 @@ impl StructureToppleUpdate {
         // `m_oclCount` is always 1, so `buildNonDupRandomIndexList` is one draw.
         let index = sim.rng_logic_int(0, list.len() as Int - 1);
         if let Some(Some(ocl)) = list.get(index as usize) {
-            sim.spawn_ocl(ocl, owner, target, target);
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                    owner,
+                    *target,
+                    None,
+                    crate::object::ocl_runtime::INVALID_ANGLE,
+                ),
+            );
         }
     }
 

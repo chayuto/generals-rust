@@ -232,10 +232,10 @@ impl MinefieldBehavior {
         }
         set_rubble(sim, ctx, self.virtual_mines_remaining == 0);
         if let Some(ocl) = &self.data.ocl {
-            let pos = sim
-                .object(owner)
-                .map_or_else(Coord3D::default, |o| *o.thing.get_position());
-            sim.spawn_ocl(ocl, owner, &pos, &pos);
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::object(owner, Some(owner)),
+            );
         }
     }
 

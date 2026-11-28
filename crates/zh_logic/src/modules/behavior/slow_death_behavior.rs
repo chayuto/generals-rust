@@ -372,7 +372,10 @@ impl SlowDeathCore {
         if !ocl_vec.is_empty() {
             let idx = sim.rng_logic_int(0, (ocl_vec.len() as Int) - 1) as usize;
             if let Some(ref ocl_name) = ocl_vec[idx] {
-                sim.spawn_ocl(ocl_name, owner, &pos, &pos);
+                sim.create_ocl(
+                    ocl_name,
+                    crate::object::ocl_runtime::OclCreateArgs::object(owner, None),
+                );
             }
         }
 

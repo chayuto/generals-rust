@@ -14,7 +14,7 @@ use zh_common::math::Coord3D;
 use zh_common::types::{Bool, Int, NameKeyType, Real, UnsignedInt, FALSE};
 
 const CREATE_ABOVE_LOCATION_HEIGHT: Real = 300.0;
-const INVALID_ANGLE: Real = -1_000_000.0;
+const INVALID_ANGLE: Real = crate::object::ocl_runtime::INVALID_ANGLE;
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -252,7 +252,15 @@ impl SpecialPowerBehaviorImpl for OCLSpecialPower {
                 target_coord.z + CREATE_ABOVE_LOCATION_HEIGHT,
             ),
         };
-        sim.spawn_ocl(&ocl, ctx.owner_slot, &creation_coord, &target_coord);
+        sim.create_ocl(
+            &ocl,
+            crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                ctx.owner_slot,
+                creation_coord,
+                Some(target_coord),
+                angle,
+            ),
+        );
     }
 
     fn do_special_power_at_object(
@@ -302,7 +310,15 @@ impl SpecialPowerBehaviorImpl for OCLSpecialPower {
             return;
         }
         if let Some(ocl) = self.find_ocl(sim, ctx).map(str::to_owned) {
-            sim.spawn_ocl(&ocl, ctx.owner_slot, &creation_coord, &creation_coord);
+            sim.create_ocl(
+                &ocl,
+                crate::object::ocl_runtime::OclCreateArgs::position_create_owner(
+                    ctx.owner_slot,
+                    creation_coord,
+                    Some(creation_coord),
+                    FALSE,
+                ),
+            );
         }
     }
 }

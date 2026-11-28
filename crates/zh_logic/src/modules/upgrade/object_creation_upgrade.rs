@@ -108,11 +108,10 @@ impl UpgradeBehaviorImpl for ObjectCreationUpgrade {
 
     fn upgrade_implementation(&mut self, sim: &mut dyn SimApi, ctx: ModuleContext) {
         if let Some(ref ocl) = self.ocl_name {
-            let pos = sim
-                .object(ctx.owner_slot)
-                .map(|o| *o.thing.get_position())
-                .unwrap_or_default();
-            sim.spawn_ocl(ocl, ctx.owner_slot, &pos, &pos);
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::object(ctx.owner_slot, None),
+            );
         }
     }
 }

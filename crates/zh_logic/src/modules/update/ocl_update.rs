@@ -229,7 +229,10 @@ impl OclUpdate {
         }
         self.set_next_creation_frame(sim);
 
-        let Some((pos, team)) = sim.object(us).map(|o| (*o.thing.get_position(), o.team_id)) else {
+        let Some((pos, orient, team)) = sim
+            .object(us)
+            .map(|o| (*o.thing.get_position(), o.thing.get_orientation(), o.team_id))
+        else {
             return UpdateSleepTime::NONE;
         };
         let creation: Coord3D = if self.data.is_create_at_edge != FALSE {
@@ -250,7 +253,15 @@ impl OclUpdate {
             self.data.ocl.clone()
         };
         if let Some(ocl) = ocl {
-            sim.spawn_ocl(&ocl, us, &creation, &pos);
+            sim.create_ocl(
+                &ocl,
+                crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                    us,
+                    creation,
+                    Some(pos),
+                    orient,
+                ),
+            );
         }
         UpdateSleepTime::NONE
     }

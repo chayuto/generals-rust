@@ -216,7 +216,10 @@ pub fn fire_weapon_template(
         &template.fire_ocl[veterancy]
     };
     if !ocl.is_empty() {
-        sim.spawn_ocl(ocl, source, &source_pos, &source_pos);
+        sim.create_ocl(
+            ocl,
+            crate::object::ocl_runtime::OclCreateArgs::object(source, None),
+        );
     }
 
     let mut destination = victim_pos;

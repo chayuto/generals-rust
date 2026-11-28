@@ -171,7 +171,10 @@ impl JetSlowDeathBehavior {
             sim.trigger_fx_list(fx, &pos);
         }
         if let Some(ocl) = ocl {
-            sim.spawn_ocl(ocl, ctx.owner_slot, &pos, &pos);
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::object(ctx.owner_slot, None),
+            );
         }
     }
 

@@ -141,7 +141,13 @@ impl StructureCollapseUpdate {
         if !ocls.is_empty() {
             let idx = sim.rng_logic_int(0, (ocls.len() as Int) - 1) as usize;
             if let Some(Some(ocl)) = ocls.get(idx) {
-                sim.spawn_ocl(ocl, owner, target, target);
+                let angle = sim.object(owner).map_or(0.0, |o| o.thing.get_orientation());
+                sim.create_ocl(
+                    ocl,
+                    crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                        owner, *target, None, angle,
+                    ),
+                );
             }
         }
     }

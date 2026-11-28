@@ -4,8 +4,8 @@
 
 - **Reference Repo:** `fbraz3/GeneralsX` @ `84a7a20769aa5749f388b1f49bd542c79b3c33e8`
 - **Manifest Packets:** `463` total (`292` implemented, `35` data only, `0` seeded skeletons, `136` unported)
-- **Golden Vector Oracles:** `128` JSON suites (`docs/golden_vectors/`)
-- **Golden Test Suites:** `123` Rust suites (`crates/*/tests/golden_*.rs`)
+- **Golden Vector Oracles:** `129` JSON suites (`docs/golden_vectors/`)
+- **Golden Test Suites:** `124` Rust suites (`crates/*/tests/golden_*.rs`)
 
 ## Phase Summary
 
@@ -397,6 +397,7 @@
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/mood_target.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/path_follow.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/modules/update/ai_update/turrets.rs` | `implemented` |
+| `zh_logic` | `crates/zh_logic/src/object/ocl_runtime.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_actions.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_effects.rs` | `implemented` |
 | `zh_logic` | `crates/zh_logic/src/object/weapon_fire.rs` | `implemented` |
@@ -446,6 +447,7 @@
 | `docs/golden_vectors/JOINS_Modules.json` | - | no |
 | `docs/golden_vectors/LogicModuleData.json` | - | no |
 | `docs/golden_vectors/NameKeys.json` | - | no |
+| `docs/golden_vectors/OclRuntime.json` | - | no |
 | `docs/golden_vectors/PARTITION_COLLIDE.json` | 520 | no |
 | `docs/golden_vectors/PARTITION_GRID.json` | 1200 | no |
 | `docs/golden_vectors/PARTITION_OBJECT_SHROUD.json` | 500 | no |
@@ -597,6 +599,7 @@
 | `zh_logic` | `crates/zh_logic/tests/golden_joins_modules.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_logic_module_data.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_name_keys.rs` | `active` |
+| `zh_logic` | `crates/zh_logic/tests/golden_ocl_runtime.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_collide.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_grid.rs` | `active` |
 | `zh_logic` | `crates/zh_logic/tests/golden_partition_object_shroud.rs` | `active` |

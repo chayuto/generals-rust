@@ -145,7 +145,10 @@ impl DieFacet for InstantDeathBehavior {
         if !self.data.ocls.is_empty() {
             let idx = sim.rng_logic_int(0, (self.data.ocls.len() as Int) - 1) as usize;
             if let Some(ref ocl_name) = self.data.ocls[idx] {
-                sim.spawn_ocl(ocl_name, owner, &pos, &pos);
+                sim.create_ocl(
+                    ocl_name,
+                    crate::object::ocl_runtime::OclCreateArgs::object(owner, None),
+                );
             }
         }
 

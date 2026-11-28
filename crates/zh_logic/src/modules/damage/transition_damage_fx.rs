@@ -329,7 +329,15 @@ impl DamageFacet for TransitionDamageFX {
                             sim,
                         );
                         let world = zh_common::math::Matrix3D::transform_vector(&owner_mtx, &local);
-                        sim.spawn_ocl(ocl_name, ctx.owner_slot, &world, &src_p);
+                        sim.create_ocl(
+                            ocl_name,
+                            crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                                ctx.owner_slot,
+                                world,
+                                Some(src_p),
+                                crate::object::ocl_runtime::INVALID_ANGLE,
+                            ),
+                        );
                     }
                 }
             }

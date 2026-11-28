@@ -297,7 +297,15 @@ impl BoneFXUpdate {
         if kind == KIND_FX {
             sim.trigger_fx_list(&name, &world);
         } else {
-            sim.spawn_ocl(&name, owner, &world, &world);
+            sim.create_ocl(
+                &name,
+                crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                    owner,
+                    world,
+                    None,
+                    crate::object::ocl_runtime::INVALID_ANGLE,
+                ),
+            );
         }
     }
 }

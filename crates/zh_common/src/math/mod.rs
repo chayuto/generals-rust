@@ -1268,6 +1268,26 @@ impl Matrix3D {
         self.translate(t.x, t.y, t.z);
     }
 
+    /// `Matrix3D::Scale(Real)`: uniform scale of the 3x3 axes, leaving translation untouched.
+    #[inline]
+    pub fn scale(&mut self, scale: Real) {
+        for r in 0..3 {
+            self.rows[r][0] *= scale;
+            self.rows[r][1] *= scale;
+            self.rows[r][2] *= scale;
+        }
+    }
+
+    /// `Matrix3D::Rotate_Vector`: multiplies by the 3x3 rotation/scale part only (no translation).
+    #[inline]
+    pub fn rotate_vector(tm: &Self, v: &Coord3D) -> Coord3D {
+        Coord3D::new(
+            tm.rows[0][0] * v.x + tm.rows[0][1] * v.y + tm.rows[0][2] * v.z,
+            tm.rows[1][0] * v.x + tm.rows[1][1] * v.y + tm.rows[1][2] * v.z,
+            tm.rows[2][0] * v.x + tm.rows[2][1] * v.y + tm.rows[2][2] * v.z,
+        )
+    }
+
     #[inline]
     pub fn transform_vector(tm: &Self, v: &Coord3D) -> Coord3D {
         Coord3D::new(

@@ -1762,6 +1762,36 @@ pub trait SimApi: SimView {
         cond: WeaponBonusConditionType,
     );
     fn spawn_ocl(&mut self, ocl_name: &str, creator: ObjectSlot, pos: &Coord3D, target_pos: &Coord3D);
+    fn create_ocl(
+        &mut self,
+        ocl_name: &str,
+        args: crate::object::ocl_runtime::OclCreateArgs,
+    ) -> Option<ObjectSlot> {
+        let pos = self
+            .object(args.primary)
+            .map(|o| *o.thing.get_position())
+            .unwrap_or_default();
+        let (log_pos, target_pos) = match args.mode {
+            crate::object::ocl_runtime::OclCreateMode::Object { secondary } => {
+                let sec = secondary
+                    .and_then(|s| self.object(s))
+                    .map_or(pos, |o| *o.thing.get_position());
+                (pos, sec)
+            }
+            crate::object::ocl_runtime::OclCreateMode::PositionAngle {
+                primary_pos,
+                secondary_pos,
+                ..
+            }
+            | crate::object::ocl_runtime::OclCreateMode::PositionCreateOwner {
+                primary_pos,
+                secondary_pos,
+                ..
+            } => (primary_pos, secondary_pos.unwrap_or(primary_pos)),
+        };
+        self.spawn_ocl(ocl_name, args.primary, &log_pos, &target_pos);
+        None
+    }
     fn trigger_fx_list(&mut self, fx_name: &str, pos: &Coord3D);
     fn trigger_damage_fx(
         &mut self,
@@ -2432,6 +2462,8 @@ pub struct SimWorld {
     pub attacked_by: BTreeMap<TeamId, BTreeSet<Int>>,
     pub player_attacked_frame: BTreeMap<Int, UnsignedInt>,
     pub spawned_ocls: Vec<(String, ObjectId, Coord3D, Coord3D)>,
+    pub delivered_payloads: Vec<crate::object::ocl_runtime::DeliveredPayloadRecord>,
+    pub transferred_object_names: Vec<(ObjectId, ObjectId)>,
     /// The module `attempt_damage_watching` waits for, and the status seen at its turn.
     pub damage_watch: Option<(ModuleSlot, Option<ObjectStatusMaskType>)>,
     pub triggered_fx_lists: Vec<(String, Coord3D)>,
@@ -2615,6 +2647,8 @@ impl SimWorld {
             attacked_by: BTreeMap::new(),
             player_attacked_frame: BTreeMap::new(),
             spawned_ocls: Vec::new(),
+            delivered_payloads: Vec::new(),
+            transferred_object_names: Vec::new(),
             damage_watch: None,
             triggered_fx_lists: Vec::new(),
             triggered_damage_fx: Vec::new(),
@@ -3071,7 +3105,7 @@ impl SimContext {
     }
 
     /// `Object::findModule` by module name.
-    fn module_by_name(&mut self, owner: ObjectSlot, name: &str) -> Option<ModuleSlot> {
+    pub(crate) fn module_by_name(&mut self, owner: ObjectSlot, name: &str) -> Option<ModuleSlot> {
         let key = self.rules.name_keys.name_to_key(name);
         self.behavior_slots(owner).into_iter().find(|&ms| {
             self.world
@@ -4626,6 +4660,7 @@ impl SimContext {
         self.adjust_team_power(slot, team, TRUE);
         crate::modules::helper::attach_object_helpers(self, slot);
 
+        let mut unported_ai = false;
         for nug in &nuggets {
             let Some(desc) = self
                 .rules
@@ -4636,6 +4671,10 @@ impl SimContext {
                 continue;
             };
             let Some(create_fn) = desc.create_module else {
+                if desc.is_ai_module {
+                    self.ai_construct(slot);
+                    unported_ai = true;
+                }
                 continue;
             };
             let Some(mod_data) = self.rules.module_data_store.get(nug.data_id) else {
@@ -4686,6 +4725,9 @@ impl SimContext {
                     m.on_object_created(sim, ctx);
                 });
             }
+        }
+        if unported_ai {
+            self.ai_init_state_machine(slot);
         }
         self.world.objects.link_into_world(slot);
         // `sendObjectCreated` binds the drawable after the modules' `onObjectCreated`:
@@ -8189,10 +8231,24 @@ impl SimApi for SimContext {
         pos: &Coord3D,
         target_pos: &Coord3D,
     ) {
-        let creator_id = self.world.objects.id_of(creator).unwrap_or(ObjectId::INVALID);
-        self.world
-            .spawned_ocls
-            .push((ocl_name.to_owned(), creator_id, *pos, *target_pos));
+        let _ = crate::object::ocl_runtime::create_ocl(
+            self,
+            ocl_name,
+            crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                creator,
+                *pos,
+                Some(*target_pos),
+                crate::object::ocl_runtime::INVALID_ANGLE,
+            ),
+        );
+    }
+
+    fn create_ocl(
+        &mut self,
+        ocl_name: &str,
+        args: crate::object::ocl_runtime::OclCreateArgs,
+    ) -> Option<ObjectSlot> {
+        crate::object::ocl_runtime::create_ocl(self, ocl_name, args)
     }
 
     fn trigger_fx_list(&mut self, fx_name: &str, pos: &Coord3D) {
@@ -13174,6 +13230,14 @@ impl SimApi for MockSimApi {
         target_pos: &Coord3D,
     ) {
         self.ctx.spawn_ocl(ocl_name, creator, pos, target_pos);
+    }
+
+    fn create_ocl(
+        &mut self,
+        ocl_name: &str,
+        args: crate::object::ocl_runtime::OclCreateArgs,
+    ) -> Option<ObjectSlot> {
+        self.ctx.create_ocl(ocl_name, args)
     }
 
     fn trigger_fx_list(&mut self, fx_name: &str, pos: &Coord3D) {

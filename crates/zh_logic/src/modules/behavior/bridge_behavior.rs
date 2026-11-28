@@ -273,7 +273,15 @@ impl BridgeBehavior {
                 }
                 if let Some(ocl) = ocl {
                     let pos = random_surface_position(sim, &effects.geometry, effects.height);
-                    sim.spawn_ocl(ocl, owner, &pos, &pos);
+                    sim.create_ocl(
+                        ocl,
+                        crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                            owner,
+                            pos,
+                            None,
+                            crate::object::ocl_runtime::INVALID_ANGLE,
+                        ),
+                    );
                 }
             }
         }
@@ -688,7 +696,22 @@ impl UpdateFacet for BridgeBehavior {
                 bone_position(sim, owner, &effect.bone_name)
             };
             if let Some(name) = &effect.name {
-                sim.spawn_ocl(name, owner, &pos, &pos);
+                if effect.bone_name == "ParentObject" {
+                    sim.create_ocl(
+                        name,
+                        crate::object::ocl_runtime::OclCreateArgs::object(owner, None),
+                    );
+                } else {
+                    sim.create_ocl(
+                        name,
+                        crate::object::ocl_runtime::OclCreateArgs::position_angle(
+                            owner,
+                            pos,
+                            None,
+                            crate::object::ocl_runtime::INVALID_ANGLE,
+                        ),
+                    );
+                }
             }
         }
         UpdateSleepTime::NONE

@@ -102,9 +102,10 @@ impl UpdateFacet for FireSpreadUpdate {
             return UpdateSleepTime::FOREVER;
         }
         if let Some(ocl) = &self.data.ocl_embers {
-            if let Some(pos) = sim.object(ctx.owner_slot).map(|o| *o.thing.get_position()) {
-                sim.spawn_ocl(ocl, ctx.owner_slot, &pos, &pos);
-            }
+            sim.create_ocl(
+                ocl,
+                crate::object::ocl_runtime::OclCreateArgs::object(ctx.owner_slot, None),
+            );
         }
         if self.data.spread_try_range != 0.0 {
             if let Some(target) =
